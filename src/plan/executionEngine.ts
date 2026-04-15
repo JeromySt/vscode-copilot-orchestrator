@@ -40,8 +40,14 @@ import {
 } from './helpers';
 import type { IGitOperations } from '../interfaces/IGitOperations';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
+import type { ICheckpointManager } from '../interfaces/ICheckpointManager';
+import type { IJobSplitter } from '../interfaces/IJobSplitter';
+import type { JobNodeSpec } from './types/nodes';
 import type { JobExecutor } from './runner';
 import { NodeManager } from './nodeManager';
+import {
+  addNode as reshaperAddNode,
+} from './reshaper';
 
 /**
  * Info about a dependency node, used for FI merge logging.
@@ -65,6 +71,8 @@ export interface ExecutionEngineState {
   configManager: PlanConfigManager;
   copilotRunner?: ICopilotRunner;
   planRepository?: import('../interfaces/IPlanRepository').IPlanRepository;
+  checkpointManager?: ICheckpointManager;
+  jobSplitter?: IJobSplitter;
 }
 
 /**
@@ -422,6 +430,10 @@ export class JobExecutionEngine {
           // redirect — its merge-ri targets plan.targetBranch directly.
           snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
           snapshotWorktreePath: plan.snapshot?.worktreePath,
+          // Per-plan spawner override (e.g., ScriptedProcessSpawner for integration tests).
+          // No copilotRunnerOverride needed — the real CopilotCliRunner uses
+          // spawnerOverride from CopilotRunOptions, threaded via phaseDeps().spawner.
+          spawnerOverride: (plan as any).__scripted_spawner__ ?? undefined,
           onProgress: (step) => {
             this.log.debug(`Job progress: ${node.name} - ${step}`);
           },
@@ -459,6 +471,26 @@ export class JobExecutionEngine {
         if (result.metrics) {
           nodeState.metrics = result.metrics;
         }
+        
+        // Snapshot context pressure state for persistence (survives monitor disposal)
+        try {
+          const { getMonitor } = require('../plan/analysis/pressureMonitorRegistry');
+          const monitor = getMonitor(plan.id, node.id);
+          if (monitor) {
+            const pressureState = monitor.getState();
+            if (pressureState.currentInputTokens > 0) {
+              nodeState.contextPressureSnapshot = {
+                level: pressureState.level,
+                currentInputTokens: pressureState.currentInputTokens,
+                maxPromptTokens: pressureState.maxPromptTokens,
+                compactionDetected: pressureState.compactionDetected,
+                modelBreakdown: pressureState.modelBreakdown,
+                totalTurns: pressureState.totalTurns,
+                turnsPerSecond: pressureState.turnsPerSecond,
+              };
+            }
+          }
+        } catch { /* monitor may not exist */ }
         
         // Store per-phase metrics breakdown
         if (result.phaseMetrics) {
@@ -683,6 +715,7 @@ export class JobExecutionEngine {
                 baseCommitAtStart: plan.baseCommitAtStart,
                 snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
                 snapshotWorktreePath: plan.snapshot?.worktreePath,
+                spawnerOverride: (plan as any).__scripted_spawner__ ?? undefined,
                 onProgress: (step) => {
                   this.log.debug(`Auto-retry progress: ${node.name} - ${step}`);
                 },
@@ -942,12 +975,13 @@ export class JobExecutionEngine {
               allowedUrls: healAllowedUrls.length > 0 ? healAllowedUrls : undefined,
             };
             
-            // Place heal agent as work, preserve original prechecks/postchecks
-            node.work = healSpec;
-            
-            // Increment attempts for auto-heal — swapping from shell/process to agent
-            // is a distinct execution attempt visible in attempt history
+            // Increment attempts BEFORE rewriting the work spec — snapshotSpecsForAttempt
+            // captures the current specs (including the original shell command) to
+            // attempts/<N>/work.json for accurate attempt history display.
             await this.incrementAttempt(plan, node.id, nodeState);
+
+            // Now place heal agent as work, preserve original prechecks/postchecks
+            node.work = healSpec;
             nodeState.error = undefined;
             attemptStartedAt = Date.now();
             this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
@@ -976,6 +1010,7 @@ export class JobExecutionEngine {
               baseCommitAtStart: plan.baseCommitAtStart,
               snapshotBranch: (node.assignedWorktreePath === plan.snapshot?.worktreePath) ? undefined : plan.snapshot?.branch,
               snapshotWorktreePath: plan.snapshot?.worktreePath,
+              spawnerOverride: (plan as any).__scripted_spawner__ ?? undefined,
               onProgress: (step) => {
                 this.log.debug(`Auto-heal progress: ${node.name} - ${step}`);
               },
@@ -1332,7 +1367,198 @@ export class JobExecutionEngine {
         // Clear process ID since execution is complete
         nodeState.pid = undefined;
         
-        sm.transition(node.id, 'succeeded');
+        // Context pressure: check for checkpoint manifest before succeeded transition.
+        // If the agent checkpointed due to context pressure, reshape the DAG with
+        // fan-out sub-jobs and a fan-in validation job before transitioning to succeeded.
+        //
+        // Feature flag: skip all context pressure logic when disabled via env var
+        const contextPressureDisabled = process.env.ORCH_CONTEXT_PRESSURE === 'false';
+        const hasCheckpointManifest = !contextPressureDisabled
+          && nodeState.worktreePath
+          && this.state.checkpointManager
+          && this.state.jobSplitter
+          && await this.state.checkpointManager.manifestExists(nodeState.worktreePath);
+
+        if (hasCheckpointManifest && nodeState.agentPhase === 'work') {
+          // Recursive split depth guard: count ancestor nodes that were themselves
+          // split via context pressure. If depth >= maxSplitDepth, skip the split
+          // and let the job succeed normally.
+          const maxSplitDepth = this.state.configManager.getConfig<number>(
+            'copilotOrchestrator.contextPressure', 'maxSplitDepth', 3,
+          );
+          const splitDepth = this.computeSplitDepth(plan, node);
+          if (splitDepth >= maxSplitDepth) {
+            this.log.info('Split depth limit reached, skipping context pressure split', {
+              planId: plan.id,
+              nodeId: node.id,
+              splitDepth,
+              maxSplitDepth,
+            });
+            sm.transition(node.id, 'succeeded');
+          } else {
+          // Phase 1: Lock — transition to completed_split (blocks checkDependentsReady)
+          sm.transition(node.id, 'completed_split');
+          this.log.info('Checkpoint manifest detected: entering split phase', {
+            planId: plan.id,
+            nodeId: node.id,
+          });
+
+          try {
+            const manifest = await this.state.checkpointManager!.readManifest(nodeState.worktreePath!);
+
+            if (manifest) {
+              const originalInstructions = node.instructions ?? '';
+              const chunks = this.state.jobSplitter!.buildChunks(manifest, originalInstructions);
+
+              // Compute the checkpoint group path so sub-jobs and fan-in are
+              // registered in the plan's group hierarchy for status tracking.
+              const cpGroupPath = node.group
+                ? `${node.group}/${node.name}`
+                : node.name;
+
+              // Fan-out: create sub-jobs (work only, NO postchecks).
+              // IMPORTANT: Capture original downstream dependents BEFORE adding sub-jobs,
+              // because reshaperAddNode will add sub-jobs as dependents of the parent node.
+              const originalDownstreamIds = [...node.dependents];
+
+              const subJobProducerIds: string[] = [];
+              const subJobNodeIds: string[] = [];
+              for (let i = 0; i < chunks.length; i++) {
+                const subProducerId = `${node.producerId}-sub-${i + 1}`;
+                const subSpec = this.state.jobSplitter!.buildSubJobSpec(chunks[i], manifest, node.id);
+                const subResult = reshaperAddNode(plan, {
+                  producerId: subProducerId,
+                  name: chunks[i].name ?? `${node.name} (sub-${i + 1})`,
+                  task: chunks[i].description,
+                  work: subSpec,
+                  postchecks: undefined,
+                  dependencies: [node.producerId],
+                  expectsNoChanges: node.expectsNoChanges,
+                  group: cpGroupPath,
+                });
+                if (subResult.success && subResult.nodeId) {
+                  subJobProducerIds.push(subProducerId);
+                  subJobNodeIds.push(subResult.nodeId);
+                } else {
+                  this.log.warn('Failed to add sub-job node', {
+                    planId: plan.id,
+                    nodeId: node.id,
+                    subProducerId,
+                    error: subResult.error,
+                  });
+                }
+              }
+
+              // Fan-in: create validation job that depends on ALL sub-jobs.
+              // Use reshaperAddNode (NOT addNodeAfter) to avoid tangling the
+              // dependency graph — addNodeAfter would transfer sub-jobs as
+              // dependents of the fan-in instead of dependencies.
+              const parentNodeSpec: JobNodeSpec = {
+                producerId: node.producerId,
+                name: node.name,
+                task: node.task,
+                postchecks: await resolveSpec('postchecks'),
+                dependencies: [],
+              };
+              const fanInSpec = this.state.jobSplitter!.buildFanInSpec(parentNodeSpec, subJobProducerIds);
+              fanInSpec.expectsNoChanges = true; // Fan-in validates, doesn't modify files
+              fanInSpec.group = cpGroupPath;
+              const fanInResult = reshaperAddNode(plan, fanInSpec);
+
+              if (fanInResult.success && fanInResult.nodeId) {
+                // Rewire original downstream dependents to depend on fan-in instead of parent.
+                // This transfers edges like: final-merge → pressure-agent becomes final-merge → fan-in
+                for (const downstreamId of originalDownstreamIds) {
+                  // Skip sub-jobs (they were just added and correctly depend on parent)
+                  if (subJobNodeIds.includes(downstreamId)) { continue; }
+                  const downNode = plan.jobs.get(downstreamId);
+                  if (!downNode) { continue; }
+                  // Replace parent dependency with fan-in dependency
+                  downNode.dependencies = downNode.dependencies.map(d => d === node.id ? fanInResult.nodeId! : d);
+                  // Update dependents arrays
+                  if (!node.dependents.includes(downstreamId)) { continue; }
+                  node.dependents = node.dependents.filter(id => id !== downstreamId);
+                  const fanInNode = plan.jobs.get(fanInResult.nodeId);
+                  if (fanInNode && !fanInNode.dependents.includes(downstreamId)) {
+                    fanInNode.dependents.push(downstreamId);
+                  }
+                }
+                // Recompute roots, leaves, and SV node dependencies
+                // (imported from reshaper module at top of file)
+                const { recomputeRootsAndLeaves } = await import('./reshaper');
+                recomputeRootsAndLeaves(plan);
+                plan.stateVersion++;
+              } else {
+                this.log.warn('Failed to add fan-in node', {
+                  planId: plan.id,
+                  nodeId: node.id,
+                  error: fanInResult.error,
+                });
+              }
+
+              // Persist — reshaper mutations are in-memory only, caller must save
+              await this.savePlanState(plan);
+
+              // Emit reshape event for full UI re-render
+              this.state.events.emit('planReshaped', plan.id);
+
+              // Store checkpoint metadata on nodeState
+              const snapshotPressure = nodeState.contextPressureSnapshot?.maxPromptTokens
+                ? nodeState.contextPressureSnapshot.currentInputTokens / nodeState.contextPressureSnapshot.maxPromptTokens
+                : 0;
+              nodeState.contextPressureCheckpoint = {
+                pressure: snapshotPressure,
+                subJobCount: chunks.length,
+                subJobIds: subJobProducerIds,
+                fanInJobId: fanInSpec.producerId,
+                manifestPath: `specs/${node.id}/checkpoint-manifest.json`,
+              };
+            }
+
+            // Phase 2: Finalize — transition to succeeded
+            sm.transition(node.id, 'succeeded');
+          } catch (reshapeErr: any) {
+            // Reshape failed — cleanup and transition to failed for auto-heal retry
+            this.log.error('Context pressure: DAG reshape failed, resetting for retry', {
+              planId: plan.id,
+              nodeId: node.id,
+              error: reshapeErr.message,
+              attemptNumber: nodeState.attempts,
+            });
+
+            // Remove sentinel so next agent doesn't immediately checkpoint
+            try {
+              await this.state.checkpointManager!.cleanupSentinel(nodeState.worktreePath!);
+            } catch { /* best-effort cleanup */ }
+
+            // Record failed reshape attempt in history
+            const reshapeFailedAttempt: AttemptRecord = {
+              attemptNumber: nodeState.attempts,
+              triggerType: 'context-pressure-reshape',
+              status: 'failed',
+              startedAt: attemptStartedAt,
+              endedAt: Date.now(),
+              error: `DAG reshape failed: ${reshapeErr.message}`,
+              stepStatuses: nodeState.stepStatuses
+                ? { ...nodeState.stepStatuses }
+                : undefined,
+            };
+            this.recordCompletedAttempt(nodeState, reshapeFailedAttempt, node.id);
+
+            // Clear session ID so next attempt gets a fresh context window
+            nodeState.copilotSessionId = undefined;
+            nodeState.pid = undefined;
+
+            sm.transition(node.id, 'failed');
+            this.state.events.emit('nodeCompleted', plan.id, node.id, false);
+            return;
+          }
+          } // end split depth else
+        } else {
+          // No manifest or not work phase — normal succeeded transition
+          sm.transition(node.id, 'succeeded');
+        }
+
         this.state.events.emit('nodeCompleted', plan.id, node.id, true);
         
         // Cleanup this node's worktree if eligible
@@ -1703,6 +1929,36 @@ export class JobExecutionEngine {
   // ============================================================================
   // WORKTREE CLEANUP
   // ============================================================================
+
+  /**
+   * Compute the recursive split depth for a node by counting how many ancestors
+   * in its dependency chain were themselves split via context pressure.
+   */
+  private computeSplitDepth(plan: PlanInstance, node: PlanNode): number {
+    let depth = 0;
+    const visited = new Set<string>();
+    let currentDeps = node.dependencies;
+
+    while (currentDeps.length > 0) {
+      const nextDeps: string[] = [];
+      for (const depId of currentDeps) {
+        if (visited.has(depId)) { continue; }
+        visited.add(depId);
+        const depState = plan.nodeStates.get(depId);
+        if (depState?.contextPressureCheckpoint) {
+          depth++;
+          // Walk further up through this ancestor's dependencies
+          const depNode = plan.jobs.get(depId);
+          if (depNode) {
+            nextDeps.push(...depNode.dependencies);
+          }
+        }
+      }
+      currentDeps = nextDeps;
+    }
+
+    return depth;
+  }
 
   /**
    * Clean up a worktree after successful completion (detached HEAD - no branch)

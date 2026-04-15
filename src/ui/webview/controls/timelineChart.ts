@@ -80,6 +80,80 @@ export class TimelineChart extends SubscribableControl {
     this.publishUpdate();
   }
 
+  /**
+   * Differential update — update a specific node's row in-place without full repaint.
+   * Updates: label status icon, bar width/color for completed nodes, removes pending indicator.
+   * Returns true if the update was applied, false if a full paint is needed (new node, etc.).
+   */
+  updateNodeInPlace(nodeId: string, nodeData: Partial<TimelineNodeData>): boolean {
+    const el = this.getElement(this.cid);
+    if (!el || !this.data) return false;
+
+    const row = el.querySelector(`[data-timeline-node="${nodeId}"]`) as HTMLElement | null;
+    if (!row) return false; // Node not rendered yet — need full paint
+
+    // Update label status icon
+    const iconEl = row.querySelector('.tl-status-icon') as HTMLElement;
+    if (iconEl && nodeData.status) {
+      iconEl.textContent = this.statusIcon(nodeData.status);
+    }
+
+    // Update label tooltip
+    const label = row.querySelector('.tl-row-label') as HTMLElement;
+    if (label) {
+      const tn = this.data.nodes.find(n => n.nodeId === nodeId);
+      if (tn) label.title = `${tn.name} (${tn.status})`;
+    }
+
+    // For terminal nodes, update or create the bar
+    if (nodeData.status === 'succeeded' || nodeData.status === 'failed' || nodeData.status === 'canceled') {
+      const tn = this.data.nodes.find(n => n.nodeId === nodeId);
+      if (tn?.startedAt && tn.endedAt) {
+        // Update existing bar if there is one, or trigger full repaint for fresh bar
+        const area = row.querySelector('div:nth-child(2)') as HTMLElement;
+        if (area) {
+          const existingBar = area.querySelector('div[style*="border-radius"]') as HTMLElement;
+          if (existingBar) {
+            // Update width for final position
+            const x = this.pxCached(tn.startedAt);
+            const w = Math.max(2, this.pxCached(tn.endedAt) - x);
+            existingBar.style.width = w + 'px';
+            existingBar.style.left = x + 'px';
+            existingBar.style.background = this.getStatusColor(tn.status);
+            existingBar.style.animation = 'none'; // Stop pulse
+            // Remove running counter if present
+            const counter = existingBar.querySelector('span[style*="justify-content"]');
+            if (counter) {
+              counter.textContent = this.elapsed(tn.endedAt - tn.startedAt);
+              (counter as HTMLElement).style.animation = 'none';
+            }
+          }
+        }
+      }
+
+      // Remove from running bars tracking
+      this._paintingRunningBars = this._paintingRunningBars.filter(rb => {
+        // Check if this bar belongs to the completed node by matching startedAt
+        const tn2 = this.data!.nodes.find(n => n.nodeId === nodeId);
+        return !(tn2 && rb.startedAt === tn2.startedAt);
+      });
+      if (this._tickState) {
+        this._tickState.runningBars = this._tickState.runningBars.filter(rb => {
+          const tn2 = this.data!.nodes.find(n => n.nodeId === nodeId);
+          return !(tn2 && rb.startedAt === tn2.startedAt);
+        });
+      }
+    }
+
+    // If plan just ended, stop the pulse subscription
+    if (!this.isRunning() && this.pulseSub) {
+      this.pulseSub.unsubscribe();
+      this.pulseSub = null;
+    }
+
+    return true;
+  }
+
   // ── Pixel helpers ─────────────────────────────────────────────────────
 
   private pxPerSec(): number {
@@ -166,16 +240,43 @@ export class TimelineChart extends SubscribableControl {
 
     // Job rows (grouped, SV at bottom) — this populates barPositions
     const groups = this.groupNodes();
+    let currentParentTarget: any = null; // DOM target for current top-level group
+    let currentParentName = '';
     for (const [gname, nodes] of groups) {
-      if (gname) wrap.appendChild(this.paintGroupHeader(d, gname));
+      const depth = gname ? (gname.match(/\//g) || []).length : 0;
+      const isNested = depth > 0;
+
+      if (gname && !isNested) {
+        // Top-level group: header + rows go directly into wrap
+        wrap.appendChild(this.paintGroupHeader(d, gname));
+        currentParentName = gname;
+        currentParentTarget = wrap;
+      } else if (isNested) {
+        // Nested group: wrap header + rows in a container with left border
+        const container = d.createElement('div');
+        container.style.cssText = 'border-left:3px solid var(--vscode-descriptionForeground);margin-left:8px;';
+        container.appendChild(this.paintGroupHeader(d, gname));
+        for (const n of nodes) {
+          container.appendChild(this.paintRow(d, n, ri++, tw));
+        }
+        // Append to parent group's target area (or wrap if no parent)
+        const target = (currentParentName && gname.startsWith(currentParentName + '/'))
+          ? currentParentTarget : wrap;
+        (target || wrap).appendChild(container);
+        continue;
+      } else {
+        // Ungrouped nodes
+        currentParentTarget = null;
+        currentParentName = '';
+      }
+
       for (const n of nodes) {
         wrap.appendChild(this.paintRow(d, n, ri++, tw));
       }
     }
 
-    // SECOND PASS: add consolidated markers to plan row + dependency lines
+    // SECOND PASS: add consolidated markers to plan row
     this.paintPlanMarkers(d, planRowResult.area);
-    this.paintDependencyLines(d, wrap);
 
     // Now marker
     let nowMarkerEl: any = null;
@@ -333,12 +434,14 @@ export class TimelineChart extends SubscribableControl {
     const row = d.createElement('div');
     const bg = ri % 2 === 0 ? 'transparent' : 'rgba(128,128,128,0.04)';
     row.style.cssText = `display:flex;height:${ROW_H}px;border-bottom:1px solid var(--vscode-panel-border);background:${bg};`;
+    row.setAttribute('data-timeline-node', node.nodeId);
     // Label
     const lbl = d.createElement('div');
+    lbl.className = 'tl-row-label';
     const si = this.statusIcon(node.status);
     const lblBg = ri % 2 === 0 ? 'var(--vscode-editor-background)' : 'var(--vscode-editor-background)';
     lbl.style.cssText = `width:${LABEL_W}px;min-width:${LABEL_W}px;box-sizing:border-box;padding:0 8px;display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid var(--vscode-panel-border);position:sticky;left:0;z-index:10;background:${lblBg};`;
-    const ic = d.createElement('span'); ic.style.cssText = 'font-size:10px;flex-shrink:0;'; ic.textContent = si;
+    const ic = d.createElement('span'); ic.className = 'tl-status-icon'; ic.style.cssText = 'font-size:10px;flex-shrink:0;'; ic.textContent = si;
     const nm = d.createElement('span'); nm.style.cssText = 'overflow:hidden;text-overflow:ellipsis;'; nm.textContent = node.name;
     lbl.appendChild(ic); lbl.appendChild(nm); lbl.title = `${node.name} (${node.status})`;
     row.appendChild(lbl);
@@ -356,11 +459,14 @@ export class TimelineChart extends SubscribableControl {
       area.appendChild(gl);
     }
 
-    // Wait line
+    // Wait line (queued, waiting for capacity)
     if (node.scheduledAt && node.startedAt && node.startedAt > node.scheduledAt) {
       const x1 = this.px(node.scheduledAt), x2 = this.px(node.startedAt);
+      const waitMs = node.startedAt - node.scheduledAt;
+      const waitSec = (waitMs / 1000).toFixed(1);
       const wl = d.createElement('div');
-      wl.style.cssText = `position:absolute;left:${x1}px;width:${x2 - x1}px;top:50%;height:0;border-top:2px dashed var(--vscode-descriptionForeground);opacity:0.3;`;
+      wl.style.cssText = `position:absolute;left:${x1}px;width:${x2 - x1}px;top:calc(50% - 4px);height:8px;border-top:2px dashed var(--vscode-descriptionForeground);opacity:0.3;cursor:help;`;
+      wl.title = `Queued for ${waitSec}s — waiting for execution capacity`;
       area.appendChild(wl);
     }
 
@@ -499,9 +605,21 @@ export class TimelineChart extends SubscribableControl {
   // ── Group header ──────────────────────────────────────────────────────
 
   private paintGroupHeader(d: any, name: string): any {
+    const depth = (name.match(/\//g) || []).length;
+    const isNested = depth > 0;
+    const displayName = isNested ? name.split('/').pop()! : name;
+    const borderColor = isNested
+      ? 'none'  // container div provides the border for nested groups
+      : '3px solid var(--vscode-activityBar-foreground)';
+    const fontSize = isNested ? '10px' : '11px';
+    const height = isNested ? '22px' : '26px';
+    const bg = isNested
+      ? 'var(--vscode-editor-background)'
+      : 'var(--vscode-sideBar-background)';
+
     const h = d.createElement('div');
-    h.style.cssText = 'display:flex;align-items:center;height:26px;background:var(--vscode-sideBar-background);border-bottom:1px solid var(--vscode-panel-border);border-left:3px solid var(--vscode-activityBar-foreground);padding:0 8px;font-size:11px;font-weight:600;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:0.5px;position:sticky;left:0;z-index:10;';
-    h.textContent = name;
+    h.style.cssText = `display:flex;align-items:center;height:${height};background:${bg};border-bottom:1px solid var(--vscode-panel-border);border-left:${borderColor};padding:0 8px;font-size:${fontSize};font-weight:600;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:0.5px;position:sticky;left:0;z-index:10;`;
+    h.textContent = isNested ? '\u21B3 ' + displayName : displayName;
     return h;
   }
 
@@ -516,6 +634,11 @@ export class TimelineChart extends SubscribableControl {
       const lb = d.createElement('span'); lb.textContent = phase;
       item.appendChild(sw); item.appendChild(lb); w.appendChild(item);
     }
+    // Wait line legend entry
+    const waitItem = d.createElement('div'); waitItem.style.cssText = 'display:flex;align-items:center;gap:4px;';
+    const waitLine = d.createElement('div'); waitLine.style.cssText = 'width:20px;height:0;border-top:2px dashed var(--vscode-descriptionForeground);opacity:0.5;';
+    const waitLb = d.createElement('span'); waitLb.textContent = 'queue wait';
+    waitItem.appendChild(waitLine); waitItem.appendChild(waitLb); w.appendChild(waitItem);
     return w;
   }
 
@@ -683,18 +806,94 @@ export class TimelineChart extends SubscribableControl {
   }
   private doc(): any { return typeof globalThis !== 'undefined' ? (globalThis as any).document : null; }
 
+  /**
+   * Group nodes for timeline rendering with hierarchical group support.
+   * 
+   * Groups are ordered: top-level groups first (sorted by earliest startedAt),
+   * then ungrouped nodes, then snapshot-validation last.
+   * 
+   * Nested groups (e.g., "parallel-work/Agent Work") are rendered as sub-groups
+   * under their parent. The returned array encodes depth via the group name:
+   * - Top-level: "parallel-work"
+   * - Nested: "parallel-work/Agent Work (Context Pressure)" 
+   * 
+   * The paintGroupHeader method uses '/' to determine indent depth.
+   */
   private groupNodes(): Array<[string, TimelineNodeData[]]> {
     const grouped = new Map<string, TimelineNodeData[]>();
     const noGroup: TimelineNodeData[] = [];
     for (const n of this.data!.nodes) {
-      if (n.group) { if (!grouped.has(n.group)) grouped.set(n.group, []); grouped.get(n.group)!.push(n); }
-      else noGroup.push(n);
+      if (n.group) {
+        if (!grouped.has(n.group)) grouped.set(n.group, []);
+        grouped.get(n.group)!.push(n);
+      } else {
+        noGroup.push(n);
+      }
     }
+
+    // Build a tree structure from group paths
+    const topLevel = new Map<string, string[]>(); // parent -> [child paths]
+    const allPaths = [...grouped.keys()];
+    for (const path of allPaths) {
+      const slashIdx = path.indexOf('/');
+      if (slashIdx === -1) {
+        // Top-level group
+        if (!topLevel.has(path)) topLevel.set(path, []);
+      } else {
+        // Nested group — register under parent
+        const parent = path.substring(0, slashIdx);
+        if (!topLevel.has(parent)) topLevel.set(parent, []);
+        topLevel.get(parent)!.push(path);
+      }
+    }
+
+    // Sort top-level groups by earliest node startedAt
+    const groupStart = (paths: string[]): number => {
+      let earliest = Infinity;
+      for (const p of paths) {
+        const nodes = grouped.get(p);
+        if (nodes) {
+          for (const n of nodes) {
+            if (n.startedAt && n.startedAt < earliest) earliest = n.startedAt;
+          }
+        }
+      }
+      return earliest;
+    };
+    const sortedParents = [...topLevel.keys()]
+      .filter(k => !k.toLowerCase().includes('snapshot'))
+      .sort((a, b) => {
+        const aStart = groupStart([a, ...(topLevel.get(a) || [])]);
+        const bStart = groupStart([b, ...(topLevel.get(b) || [])]);
+        return aStart - bStart;
+      });
+
     const result: Array<[string, TimelineNodeData[]]> = [];
-    const svKey = [...grouped.keys()].find(k => k.toLowerCase().includes('snapshot'));
-    for (const [k, v] of grouped) { if (k !== svKey) result.push([k, v]); }
+
+    // Emit groups in order: parent nodes first, then children
+    for (const parent of sortedParents) {
+      const parentNodes = grouped.get(parent);
+      if (parentNodes && parentNodes.length > 0) {
+        result.push([parent, parentNodes]);
+      }
+      // Emit child groups sorted by earliest startedAt
+      const children = (topLevel.get(parent) || []).sort((a, b) => groupStart([a]) - groupStart([b]));
+      for (const child of children) {
+        const childNodes = grouped.get(child);
+        if (childNodes && childNodes.length > 0) {
+          result.push([child, childNodes]);
+        }
+      }
+    }
+
     if (noGroup.length) result.push(['', noGroup]);
-    if (svKey) result.push([svKey, grouped.get(svKey)!]);
+
+    // Snapshot validation last
+    const svKey = allPaths.find(k => k.toLowerCase().includes('snapshot'));
+    if (svKey) {
+      const svNodes = grouped.get(svKey);
+      if (svNodes && svNodes.length > 0) result.push([svKey, svNodes]);
+    }
     return result;
   }
 
@@ -808,83 +1007,4 @@ export class TimelineChart extends SubscribableControl {
     }
   }
 
-  // ── Dependency lines ──────────────────────────────────────────────────
-
-  private paintDependencyLines(d: any, wrap: any): void {
-    if (!this.data) { return; }
-
-    // Build a map of nodeId → last bar position (use last attempt's end as the producer finish point)
-    const nodeLastBar = new Map<string, { rightPx: number; rowIndex: number; endedAt: number }>();
-    for (const bp of this.barPositions) {
-      const existing = nodeLastBar.get(bp.nodeId);
-      if (!existing || bp.endedAt > existing.endedAt) {
-        nodeLastBar.set(bp.nodeId, { rightPx: bp.rightPx, rowIndex: bp.rowIndex, endedAt: bp.endedAt });
-      }
-    }
-
-    // Build a map of nodeId → first bar position (the consumer's start)
-    const nodeFirstBar = new Map<string, { leftPx: number; rowIndex: number; startedAt: number }>();
-    for (const bp of this.barPositions) {
-      const existing = nodeFirstBar.get(bp.nodeId);
-      if (!existing || bp.startedAt < existing.startedAt) {
-        nodeFirstBar.set(bp.nodeId, { leftPx: bp.leftPx, rowIndex: bp.rowIndex, startedAt: bp.startedAt });
-      }
-    }
-
-    // Create an SVG overlay for dependency lines
-    const svg = d.createElementNS ? d.createElementNS('http://www.w3.org/2000/svg', 'svg') : d.createElement('svg');
-    // Calculate total height based on number of rows rendered
-    const maxRow = this.barPositions.reduce((m, bp) => Math.max(m, bp.rowIndex), 0);
-    const svgH = (maxRow + 2) * ROW_H + AXIS_H;
-    const svgW = this.totalWidth() + LABEL_W;
-    svg.setAttribute('width', String(svgW));
-    svg.setAttribute('height', String(svgH));
-    svg.style.cssText = `position:absolute;top:0;left:0;width:${svgW}px;height:${svgH}px;pointer-events:none;z-index:2;overflow:visible;`;
-
-    let lineCount = 0;
-    for (const node of this.data.nodes) {
-      if (!node.dependencies || node.dependencies.length === 0) { continue; }
-      const consumer = nodeFirstBar.get(node.nodeId);
-      if (!consumer) { continue; }
-
-      for (const depId of node.dependencies) {
-        const producer = nodeLastBar.get(depId);
-        if (!producer) { continue; }
-
-        // Only draw if there's a visible gap (producer ends before consumer starts)
-        if (producer.rightPx + 4 >= consumer.leftPx) { continue; }
-
-        const x1 = LABEL_W + producer.rightPx;
-        const y1 = AXIS_H + producer.rowIndex * ROW_H + ROW_H / 2;
-        const x2 = LABEL_W + consumer.leftPx;
-        const y2 = AXIS_H + consumer.rowIndex * ROW_H + ROW_H / 2;
-
-        // Draw a curved line from producer end → consumer start
-        const midX = (x1 + x2) / 2;
-        const line = d.createElementNS ? d.createElementNS('http://www.w3.org/2000/svg', 'path') : d.createElement('path');
-        const pathD = y1 === y2
-          ? `M${x1},${y1} L${x2},${y2}`
-          : `M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`;
-        line.setAttribute('d', pathD);
-        line.setAttribute('fill', 'none');
-        line.setAttribute('stroke', 'var(--vscode-descriptionForeground)');
-        line.setAttribute('stroke-width', '1');
-        line.setAttribute('stroke-opacity', '0.25');
-        line.setAttribute('stroke-dasharray', '3,3');
-        svg.appendChild(line);
-
-        // Small arrow at consumer end
-        const arrow = d.createElementNS ? d.createElementNS('http://www.w3.org/2000/svg', 'polygon') : d.createElement('polygon');
-        arrow.setAttribute('points', `${x2},${y2} ${x2 - 5},${y2 - 3} ${x2 - 5},${y2 + 3}`);
-        arrow.setAttribute('fill', 'var(--vscode-descriptionForeground)');
-        arrow.setAttribute('opacity', '0.25');
-        svg.appendChild(arrow);
-        lineCount++;
-      }
-    }
-
-    if (lineCount > 0) {
-      wrap.appendChild(svg);
-    }
-  }
 }

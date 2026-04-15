@@ -173,6 +173,20 @@ export class ExecutionPump {
               const node = plan.jobs.get(nodeId);
               this.log.warn(`Watchdog: PID ${state.pid} for node "${node?.name || nodeId}" is no longer running — marking as failed (possible hibernate/crash)`);
               state.error = `Process ${state.pid} died unexpectedly (system hibernate or crash). Retry to resume.`;
+              
+              // Finalize the running AttemptRecord placeholder in attemptHistory.
+              // Without this, the UI shows a stale "running" entry alongside the
+              // failed entry, creating duplicate attempt cards.
+              if (state.attemptHistory && state.attemptHistory.length > 0) {
+                const lastRecord = state.attemptHistory[state.attemptHistory.length - 1];
+                if (lastRecord.status === 'running') {
+                  lastRecord.status = 'failed';
+                  lastRecord.endedAt = Date.now();
+                  lastRecord.error = state.error;
+                  lastRecord.failedPhase = 'work';
+                }
+              }
+              
               state.pid = undefined;
               state.lastAttempt = {
                 phase: 'work',

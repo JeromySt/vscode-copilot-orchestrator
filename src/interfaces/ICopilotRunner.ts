@@ -14,11 +14,12 @@ import type { CopilotRunOptions, CopilotRunResult } from '../agent/copilotCliRun
  * 
  * @example
  * ```typescript
- * class AgentDelegator {
+ * // Phase executors inject ICopilotRunner directly:
+ * class WorkPhaseExecutor {
  *   constructor(private readonly runner: ICopilotRunner) {}
  *   
- *   async delegate(options: DelegateOptions): Promise<DelegateResult> {
- *     const result = await this.runner.run({ cwd: options.worktreePath, task: options.taskDescription });
+ *   async runAgent(spec: AgentSpec): Promise<PhaseResult> {
+ *     const result = await this.runner.run({ cwd: spec.worktreePath, task: spec.instructions });
  *     return { success: result.success };
  *   }
  * }
@@ -58,7 +59,8 @@ export interface ICopilotRunner {
     cwd?: string;
     allowedFolders?: string[];
     allowedUrls?: string[];
-  }): string;
+    effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  }): any;
 
   /**
    * Clean up the instructions file after execution.

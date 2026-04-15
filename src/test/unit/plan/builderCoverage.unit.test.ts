@@ -621,4 +621,108 @@ suite('Builder Coverage Tests', () => {
       );
     });
   });
+
+  suite('SV node spec delegation to svNodeBuilder', () => {
+    test('SV node prechecks is an agent spec (from buildSvJobSpec)', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.prechecks, 'SV node should have prechecks');
+      assert.strictEqual(svNode.prechecks.type, 'agent');
+    });
+
+    test('SV node prechecks agent uses fast model tier', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.strictEqual(svNode.prechecks.modelTier, 'fast');
+    });
+
+    test('SV node prechecks instructions reference the target branch', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'release-1', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.prechecks.instructions.includes('release-1'));
+    });
+
+    test('SV node prechecks has noAutoHeal onFailure config', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.prechecks.onFailure);
+      assert.strictEqual(svNode.prechecks.onFailure.noAutoHeal, true);
+      assert.strictEqual(svNode.prechecks.onFailure.resumeFromPhase, 'prechecks');
+    });
+
+    test('SV node postchecks is a process spec (from buildSvJobSpec)', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.postchecks, 'SV node should have postchecks');
+      assert.strictEqual(svNode.postchecks.type, 'process');
+    });
+
+    test('SV node postchecks executable is node.js', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.strictEqual(svNode.postchecks.executable, process.execPath);
+    });
+
+    test('SV node postchecks script references the target branch', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'feature-xyz', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.postchecks.args[1].includes('feature-xyz'));
+    });
+
+    test('SV node postchecks has ELECTRON_RUN_AS_NODE env var', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.postchecks.env);
+      assert.strictEqual(svNode.postchecks.env.ELECTRON_RUN_AS_NODE, '1');
+    });
+
+    test('SV node postchecks has noAutoHeal onFailure config', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [makeJob('a')] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.postchecks.onFailure);
+      assert.strictEqual(svNode.postchecks.onFailure.noAutoHeal, true);
+      assert.strictEqual(svNode.postchecks.onFailure.resumeFromPhase, 'prechecks');
+    });
+
+    test('targetBranch overrides baseBranch in SV node specs', () => {
+      const plan = buildPlan({
+        name: 'Test',
+        baseBranch: 'main',
+        targetBranch: 'release-2',
+        jobs: [makeJob('a')],
+      });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.prechecks.instructions.includes('release-2'));
+      assert.ok(svNode.postchecks.args[1].includes('release-2'));
+    });
+
+    test('SV node has both prechecks and postchecks in 0-job plan', () => {
+      const plan = buildPlan({ name: 'Test', baseBranch: 'main', jobs: [] });
+      const svId = plan.producerIdToNodeId.get(SV_PRODUCER_ID)!;
+      const svNode = plan.jobs.get(svId)! as any;
+
+      assert.ok(svNode.prechecks, 'SV node should have prechecks even in 0-job plan');
+      assert.ok(svNode.postchecks, 'SV node should have postchecks even in 0-job plan');
+    });
+  });
 });

@@ -5,6 +5,8 @@ import type {
   PlanNode,
   JobNodeSpec,
   NodeExecutionState,
+  GroupInstance,
+  GroupExecutionState,
 } from './types';
 
 const log = Logger.for('plan');
@@ -164,6 +166,64 @@ function isDependencyAvailable(plan: PlanInstance, depNodeId: string): boolean {
   return false;
 }
 
+/**
+ * Resolve a group path to a group ID, auto-creating the hierarchy if needed.
+ * Mirrors the logic in builder.ts so reshaper-added nodes get proper group tracking.
+ */
+function resolveOrCreateGroup(plan: PlanInstance, groupPath: string): string | undefined {
+  const existing = plan.groupPathToId.get(groupPath);
+  if (existing) { return existing; }
+
+  const parts = groupPath.split('/');
+  let currentPath = '';
+  let parentGroupId: string | undefined;
+
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+    let existingGroupId = plan.groupPathToId.get(currentPath);
+    if (!existingGroupId) {
+      const newGroupId = uuidv4();
+      const newGroup: GroupInstance = {
+        id: newGroupId,
+        name: part,
+        path: currentPath,
+        parentGroupId,
+        childGroupIds: [],
+        nodeIds: [],
+        allNodeIds: [],
+        totalNodes: 0,
+      };
+      plan.groups.set(newGroupId, newGroup);
+      plan.groupPathToId.set(currentPath, newGroupId);
+
+      if (parentGroupId) {
+        const parent = plan.groups.get(parentGroupId);
+        if (parent && !parent.childGroupIds.includes(newGroupId)) {
+          parent.childGroupIds.push(newGroupId);
+        }
+      }
+
+      const initState: GroupExecutionState = {
+        status: 'pending',
+        version: 0,
+        runningCount: 0,
+        succeededCount: 0,
+        failedCount: 0,
+        blockedCount: 0,
+        canceledCount: 0,
+      };
+      plan.groupStates.set(newGroupId, initState);
+
+      existingGroupId = newGroupId;
+    }
+
+    parentGroupId = existingGroupId;
+  }
+
+  return parentGroupId;
+}
+
 /** Build a PlanNode from a JobNodeSpec and resolved dependency node IDs. */
 function buildNodeFromSpec(spec: JobNodeSpec, nodeId: string, resolvedDeps: string[]): PlanNode {
   return {
@@ -244,6 +304,30 @@ export function addNode(plan: PlanInstance, spec: JobNodeSpec): AddNodeResult {
 
   const nodeId = uuidv4();
   const node = buildNodeFromSpec(spec, nodeId, resolvedDeps);
+
+  // Resolve group path → groupId and register in group hierarchy
+  if (spec.group) {
+    const resolved = resolveOrCreateGroup(plan, spec.group);
+    if (resolved) {
+      (node as any).groupId = resolved;
+      const group = plan.groups.get(resolved);
+      if (group) {
+        group.nodeIds.push(nodeId);
+        group.allNodeIds.push(nodeId);
+        group.totalNodes++;
+        // Propagate to ancestor groups
+        let parentId = group.parentGroupId;
+        while (parentId) {
+          const parent = plan.groups.get(parentId);
+          if (parent) {
+            parent.allNodeIds.push(nodeId);
+            parent.totalNodes++;
+            parentId = parent.parentGroupId;
+          } else { break; }
+        }
+      }
+    }
+  }
 
   // Wire into plan
   plan.jobs.set(nodeId, node);
@@ -491,6 +575,29 @@ export function addNodeBefore(
   const nodeId = uuidv4();
   const newNode = buildNodeFromSpec(spec, nodeId, resolvedSpecDeps);
 
+  // Resolve group path → groupId and register in group hierarchy
+  if (spec.group) {
+    const resolved = resolveOrCreateGroup(plan, spec.group);
+    if (resolved) {
+      (newNode as any).groupId = resolved;
+      const group = plan.groups.get(resolved);
+      if (group) {
+        group.nodeIds.push(nodeId);
+        group.allNodeIds.push(nodeId);
+        group.totalNodes++;
+        let parentId = group.parentGroupId;
+        while (parentId) {
+          const parent = plan.groups.get(parentId);
+          if (parent) {
+            parent.allNodeIds.push(nodeId);
+            parent.totalNodes++;
+            parentId = parent.parentGroupId;
+          } else { break; }
+        }
+      }
+    }
+  }
+
   // Wire: new node's dependents = [existingNodeId]
   newNode.dependents = [existingNodeId];
 
@@ -586,6 +693,29 @@ export function addNodeAfter(
 
   const nodeId = uuidv4();
   const newNode = buildNodeFromSpec(spec, nodeId, resolvedSpecDeps);
+
+  // Resolve group path → groupId and register in group hierarchy
+  if (spec.group) {
+    const resolved = resolveOrCreateGroup(plan, spec.group);
+    if (resolved) {
+      (newNode as any).groupId = resolved;
+      const group = plan.groups.get(resolved);
+      if (group) {
+        group.nodeIds.push(nodeId);
+        group.allNodeIds.push(nodeId);
+        group.totalNodes++;
+        let parentId = group.parentGroupId;
+        while (parentId) {
+          const parent = plan.groups.get(parentId);
+          if (parent) {
+            parent.allNodeIds.push(nodeId);
+            parent.totalNodes++;
+            parentId = parent.parentGroupId;
+          } else { break; }
+        }
+      }
+    }
+  }
 
   // Register in plan
   plan.jobs.set(nodeId, newNode);

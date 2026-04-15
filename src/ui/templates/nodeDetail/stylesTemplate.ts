@@ -196,7 +196,7 @@ function statusBadgeStyles(): string {
       font-weight: 600;
     }
     .status-badge.running { background: rgba(0, 122, 204, 0.2); color: #3794ff; }
-    .status-badge.succeeded { background: rgba(78, 201, 176, 0.2); color: #4ec9b0; }
+    .status-badge.succeeded { background: rgba(115, 201, 145, 0.25); color: #73c991; }
     .status-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
     .status-badge.pending, .status-badge.ready { background: rgba(133, 133, 133, 0.2); color: #858585; }
     .status-badge.blocked { background: rgba(133, 133, 133, 0.2); color: #858585; }
@@ -446,6 +446,11 @@ function configStyles(): string {
       font-size: 12px;
       line-height: 1.6;
       color: var(--vscode-foreground);
+      user-select: text;
+      cursor: text;
+    }
+    .agent-instructions:focus {
+      outline: 1px solid var(--vscode-focusBorder);
     }
     .agent-instructions p { margin: 0 0 8px 0; }
     .agent-instructions p:last-child { margin-bottom: 0; }
@@ -1389,6 +1394,7 @@ export function renderNodeDetailStyles(): string {
     actionButtonStyles(),
     workSummaryStyles(),
     markdownStyles(),
+    contextPressureStyles(),
     bridgeStyles(),
   ].join('\n');
 }
@@ -1465,6 +1471,11 @@ function bridgeStyles(): string {
     .agent-tier.tier-fast { background: rgba(76,175,80,0.2); color: #4CAF50; }
     .agent-tier.tier-standard { background: rgba(33,150,243,0.2); color: #2196F3; }
     .agent-tier.tier-premium { background: rgba(255,152,0,0.2); color: #FFB74D; }
+    .agent-effort { font-size: 9px; padding: 1px 5px; border-radius: 8px; font-weight: 600; text-transform: uppercase; margin-left: 4px; }
+    .agent-effort.effort-low { background: rgba(76,175,80,0.2); color: #4CAF50; }
+    .agent-effort.effort-medium { background: rgba(33,150,243,0.2); color: #2196F3; }
+    .agent-effort.effort-high { background: rgba(255,152,0,0.2); color: #FFB74D; }
+    .agent-effort.effort-xhigh { background: rgba(244,67,54,0.2); color: #EF5350; }
     .work-instructions { padding: 8px; font-size: 12px; line-height: 1.5; }
     .work-content { padding: 8px; }
     .env-section { margin-top: 6px; padding: 6px 10px; font-size: 11px; background: rgba(128,128,128,0.06); border-top: 1px solid var(--vscode-panel-border); }
@@ -1551,5 +1562,44 @@ function bridgeStyles(): string {
     .md-inline-code { background: rgba(128,128,128,0.15); padding: 1px 4px; border-radius: 3px; font-family: var(--vscode-editor-font-family); font-size: 0.9em; }
     .md-link { color: var(--vscode-textLink-foreground); text-decoration: none; }
     .md-link:hover { text-decoration: underline; }
+  `;
+}
+
+/**
+ * Context pressure card styles.
+ */
+function contextPressureStyles(): string {
+  return `
+    /* ── Context pressure section ── */
+    .context-pressure-section { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--vscode-panel-border); }
+    .context-pressure-label { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+    .context-pressure-bar-container { width: 100%; height: 8px; background: var(--vscode-editor-background); border-radius: 4px; overflow: hidden; border: 1px solid var(--vscode-panel-border); margin-bottom: 4px; }
+    .context-pressure-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease, background 0.3s ease; }
+    .context-pressure-bar.context-pressure-normal { background: var(--vscode-charts-green); }
+    .context-pressure-bar.context-pressure-elevated { background: var(--vscode-charts-yellow); }
+    .context-pressure-bar.context-pressure-critical { background: var(--vscode-charts-red); }
+    .context-pressure-stats { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
+    .context-pressure-details { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
+    .context-pressure-status { font-size: 11px; font-weight: 500; margin-bottom: 4px; }
+    .context-pressure-status.context-pressure-normal { color: var(--vscode-charts-green, #4ec9b0); }
+    .context-pressure-status.context-pressure-elevated { color: var(--vscode-charts-yellow, #cca700); }
+    .context-pressure-status.context-pressure-critical { color: var(--vscode-charts-red, #f48771); }
+    .context-pressure-checkpoint-banner { margin-top: 6px; padding: 8px 10px; background: rgba(244, 135, 113, 0.1); border: 1px solid var(--vscode-charts-red, #f48771); border-radius: 4px; font-size: 11px; color: var(--vscode-charts-red, #f48771); line-height: 1.4; }
+
+    /* ── Context pressure checkpoint (post-split) section ── */
+    .cp-checkpoint-section { border: 1px solid var(--vscode-panel-border); border-radius: 6px; padding: 12px; background: var(--vscode-editor-background); }
+    .cp-checkpoint-section .attempt-section-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+    .cp-summary { margin-bottom: 10px; }
+    .cp-stat { font-size: 12px; color: var(--vscode-foreground); margin-bottom: 3px; }
+    .cp-stat strong { color: var(--vscode-foreground); }
+    .cp-subjob-list { margin: 8px 0; padding-left: 4px; }
+    .cp-subjob-row { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 0; }
+    .cp-connector { font-family: monospace; color: var(--vscode-descriptionForeground); white-space: pre; }
+    .cp-subjob-link { color: var(--vscode-textLink-foreground); cursor: pointer; text-decoration: none; }
+    .cp-subjob-link:hover { text-decoration: underline; }
+    .cp-manifest-section { margin-top: 8px; border-top: 1px dashed var(--vscode-panel-border); padding-top: 8px; }
+    .cp-manifest-toggle { font-size: 12px; cursor: pointer; color: var(--vscode-textLink-foreground); user-select: none; }
+    .cp-manifest-toggle:hover { text-decoration: underline; }
+    .cp-manifest-content { font-size: 11px; line-height: 1.4; max-height: 300px; overflow-y: auto; margin-top: 6px; padding: 8px; background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
   `;
 }

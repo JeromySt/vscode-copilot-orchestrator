@@ -14,8 +14,95 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { EventEmitter } from 'events';
 import { CopilotCliRunner } from '../../../agent/copilotCliRunner';
 import { resetCliCache } from '../../../agent/cliCheckCore';
+import type { IManagedProcessFactory } from '../../../interfaces/IManagedProcessFactory';
+
+/** Create a mock IManagedProcessFactory that wraps a raw process with simple handler stubs. */
+function createMockManagedFactory(): IManagedProcessFactory {
+  return {
+    create(proc: any, _options: any) {
+      const emitter = new EventEmitter();
+      let sessionId: string | undefined;
+      let sawComplete = false;
+      let statsStarted: number | null = null;
+      let metrics: any;
+
+      const mockBus = {
+        getHandler: <T>(name: string): T | undefined => {
+          if (name === 'session-id') return { getSessionId: () => sessionId } as any;
+          if (name === 'task-complete') return { sawTaskComplete: () => sawComplete } as any;
+          if (name === 'stats') return { getStatsStartedAt: () => statsStarted, getMetrics: () => metrics } as any;
+          return undefined;
+        },
+        dispose: () => {},
+      };
+
+      const processLine = (line: string) => {
+        const sm = line.match(/Session ID[:\s]+([a-f0-9-]{36})/i) ||
+                   line.match(/session[:\s]+([a-f0-9-]{36})/i) ||
+                   line.match(/Starting session[:\s]+([a-f0-9-]{36})/i);
+        if (sm && !sessionId) { sessionId = sm[1]; }
+        if (line.includes('Task complete')) { sawComplete = true; }
+        if (line.includes('Premium requests')) {
+          statsStarted = Date.now();
+          if (!metrics) { metrics = {}; }
+          const pm = line.match(/(\d+)\s+Premium requests/);
+          if (pm) { metrics.premiumRequests = parseInt(pm[1]); }
+        }
+        const mm = line.match(/^(\S+)\s+([\d.]+[km]?)\s+in,\s+([\d.]+[km]?)\s+out/i);
+        if (mm) {
+          if (!metrics) { metrics = {}; }
+          if (!metrics.modelBreakdown) { metrics.modelBreakdown = []; }
+          const parseCount = (s: string): number => {
+            const n = parseFloat(s);
+            if (s.endsWith('k')) return n * 1000;
+            if (s.endsWith('m')) return n * 1000000;
+            return n;
+          };
+          metrics.modelBreakdown.push({ model: mm[1], inputTokens: parseCount(mm[2]), outputTokens: parseCount(mm[3]) });
+        }
+      };
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        data.toString().split('\n').forEach((line: string) => {
+          if (line.trim()) {
+            processLine(line.trim());
+            emitter.emit('line', line.trim(), { type: 'stdout', name: 'stdout' });
+          }
+        });
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        data.toString().split('\n').forEach((line: string) => {
+          if (line.trim()) {
+            processLine(line.trim());
+            emitter.emit('line', line.trim(), { type: 'stderr', name: 'stderr' });
+          }
+        });
+      });
+      proc.on('exit', (code: any, signal: any) => emitter.emit('exit', code, signal));
+      proc.on('error', (err: any) => emitter.emit('error', err));
+
+      return Object.assign(emitter, {
+        pid: proc.pid,
+        exitCode: proc.exitCode,
+        killed: proc.killed,
+        bus: mockBus,
+        timestamps: { requested: 0 },
+        durations: {},
+        diagnostics: () => ({
+          pid: proc.pid, exitCode: proc.exitCode, killed: proc.killed,
+          timestamps: { requested: 0 }, durations: {},
+          handlerNames: ['stats', 'session-id', 'task-complete'],
+          busMetrics: { totalLines: 0, linesBySource: {}, handlerInvocations: 0, handlerErrors: 0 },
+          tailerMetrics: [],
+        }),
+        kill: (signal?: any) => proc.kill?.(signal),
+      }) as any;
+    },
+  };
+}
 
 /**
  * Testable subclass that overrides buildCommand to use simple shell commands
@@ -23,6 +110,10 @@ import { resetCliCache } from '../../../agent/cliCheckCore';
  */
 class TestableCliRunner extends CopilotCliRunner {
   private _testCommand: string | undefined;
+
+  constructor(logger?: any, managedFactory?: IManagedProcessFactory) {
+    super(logger, undefined, undefined, undefined, managedFactory);
+  }
 
   setTestCommand(cmd: string): void {
     this._testCommand = cmd;
@@ -37,8 +128,17 @@ class TestableCliRunner extends CopilotCliRunner {
     return true;
   }
 
-  buildCommand(_options: any): string {
-    return this._testCommand || super.buildCommand(_options);
+  buildCommand(_options: any): any {
+    if (this._testCommand) {
+      // Parse the test command into executable + args for shell: false execution.
+      // On Windows, commands like 'cmd /c echo hello' become executable='cmd', args=['/c', 'echo', 'hello'].
+      // On Unix, 'echo hello' becomes executable='echo', args=['hello'].
+      const parts = this._testCommand.match(/"[^"]*"|\S+/g) || [];
+      const executable = parts[0] || this._testCommand;
+      const args = parts.slice(1).map(p => p.replace(/^"|"$/g, ''));
+      return { executable, args, logDir: undefined, commandString: this._testCommand };
+    }
+    return super.buildCommand(_options);
   }
 }
 
@@ -57,7 +157,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
   setup(() => {
     logMessages = [];
-    runner = new CopilotCliRunner(createLogger());
+    runner = new CopilotCliRunner(createLogger(), undefined, undefined, undefined, createMockManagedFactory());
     // Ensure isCopilotCliAvailable() returns true optimistically
     resetCliCache();
   });
@@ -189,7 +289,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
       this.timeout(10000);
 
       // Use TestableCliRunner (overrides ensureAvailable + buildCommand) to avoid real CLI detection
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c exit 1' : 'sh -c "exit 1"');
 
       const result = await testRunner.run({
@@ -206,7 +306,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
       this.timeout(10000);
       const outputLines: string[] = [];
 
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo hello_from_run' : 'echo hello_from_run');
 
       await testRunner.run({
@@ -224,7 +324,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
       this.timeout(10000);
       let processReceived = false;
 
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo spawned' : 'echo spawned');
 
       await testRunner.run({
@@ -289,7 +389,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
       // Should not throw when building command (which uses logger)
       const cmd = noLogRunner.buildCommand({ task: 'test' });
-      assert.ok(cmd.includes('copilot'));
+      assert.ok(cmd.commandString.includes('copilot'));
     });
 
     test('works with custom logger', () => {
@@ -313,7 +413,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('successful command returns success with exit code 0', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo hello' : 'echo hello');
 
       const result = await testRunner.run({
@@ -329,7 +429,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('failed command returns failure with non-zero exit code', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c exit 42' : 'exit 42');
 
       const result = await testRunner.run({
@@ -345,7 +445,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('command outputting Task complete with null exit code treated as success', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       // Echo "Task complete" to trigger the sawTaskComplete flag
       testRunner.setTestCommand(process.platform === 'win32'
         ? 'cmd /c echo Task complete'
@@ -363,7 +463,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('command with stats output parses metrics', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       const statsOutput = [
         'Total usage est:        3 Premium requests',
         'API time spent:         32s',
@@ -397,7 +497,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('session ID is extracted from output', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       const sessionUUID = 'abcd1234-5678-9012-3456-789abcdef012';
       testRunner.setTestCommand(process.platform === 'win32'
         ? `cmd /c echo Session ID: ${sessionUUID}`
@@ -416,7 +516,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('onProcess callback receives process object', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo test' : 'echo test');
 
       let receivedPid = false;
@@ -435,7 +535,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('onOutput callback receives output lines', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo test_output_line' : 'echo test_output_line');
 
       const lines: string[] = [];
@@ -453,7 +553,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('timeout kills long-running process', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       // A command that takes a long time
       testRunner.setTestCommand(process.platform === 'win32'
         ? 'cmd /c ping -n 30 127.0.0.1'
@@ -473,7 +573,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('zero timeout means no timeout', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo quick' : 'echo quick');
 
       const result = await testRunner.run({
@@ -488,7 +588,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('stderr output is also processed', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32'
         ? 'cmd /c echo stderr_test 1>&2'
         : 'echo stderr_test >&2');
@@ -507,7 +607,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('metrics tokenUsage backfill from modelBreakdown', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       // Output model breakdown stats that should trigger backfill
       if (process.platform === 'win32') {
         testRunner.setTestCommand(`cmd /c "echo Breakdown by AI model: && echo claude-opus-4.6         100k in, 5k out (Est. 2 Premium requests)"`);
@@ -531,7 +631,7 @@ suite('CopilotCliRunner - Execute & Lifecycle', () => {
 
     test('pre-existing sessionId is preserved when output has no session', async function () {
       this.timeout(15000);
-      const testRunner = new TestableCliRunner(createLogger());
+      const testRunner = new TestableCliRunner(createLogger(), createMockManagedFactory());
       testRunner.setTestCommand(process.platform === 'win32' ? 'cmd /c echo done' : 'echo done');
 
       const result = await testRunner.run({

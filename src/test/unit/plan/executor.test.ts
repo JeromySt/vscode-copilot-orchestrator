@@ -71,12 +71,6 @@ suite('DefaultJobExecutor', () => {
     });
   });
 
-  suite('setAgentDelegator()', () => {
-    test('accepts any delegator object', () => {
-      assert.doesNotThrow(() => executor.setAgentDelegator({ delegate: async () => ({}) }));
-    });
-  });
-
   suite('setEvidenceValidator()', () => {
     test('accepts any validator', () => {
       assert.doesNotThrow(() => executor.setEvidenceValidator({ validate: async () => ({ valid: true }) } as any));
@@ -564,25 +558,6 @@ suite('DefaultJobExecutor', () => {
 
   suite('execute() - agent work', function () {
     this.timeout(30000); // These tests spawn real processes and run git operations
-    test('returns error when no agent delegator configured', async () => {
-      const tmp = makeTmpDir();
-      const context = {
-        plan: { id: 'pa1', spec: { name: 'test' }, nodeStates: new Map() } as any,
-        node: {
-          id: 'na1', name: 'AgentWork', type: 'job' as const,
-          task: 'Agent task',
-          work: { type: 'agent', instructions: 'fix the bug' },
-          dependencies: [], dependents: [],
-        } as any,
-        worktreePath: tmp,
-        baseCommit: 'abc123',
-        attemptNumber: 1,
-      };
-      const result = await executor.execute(context);
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error?.includes('agent delegator'));
-    });
-
     test('runs agent work with delegator', async () => {
       const tmp = makeTmpDir();
       executor.setStoragePath(tmp);
@@ -596,13 +571,15 @@ suite('DefaultJobExecutor', () => {
       } catch {}
       const baseCommit = require('child_process').execSync('git rev-parse HEAD', { cwd: tmp }).toString().trim();
 
-      executor.setAgentDelegator({
-        delegate: async (opts: any) => {
+      executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), new DefaultGitOperations(), {
+        ...mockCopilotRunner,
+        run: async (opts: any) => {
           // Simulate agent making changes
           fs.writeFileSync(path.join(tmp, 'agent-output.txt'), 'agent work');
           return { success: true, sessionId: 'session-123' };
         },
-      });
+      } as any);
+      executor.setStoragePath(tmp);
       const context = {
         plan: { id: 'pa2', spec: { name: 'test' }, nodeStates: new Map() } as any,
         node: {
@@ -622,9 +599,10 @@ suite('DefaultJobExecutor', () => {
 
     test('handles agent failure', async () => {
       const tmp = makeTmpDir();
-      executor.setAgentDelegator({
-        delegate: async () => ({ success: false, error: 'agent crashed', exitCode: 1 }),
-      });
+      const failExecutor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), new DefaultGitOperations(), {
+        ...mockCopilotRunner,
+        run: async () => ({ success: false, error: 'agent crashed', exitCode: 1 }),
+      } as any);
       const context = {
         plan: { id: 'pa3', spec: { name: 'test' }, nodeStates: new Map() } as any,
         node: {
@@ -637,16 +615,17 @@ suite('DefaultJobExecutor', () => {
         baseCommit: 'abc123',
         attemptNumber: 1,
       };
-      const result = await executor.execute(context);
+      const result = await failExecutor.execute(context);
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.failedPhase, 'work');
     });
 
-    test('handles agent delegator exception', async () => {
+    test('handles agent runner exception', async () => {
       const tmp = makeTmpDir();
-      executor.setAgentDelegator({
-        delegate: async () => { throw new Error('delegator error'); },
-      });
+      const errorExecutor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), new DefaultGitOperations(), {
+        ...mockCopilotRunner,
+        run: async () => { throw new Error('runner error'); },
+      } as any);
       const context = {
         plan: { id: 'pa4', spec: { name: 'test' }, nodeStates: new Map() } as any,
         node: {
@@ -659,7 +638,7 @@ suite('DefaultJobExecutor', () => {
         baseCommit: 'abc123',
         attemptNumber: 1,
       };
-      const result = await executor.execute(context);
+      const result = await errorExecutor.execute(context);
       assert.strictEqual(result.success, false);
     });
   });

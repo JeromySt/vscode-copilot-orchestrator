@@ -126,8 +126,9 @@ function renderAgentSpec(spec: any): string {
   html += renderSpecEnv(spec);
 
   if (spec.instructions) {
-    // Render instructions as formatted content with basic markdown support
-    html += `<div class="agent-instructions">${renderMarkdown(spec.instructions)}</div>`;
+    // Render instructions in a selectable container — Ctrl+A selects just
+    // the instructions (not the whole page), matching the logs section UX.
+    html += `<div class="agent-instructions" tabindex="0" data-selectable="true">${renderMarkdown(spec.instructions)}</div>`;
   }
   
   html += '</div>';

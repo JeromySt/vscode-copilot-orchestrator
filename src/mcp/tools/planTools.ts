@@ -54,6 +54,9 @@ export async function getPlanToolDefinitions(): Promise<McpTool[]> {
     ? modelResult.rawChoices
     : ['gpt-5', 'claude-sonnet-4.5'];
 
+  const effortSupported = modelResult.capabilities?.effort ?? false;
+  const effortChoices = modelResult.capabilities?.effortChoices ?? ['low', 'medium', 'high'];
+
   return [
     // =========================================================================
     // Plan CREATION
@@ -96,7 +99,7 @@ WORK OPTIONS (work/prechecks/postchecks/verifyRi accept):
 1. STRING: Shell command like "npm run build" or "@agent Do something" for AI
 2. PROCESS OBJECT: { "type": "process", "executable": "dotnet", "args": ["build"] }
 3. SHELL OBJECT: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }
+4. AGENT OBJECT: { "type": "agent", "instructions": "# Task\\n\\n1. Step one", "model": "claude-sonnet-4.5" }${effortSupported ? `\n5. AGENT WITH EFFORT: { "type": "agent", "instructions": "# Complex refactor\\n\\n1. Analyze\\n2. Implement", "effort": "high" }` : ''}
 
 ON_FAILURE CONFIG (optional on any work spec object):
 - noAutoHeal: true — prevents AI retry, requires manual intervention
@@ -196,6 +199,7 @@ NEXT STEPS after creation:
                   instructions: { type: 'string' },
                   model: { type: 'string' },
                   maxTurns: { type: 'number' },
+                  ...(effortSupported ? { effort: { type: 'string', enum: effortChoices, description: 'Reasoning effort level hint for the AI model. Controls depth of reasoning: low (fast/shallow), medium (balanced), high (thorough/deep).' } } : {}),
                   onFailure: { type: 'object' }
                 }
               }
@@ -243,7 +247,13 @@ For agent type, model goes INSIDE the work object. Available models: ${modelEnum
 Fast models (haiku/mini) for simple tasks, premium models (opus) for complex reasoning.
 IMPORTANT: For security-sensitive work (cryptography, authentication, authorization, input validation, secret handling, encryption, certificate management, or any code that handles sensitive data), ALWAYS use modelTier: 'premium' to ensure the most capable model reviews the code.
 IMPORTANT: For security-sensitive work (cryptography, authentication, authorization, input validation, secret handling, encryption, certificate management, or any code that handles sensitive data), ALWAYS use modelTier: 'premium' to ensure the most capable model reviews the code. Security bugs from weaker models are far more costly than the premium request overhead.
-
+${effortSupported ? `\nEFFORT HINT: For agent work, set 'effort' inside the work object to control how deeply the model reasons about the task. Valid values: ${effortChoices.map(c => `'${c}'`).join(', ')}.
+- 'low': Simple, well-defined tasks (formatting, renaming, boilerplate generation, straightforward test additions). Fastest execution, lowest token cost.
+- 'medium': Standard development tasks (implementing a feature from a spec, writing tests for existing code, refactoring with clear patterns). Good balance of quality and speed. This is the default behavior when effort is omitted.
+- 'high': Complex, nuanced, or security-critical tasks (cryptographic implementations, multi-file architectural refactors, debugging subtle race conditions, security reviews, protocol implementations). Deep reasoning for high quality output.
+- 'xhigh': Maximum reasoning depth. Use for the most challenging problems that require exhaustive analysis. Highest latency and token cost — reserve for tasks where absolute correctness is critical.
+Example: { "type": "agent", "instructions": "# Implement AES-256-GCM encryption", "effort": "high", "modelTier": "premium" }
+RULE: When modelTier is 'premium' for security-sensitive work, also consider setting effort to 'high' or 'xhigh' for maximum reasoning depth.` : ''}
 Agent instructions MUST be in Markdown format with headers, numbered lists, bullet lists.
 
 SKILL-AWARE INSTRUCTIONS: If the project has .github/skills/ directories, read the relevant SKILL.md files and incorporate their conventions, patterns, and rules directly into each agent's instructions. Match skills by task type — e.g., test-writer for testing tasks, di-refactor for DI/interface work, security-hardener for security reviews, documentation-writer for docs updates. This gives each agent the project-specific context it needs to produce correct, convention-following code.`,
@@ -493,11 +503,11 @@ NEW WORK OPTIONS:
 - String: Shell command like "npm run build" or "@agent Do something"
 - Process: { type: "process", executable: "node", args: ["script.js"] }
 - Shell: { type: "shell", command: "Get-ChildItem", shell: "powershell" }
-- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze error\\n2. Apply fix", resumeSession: true }
+- Agent: { type: "agent", instructions: "# Fix Issue\\n\\n1. Analyze error\\n2. Apply fix", resumeSession: true }${effortSupported ? `\n- Agent with effort: { type: "agent", instructions: "# Deep analysis needed\\n\\n1. Root cause\\n2. Fix", effort: "high" }` : ''}
 
 For agent work, resumeSession (default: true) controls whether to continue
 the existing Copilot session or start fresh.
-
+${effortSupported ? `For complex retry logic (debugging subtle issues), consider setting effort: 'high' to give the agent more reasoning depth.` : ''}
 IMPORTANT: Agent instructions MUST be in Markdown format (# headers, 1. numbered lists, - bullet lists).
 
 Options:
@@ -524,7 +534,7 @@ Options:
 4. AGENT: { "type": "agent", "instructions": "# Fix X\\n\\n1. Analyze\\n2. Fix", "resumeSession": true }
 
 For agent type, resumeSession (default: true) continues existing Copilot session.
-Agent instructions MUST be in Markdown format.`
+${effortSupported ? `For agent type, set effort (${effortChoices.join('/')}) to control reasoning depth. Use 'high' for retrying complex failures that need deeper analysis.` : ''}Agent instructions MUST be in Markdown format.`
           },
           newPrechecks: {
             description: 'Optional replacement prechecks for the retry. Same format as work specs. Use null to remove prechecks.'
@@ -769,11 +779,11 @@ EXAMPLES:
   Shell:  {"type": "shell", "command": "dotnet build", "shell": "powershell"}
   Agent:  {"type": "agent", "instructions": "# Task\\nImplement the feature..."}
   Agent file: {"type": "agent", "instructionsFile": ".github/prompts/task.md"}
-  Process: {"type": "process", "executable": "node", "args": ["build.js"]}
+  Process: {"type": "process", "executable": "node", "args": ["build.js"]}${effortSupported ? `\n  Agent with effort: {"type": "agent", "instructions": "# Complex refactor\\n1. Analyze patterns\\n2. Restructure", "effort": "high"}` : ''}
 
 LIMITS: name ≤80, task ≤200, instructions ≤100KB, work string ≤50KB.
-Use camelCase for properties: maxTurns, modelTier, allowedFolders, allowedUrls.
-
+Use camelCase for properties: maxTurns, modelTier, allowedFolders, allowedUrls${effortSupported ? ', effort' : ''}.
+${effortSupported ? `\nEFFORT (agent work only): Controls reasoning depth. Values: ${effortChoices.map(c => `'${c}'`).join(', ')}.\n- 'low': Simple/boilerplate tasks. Fast, low cost.\n- 'medium': Standard development (default when omitted).\n- 'high': Complex/security-critical tasks requiring deep reasoning.` : ''}
 RETURNS:
 { "success": true, "jobId": "producerId", "message": "Job 'producerId' added to plan 'planId'. Task: ..." }
 
@@ -811,7 +821,7 @@ NEXT: Continue adding jobs, then call finalize_copilot_plan when all jobs are ad
           },
           work: {
             description: `Work specification. String shorthand OR object with type field.
-Object properties: type (required: agent|shell|process), command, instructions (markdown), instructionsFile, model, modelTier (fast|standard|premium), maxTurns, shell (cmd|powershell|pwsh|bash|sh), allowedFolders, allowedUrls, executable, args, env.`,
+Object properties: type (required: agent|shell|process), command, instructions (markdown), instructionsFile, model, modelTier (fast|standard|premium), maxTurns, shell (cmd|powershell|pwsh|bash|sh), allowedFolders, allowedUrls, executable, args, env${effortSupported ? `, effort (${effortChoices.join('|')})` : ''}.${effortSupported ? `\nFor agent work, set effort to control reasoning depth: 'low' for simple tasks, 'medium' for standard work (default), 'high' for complex/security-critical tasks.` : ''}`,
             oneOf: [
               { type: 'string' },
               {
@@ -823,6 +833,7 @@ Object properties: type (required: agent|shell|process), command, instructions (
                   model: { type: 'string', enum: modelEnum },
                   modelTier: { type: 'string', enum: ['fast', 'standard', 'premium'] },
                   maxTurns: { type: 'number', minimum: 1, maximum: 100 },
+                  ...(effortSupported ? { effort: { type: 'string', enum: effortChoices, description: 'Reasoning effort level: low (simple/fast), medium (standard, default), high (complex/thorough). Set high for security-critical, architectural, or complex multi-file tasks.' } } : {}),
                   allowedFolders: { type: 'array', items: { type: 'string' } },
                   allowedUrls: { type: 'array', items: { type: 'string' } },
                   command: { type: 'string' },
@@ -897,13 +908,13 @@ NEXT STEPS:
 
 Each job in the array uses the same format as add_copilot_plan_job (producerId, task, work, etc.).
 Jobs can reference each other's producerIds in their dependencies arrays.
-
+${effortSupported ? `\nFor agent work, set effort inside the work object to control reasoning depth: ${effortChoices.map(c => `'${c}'`).join(', ')}. Use 'high' for complex/security-critical tasks, 'low' for simple/fast tasks.` : ''}
 EXAMPLE:
 {
   "planId": "abc123",
   "jobs": [
-    {"producerId": "setup", "task": "Create project scaffold", "work": {"type": "agent", "instructions": "..."}, "dependencies": []},
-    {"producerId": "impl", "task": "Implement feature", "work": {"type": "agent", "instructions": "..."}, "dependencies": ["setup"]},
+    {"producerId": "setup", "task": "Create project scaffold", "work": {"type": "agent", "instructions": "..."${effortSupported ? ', "effort": "low"' : ''}}, "dependencies": []},
+    {"producerId": "impl", "task": "Implement feature", "work": {"type": "agent", "instructions": "..."${effortSupported ? ', "effort": "high"' : ''}}, "dependencies": ["setup"]},
     {"producerId": "test", "task": "Write tests", "work": {"type": "agent", "instructions": "..."}, "dependencies": ["impl"]}
   ]
 }`,

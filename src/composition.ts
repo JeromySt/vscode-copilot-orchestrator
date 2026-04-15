@@ -58,6 +58,12 @@ import { GitHubPRService } from './git/remotePR/githubPRService';
 import { AdoPRService } from './git/remotePR/adoPRService';
 import { FileSystemReleaseStore } from './plan/store/releaseStore';
 import { DefaultReleasePRMonitor } from './plan/releasePRMonitor';
+import { OutputHandlerRegistry } from './process/outputHandlerRegistry';
+import { ManagedProcessFactory } from './process/managedProcessFactory';
+import { StatsHandlerFactory } from './agent/handlers/statsHandler';
+import { SessionIdHandlerFactory } from './agent/handlers/sessionIdHandler';
+import { TaskCompleteHandlerFactory } from './agent/handlers/taskCompleteHandler';
+import { ContextPressureHandlerFactory } from './agent/handlers/contextPressureHandler';
 
 /**
  * Create and wire the production DI container.
@@ -102,6 +108,27 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     () => new DefaultProcessSpawner(),
   );
 
+  // ─── Output Handler Registry & Managed Process Factory ──────────────
+  const registry = new OutputHandlerRegistry();
+  container.registerSingleton<import('./interfaces/IOutputHandlerRegistry').IOutputHandlerRegistry>(
+    Tokens.IOutputHandlerRegistry,
+    () => registry,
+  );
+
+  registry.registerFactory(StatsHandlerFactory);
+  registry.registerFactory(SessionIdHandlerFactory);
+  registry.registerFactory(TaskCompleteHandlerFactory);
+  registry.registerFactory(ContextPressureHandlerFactory);
+
+  container.registerSingleton<import('./interfaces/IManagedProcessFactory').IManagedProcessFactory>(
+    Tokens.IManagedProcessFactory,
+    (c) => {
+      const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
+      const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
+      return new ManagedProcessFactory(registry, spawner, env);
+    },
+  );
+
   // Process monitoring (now with spawner dependency)
   container.registerSingleton<import('./interfaces').IProcessMonitor>(
     Tokens.IProcessMonitor,
@@ -143,7 +170,9 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
     (c) => {
       const spawner = c.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
       const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
-      return new CopilotCliRunner(undefined, spawner, env);
+      const config = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
+      const managedFactory = c.resolve<import('./interfaces/IManagedProcessFactory').IManagedProcessFactory>(Tokens.IManagedProcessFactory);
+      return new CopilotCliRunner(undefined, spawner, env, config, managedFactory);
     },
   );
 
@@ -156,7 +185,8 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const processMonitor = c.resolve<import('./interfaces').IProcessMonitor>(Tokens.IProcessMonitor);
       const git = c.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
       const copilotRunner = c.resolve<import('./interfaces/ICopilotRunner').ICopilotRunner>(Tokens.ICopilotRunner);
-      return new DefaultJobExecutor(spawner, evidenceValidator, processMonitor, git, copilotRunner);
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      return new DefaultJobExecutor(spawner, evidenceValidator, processMonitor, git, copilotRunner, fileSystem);
     },
   );
 
@@ -282,6 +312,15 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   container.register(
     Tokens.IBulkPlanActions,
     () => { throw new Error('IBulkPlanActions must be resolved from a scoped container with a PlanRunner'); },
+  );
+
+  // ─── Context Pressure Monitor ────────────────────────────────────────
+  // Transient — a new instance is created per agent delegation.
+  // Callers must resolve from a scoped container that overrides this registration
+  // with the delegation-specific identity (planId, nodeId, attemptNumber, agentPhase).
+  container.register(
+    Tokens.IContextPressureMonitor,
+    () => { throw new Error('IContextPressureMonitor must be resolved from a scoped container with delegation context'); },
   );
 
   // ─── Release Store ──────────────────────────────────────────────────

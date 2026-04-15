@@ -26,7 +26,7 @@ suite('workPhase edge cases', () => {
   test('WorkPhaseExecutor construction', async () => {
     const workPhase = await import('../../../plan/phases/workPhase');
     const executor = new workPhase.WorkPhaseExecutor({
-      agentDelegator: undefined,
+      copilotRunner: undefined,
       spawner: { spawn: () => ({} as any) },
     });
     assert.ok(executor);

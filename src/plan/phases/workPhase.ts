@@ -10,6 +10,7 @@
 import * as path from 'path';
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
+import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
 import { normalizeWorkSpec } from '../types';
 import type { ProcessSpec, ShellSpec, AgentSpec, CopilotUsageMetrics } from '../types';
 import { killProcessTree } from '../../process/processHelpers';
@@ -121,9 +122,10 @@ export function runShell(spec: ShellSpec, ctx: PhaseContext, spawner: IProcessSp
 /** Run agent work. */
 export async function runAgent(
   spec: AgentSpec, ctx: PhaseContext,
-  agentDelegator: any | undefined,
+  copilotRunner: ICopilotRunner | undefined,
+  spawner?: IProcessSpawner,
 ): Promise<PhaseResult> {
-  if (!agentDelegator) {return { success: false, error: 'Agent work requires an agent delegator to be configured' };}
+  if (!copilotRunner) {return { success: false, error: 'Agent work requires a Copilot runner to be configured' };}
   ctx.setIsAgentWork(true);
   const startTime = Date.now();
   ctx.setStartTime(startTime);
@@ -145,28 +147,50 @@ export async function runAgent(
   if (resolvedModel) {ctx.logInfo(`Using model: ${resolvedModel}`);}
   if (spec.contextFiles?.length) {ctx.logInfo(`Agent context files: ${spec.contextFiles.join(', ')}`);}
   if (spec.maxTurns) {ctx.logInfo(`Agent max turns: ${spec.maxTurns}`);}
+  if (spec.effort) {ctx.logInfo(`Agent effort: ${spec.effort}`);}
   if (spec.context) {ctx.logInfo(`Agent context: ${spec.context}`);}
   if (ctx.sessionId) {ctx.logInfo(`Resuming Copilot session: ${ctx.sessionId}`);}
   if (spec.allowedFolders?.length) {ctx.logInfo(`Agent allowed folders: ${spec.allowedFolders.join(', ')}`);}
   if (spec.allowedUrls?.length) {ctx.logInfo(`Agent allowed URLs: ${spec.allowedUrls.join(', ')}`);}
   if (ctx.env) {ctx.logInfo(`Plan/spec environment override keys: ${Object.keys(ctx.env).join(', ')}`);}
+
+  // Resolve effort: only pass through if CLI supports --effort
+  let resolvedEffort = spec.effort;
+  if (resolvedEffort) {
+    try {
+      const { hasEffortSupport } = await import('../../agent/modelDiscovery');
+      const supported = await hasEffortSupport();
+      if (!supported) {
+        ctx.logInfo(`Effort '${resolvedEffort}' specified but CLI does not support --effort — ignoring`);
+        resolvedEffort = undefined;
+      }
+    } catch { /* fallback: skip effort if discovery fails */ resolvedEffort = undefined; }
+  }
+
   try {
-    const result = await agentDelegator.delegate({
+    const result = await copilotRunner.run({
+      cwd: ctx.worktreePath,
       task: spec.instructions,
       instructions: ctx.node.instructions || spec.context,
-      worktreePath: ctx.worktreePath, model: resolvedModel,
-      contextFiles: spec.contextFiles, maxTurns: spec.maxTurns,
-      sessionId: ctx.sessionId, jobId: ctx.node.id,
-      allowedFolders: spec.allowedFolders, allowedUrls: spec.allowedUrls,
+      label: 'agent',
+      model: resolvedModel,
+      sessionId: ctx.sessionId,
+      jobId: ctx.node.id,
+      planId: ctx.planId,
+      allowedFolders: spec.allowedFolders,
+      allowedUrls: spec.allowedUrls,
       configDir: ctx.configDir,
       env: ctx.env,
-      logOutput: (line: string) => ctx.logInfo(line),
+      effort: resolvedEffort,
+      timeout: 0,
+      spawnerOverride: spawner,
+      onOutput: (line: string) => ctx.logInfo(`[copilot] ${line}`),
       onProcess: (proc: any) => { ctx.setProcess(proc); ctx.setIsAgentWork(true); },
     });
     const durationMs = Date.now() - startTime;
     let metrics: CopilotUsageMetrics;
     if (result.metrics) { metrics = { ...result.metrics, durationMs }; }
-    else { metrics = { durationMs }; if (result.tokenUsage) {metrics.tokenUsage = result.tokenUsage;} }
+    else { metrics = { durationMs }; }
     if (result.success) {
       ctx.logInfo('Agent completed successfully');
       if (result.sessionId) {ctx.logInfo(`Captured session ID: ${result.sessionId}`);}
@@ -182,14 +206,14 @@ export async function runAgent(
 
 /** Executes the main work phase of a job node. */
 export class WorkPhaseExecutor implements IPhaseExecutor {
-  private agentDelegator?: any;
+  private copilotRunner?: ICopilotRunner;
   private spawner: IProcessSpawner;
   
   constructor(deps: { 
-    agentDelegator?: any; 
+    copilotRunner?: ICopilotRunner; 
     spawner: IProcessSpawner;
   }) {
-    this.agentDelegator = deps.agentDelegator;
+    this.copilotRunner = deps.copilotRunner;
     this.spawner = deps.spawner;
   }
   
@@ -200,7 +224,7 @@ export class WorkPhaseExecutor implements IPhaseExecutor {
     switch (normalized.type) {
       case 'process': return runProcess(normalized as ProcessSpec, context, this.spawner);
       case 'shell': return runShell(normalized as ShellSpec, context, this.spawner);
-      case 'agent': return runAgent(normalized as AgentSpec, context, this.agentDelegator);
+      case 'agent': return runAgent(normalized as AgentSpec, context, this.copilotRunner, this.spawner);
       default: return { success: false, error: `Unknown work type: ${(normalized as any).type}` };
     }
   }

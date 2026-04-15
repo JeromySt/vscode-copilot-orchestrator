@@ -36,14 +36,17 @@ You have Copilot. It's great at coding tasks. But it works **one task at a time*
 | 📊 **Interactive DAG Visualization** | See your entire plan as a live, zoomable Mermaid dependency graph |
 | ⚡ **Automated 8-Phase Pipeline** | Merge FI → Prechecks → AI Work → Commit → Postchecks → Merge RI → Verify RI → Cleanup |
 | 🔧 **Multi-Retry Auto-Heal** | Failed phases automatically retried up to 4 times with fresh AI agents and failure context |
+| 🧠 **Context Pressure Management** | Auto-detects agent context exhaustion, checkpoints work, and splits into sub-jobs with fresh context |
 | 📈 **Timeline Gantt Chart** | [Experimental] Pixel-perfect timeline showing execution history with phases, retries, and durations |
-| 🤖 **29 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
+| 🤖 **31 Native MCP Tools** | Create and manage plans and releases directly from GitHub Copilot Chat |
 | 🚀 **Release Management** | Combine multiple plans into a single PR with autonomous monitoring (GitHub/GHE/Azure DevOps) |
 | 📁 **Visual Release Grouping** | Plans tab automatically groups plans by release with collapsible containers and status badges |
+| 🎯 **Effort / Reasoning Hints** | Control model reasoning depth per job — low, medium, high, or xhigh |
 | ⏸️ **Pause / Resume / Retry** | Pause running plans, resume later, or retry failed nodes with AI failure context |
 | 🔒 **Secure MCP Architecture** | Nonce-authenticated IPC ensures 1:1 pairing between VS Code and MCP stdio process |
 | 🛡️ **Default Branch Protection** | Auto-creates feature branches when targeting main/master — never writes to default |
 | 📡 **Live Process Monitoring** | Real-time CPU, memory, and process tree visibility for every running agent |
+| 🔌 **Process Output Bus** | Pluggable, process-agnostic output handling with handler registry and log file tailing |
 | 💤 **Sleep Prevention** | Automatically prevents system sleep during plan execution (Windows, macOS, Linux) |
 | 🌐 **Multi-Instance Coordination** | Global job capacity limits across all VS Code instances on the same machine |
 | 🧹 **Auto Worktree Cleanup** | Orphaned worktree directories are automatically detected and removed on startup |
@@ -266,7 +269,59 @@ Work specs can include an `onFailure` (or snake_case `on_failure`) configuration
 
 This is used internally by the snapshot-validation node to force-fail (rather than auto-heal) when `targetBranch` is in an unrecoverable state, and to control retry reset points for different failure modes.
 
-### � Timeline Visualization (Experimental)
+### 🧠 Context Pressure Management (v0.16.0+)
+
+When a Copilot CLI agent runs a complex job, its context window fills with tool outputs, file reads, and conversation history. At some point, the model loses critical information and output quality degrades — stubs, placeholders, incomplete implementations.
+
+**Context Pressure Management** automatically detects this, checkpoints the agent's work, and splits remaining work into sub-jobs with fresh context windows:
+
+1. **Detection** — `ContextPressureMonitor` tracks token usage from debug logs. Threshold-based classification (normal → elevated → critical) with EMA growth rate prediction.
+2. **Signal** — When critical threshold is reached, the orchestrator writes a sentinel file. The agent (trained via injected protocol preamble) commits partial work and writes a checkpoint manifest describing remaining tasks.
+3. **Split** — `DefaultJobSplitter` converts the manifest into parallel sub-jobs. The original node transitions through `completed_split` state while the DAG reshapes.
+4. **Fan-in** — A validation node collects all sub-job results, verifying the combined work is complete.
+
+**Visual indicators:**
+- Context pressure card in the node detail panel shows fill %, growth rate, and split risk
+- Mermaid DAG shows checkpointed nodes (`⑃`), fan-in nodes (`⇉`), and sub-job numbering
+- Post-split attempt cards display tokens consumed/max and sub-job navigation links
+
+**Configuration:**
+```json
+{
+  "copilotOrchestrator.contextPressure.enabled": true,
+  "copilotOrchestrator.contextPressure.elevatedThreshold": 50,
+  "copilotOrchestrator.contextPressure.criticalThreshold": 75,
+  "copilotOrchestrator.contextPressure.maxSplitDepth": 3,
+  "copilotOrchestrator.contextPressure.maxSubJobs": 8
+}
+```
+
+See [docs/CONTEXT_PRESSURE_DESIGN.md](docs/CONTEXT_PRESSURE_DESIGN.md) for the detailed design document.
+
+### 🎯 Effort / Reasoning Hints (v0.16.0+)
+
+Control the model reasoning depth per job using the `effort` field on agent work specs:
+
+```json
+{
+  "work": {
+    "type": "agent",
+    "instructions": "Implement cryptographic key rotation...",
+    "effort": "xhigh"
+  }
+}
+```
+
+| Level | Use Case |
+|-------|----------|
+| `low` | Simple formatting, renaming, boilerplate |
+| `medium` | Standard coding tasks (default) |
+| `high` | Complex logic, multi-file refactoring |
+| `xhigh` | Cryptography, protocol design, state machines |
+
+Use `bulk_update_copilot_plan_jobs` to set effort across multiple jobs at once.
+
+### 📈 Timeline Visualization (Experimental)
 
 **Note:** This feature is opt-in and disabled by default. Enable via Settings → "Copilot Orchestrator: Experimental: Show Timeline".
 

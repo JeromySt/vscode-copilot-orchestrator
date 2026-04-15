@@ -169,9 +169,9 @@ suite('CommitPhaseExecutor - Coverage', () => {
       const logs: LogEntry[] = [];
       let capturedInstructions = '';
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
+        run: sinon.stub().callsFake(async (opts: any) => {
           capturedInstructions = opts.instructions;
-          opts.logOutput('[ai-review] {"legitimate": true, "reason": "using hydrated work"}');
+          opts.onOutput('[ai-review] {"legitimate": true, "reason": "using hydrated work"}');
           return { success: true };
         }),
       };
@@ -187,7 +187,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 
@@ -216,9 +216,9 @@ suite('CommitPhaseExecutor - Coverage', () => {
       const logs: LogEntry[] = [];
       let capturedInstructions = '';
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
+        run: sinon.stub().callsFake(async (opts: any) => {
           capturedInstructions = opts.instructions;
-          opts.logOutput('[ai-review] {"legitimate": true, "reason": "using node.work"}');
+          opts.onOutput('[ai-review] {"legitimate": true, "reason": "using node.work"}');
           return { success: true };
         }),
       };
@@ -228,7 +228,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 
@@ -255,9 +255,9 @@ suite('CommitPhaseExecutor - Coverage', () => {
       const logs: LogEntry[] = [];
       let capturedInstructions = '';
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
+        run: sinon.stub().callsFake(async (opts: any) => {
           capturedInstructions = opts.instructions;
-          opts.logOutput('[ai-review] {"legitimate": true, "reason": "parsed JSON"}');
+          opts.onOutput('[ai-review] {"legitimate": true, "reason": "parsed JSON"}');
           return { success: true };
         }),
       };
@@ -270,7 +270,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 
@@ -350,9 +350,9 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       let capturedInstructions = '';
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
+        run: sinon.stub().callsFake(async (opts: any) => {
           capturedInstructions = opts.instructions;
-          opts.logOutput('[ai-review] {"legitimate": true, "reason": "analysis complete"}');
+          opts.onOutput('[ai-review] {"legitimate": true, "reason": "analysis complete"}');
           return { success: true, metrics: { durationMs: 100 } };
         }),
       };
@@ -364,7 +364,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 
@@ -392,11 +392,11 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const reviewLogs: LogEntry[] = [];
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
+        run: sinon.stub().callsFake(async (opts: any) => {
           // Simulate output where individual lines don't parse but combined does
           // This happens when JSON spans multiple log calls with different prefixes
-          opts.logOutput('Analyzing logs...');
-          opts.logOutput('[ai-review] Result: {"legitimate": true, "reason": "parsed from combined"}');
+          opts.onOutput('Analyzing logs...');
+          opts.onOutput('[ai-review] Result: {"legitimate": true, "reason": "parsed from combined"}');
           return { success: true };
         }),
       };
@@ -406,7 +406,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 
@@ -429,9 +429,9 @@ suite('CommitPhaseExecutor - Coverage', () => {
       const logs: LogEntry[] = [];
       let capturedInstructions = '';
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
+        run: sinon.stub().callsFake(async (opts: any) => {
           capturedInstructions = opts.instructions;
-          opts.logOutput('[ai-review] {"legitimate": true, "reason": "shell work"}');
+          opts.onOutput('[ai-review] {"legitimate": true, "reason": "shell work"}');
           return { success: true };
         }),
       };
@@ -441,7 +441,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 
@@ -464,8 +464,8 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const logs: LogEntry[] = [];
       const delegator = {
-        delegate: sinon.stub().callsFake(async (opts: any) => {
-          opts.logOutput('[ai-review] This is not valid JSON at all');
+        run: sinon.stub().callsFake(async (opts: any) => {
+          opts.onOutput('[ai-review] This is not valid JSON at all');
           return { success: true };
         }),
       };
@@ -475,7 +475,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
 
       const executor = new CommitPhaseExecutor({
         evidenceValidator: mockEvidenceValidator(),
-        agentDelegator: delegator,
+        copilotRunner: delegator as any,
         git,
       });
 

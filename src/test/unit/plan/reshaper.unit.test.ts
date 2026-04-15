@@ -1041,4 +1041,92 @@ suite('reshaper', () => {
       assert.strictEqual(result.success, true);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // group registration on addNode
+  // -----------------------------------------------------------------------
+  suite('addNode group registration', () => {
+    test('creates group hierarchy and registers node', () => {
+      const a = makeNode('a-id', { producerId: 'a' });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      const plan = makePlan([a], states);
+
+      const result = addNode(plan, makeSpec('sub1', ['a'], { group: 'Agent Work' }));
+
+      assert.strictEqual(result.success, true);
+      // Group should be registered in groupPathToId
+      const groupId = plan.groupPathToId.get('Agent Work');
+      assert.ok(groupId, 'group path should be in groupPathToId');
+      // Group instance should exist
+      const group = plan.groups.get(groupId!);
+      assert.ok(group, 'GroupInstance should exist');
+      assert.strictEqual(group!.name, 'Agent Work');
+      assert.strictEqual(group!.path, 'Agent Work');
+      assert.ok(group!.nodeIds.includes(result.nodeId!));
+      assert.ok(group!.allNodeIds.includes(result.nodeId!));
+      assert.strictEqual(group!.totalNodes, 1);
+      // GroupExecutionState should exist
+      const gs = plan.groupStates.get(groupId!);
+      assert.ok(gs, 'GroupExecutionState should exist');
+      assert.strictEqual(gs!.status, 'pending');
+      // Node should have groupId set
+      const node = plan.jobs.get(result.nodeId!);
+      assert.strictEqual((node as any).groupId, groupId);
+    });
+
+    test('reuses existing group for multiple nodes', () => {
+      const a = makeNode('a-id', { producerId: 'a' });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      const plan = makePlan([a], states);
+
+      const r1 = addNode(plan, makeSpec('sub1', ['a'], { group: 'SplitGroup' }));
+      const r2 = addNode(plan, makeSpec('sub2', ['a'], { group: 'SplitGroup' }));
+
+      assert.strictEqual(r1.success, true);
+      assert.strictEqual(r2.success, true);
+      const groupId = plan.groupPathToId.get('SplitGroup');
+      const group = plan.groups.get(groupId!);
+      assert.strictEqual(group!.nodeIds.length, 2);
+      assert.strictEqual(group!.totalNodes, 2);
+    });
+
+    test('creates nested group hierarchy', () => {
+      const a = makeNode('a-id', { producerId: 'a' });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      const plan = makePlan([a], states);
+
+      const result = addNode(plan, makeSpec('sub1', ['a'], { group: 'parent/child' }));
+
+      assert.strictEqual(result.success, true);
+      const parentId = plan.groupPathToId.get('parent');
+      const childId = plan.groupPathToId.get('parent/child');
+      assert.ok(parentId);
+      assert.ok(childId);
+      const parent = plan.groups.get(parentId!);
+      const child = plan.groups.get(childId!);
+      assert.ok(parent!.childGroupIds.includes(childId!));
+      assert.strictEqual(child!.parentGroupId, parentId);
+      // Node registered in child group, propagated to parent
+      assert.ok(child!.nodeIds.includes(result.nodeId!));
+      assert.ok(parent!.allNodeIds.includes(result.nodeId!));
+      assert.strictEqual(parent!.totalNodes, 1);
+    });
+
+    test('no group — node has no groupId', () => {
+      const a = makeNode('a-id', { producerId: 'a' });
+      const states = new Map<string, NodeExecutionState>();
+      states.set('a-id', makeState('succeeded', { completedCommit: 'abc' }));
+      const plan = makePlan([a], states);
+
+      const result = addNode(plan, makeSpec('b', ['a']));
+
+      assert.strictEqual(result.success, true);
+      const node = plan.jobs.get(result.nodeId!);
+      assert.strictEqual((node as any).groupId, undefined);
+      assert.strictEqual(plan.groups.size, 0);
+    });
+  });
 });

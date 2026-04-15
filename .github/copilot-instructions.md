@@ -12,7 +12,7 @@ Extension.ts → createContainer() → DI Container (ServiceContainer)
   │   ├─ PlanEventEmitter (typed pub/sub for UI)
   │   └─ PlanPersistence (state save/load)
   ├─ MCP Server (stdio JSON-RPC → IPC bridge → tool handlers)
-  ├─ AgentDelegator (spawns Copilot CLI in worktrees)
+  ├─ CopilotCliRunner (spawns Copilot CLI in worktrees via ICopilotRunner)
   └─ UI Layer (TreeView, Webview panels, status bar)
 ```
 

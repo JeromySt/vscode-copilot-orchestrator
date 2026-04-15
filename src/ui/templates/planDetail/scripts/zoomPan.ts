@@ -103,7 +103,7 @@ export function renderZoomPan(): string {
       panStartX = e.clientX;
       panStartY = e.clientY;
       scrollStartX = diagramEl.scrollLeft;
-      scrollStartY = diagramEl.scrollTop;
+      scrollStartY = window.scrollY || document.documentElement.scrollTop;
       diagramEl.classList.add('panning');
       e.preventDefault();
     });
@@ -119,8 +119,10 @@ export function renderZoomPan(): string {
         didPan = true;
       }
       
+      // Horizontal: pan the diagram container
       diagramEl.scrollLeft = scrollStartX - dx;
-      diagramEl.scrollTop = scrollStartY - dy;
+      // Vertical: scroll the page
+      window.scrollTo(window.scrollX, scrollStartY - dy);
     });
     
     document.addEventListener('mouseup', () => {

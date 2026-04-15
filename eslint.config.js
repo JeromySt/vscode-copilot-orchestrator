@@ -37,10 +37,6 @@ const diSelectors = [
     selector: "NewExpression[callee.name='CopilotCliRunner']",
     message: 'Use ICopilotRunner from DI container instead of new CopilotCliRunner().',
   },
-  {
-    selector: "NewExpression[callee.name='AgentDelegator']",
-    message: 'Resolve AgentDelegator through DI instead of direct construction.',
-  },
   // -- Plan --
   {
     selector: "NewExpression[callee.name='PlanPersistence']",
@@ -305,7 +301,6 @@ module.exports = [
     files: [
       'src/core/logger.ts',
       'src/plan/logFileHelper.ts',
-      'src/agent/agentDelegator.ts',
       // fs usage in plan engine and repository (tracked for DI migration)
       'src/plan/runner.ts',
       'src/plan/repository/DefaultPlanRepository.ts',

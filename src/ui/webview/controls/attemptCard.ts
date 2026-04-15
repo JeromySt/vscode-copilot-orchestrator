@@ -14,6 +14,26 @@ import { Topics } from '../topics';
 // VS Code webview API global (injected by the webview host)
 declare const vscode: { postMessage(msg: unknown): void };
 
+/** Sub-job info for context pressure checkpoint display. */
+export interface SubJobInfo {
+  producerId: string;
+  nodeId: string;
+  name: string;
+  status: string;
+}
+
+/** Context pressure checkpoint data for post-split view. */
+export interface CheckpointData {
+  pressure: number;
+  tokensConsumed?: number;
+  maxTokens?: number;
+  subJobCount: number;
+  subJobs: SubJobInfo[];
+  fanInJobId: string;
+  manifestJson?: string;
+  planId: string;
+}
+
 /** Single attempt data from the backend. */
 export interface AttemptCardData {
   attemptNumber: number;
@@ -35,6 +55,16 @@ export interface AttemptCardData {
   logs?: string;
   metricsHtml?: string;
   expanded?: boolean;
+  contextPressureCheckpoint?: CheckpointData;
+  contextPressureSnapshot?: {
+    level: string;
+    currentInputTokens: number;
+    maxPromptTokens?: number;
+    compactionDetected: boolean;
+    modelBreakdown?: Array<{ model: string; inputTokens: number; outputTokens: number; cachedTokens: number; turns: number }>;
+    totalTurns?: number;
+    turnsPerSecond?: number;
+  };
 }
 
 /** Batch update payload from the backend. */
@@ -101,6 +131,12 @@ export class AttemptCard extends SubscribableControl {
   private currentStreamPhase = 'unknown';
   /** Plan-level env vars HTML (set once from first attemptUpdate). */
   private planEnvHtml = '';
+  /** Structure key to skip no-op rebuilds. */
+  private _lastStructureKey = '';
+  /** Track which attempts have been rendered to DOM (attemptNumber → last status). */
+  private _renderedAttempts = new Map<number, string>();
+  /** Cache of last attempt data for differential updates. */
+  private _lastAttemptData = new Map<number, AttemptCardData>();
 
   constructor(bus: EventBus, controlId: string, selector: string) {
     super(bus, controlId);
@@ -113,7 +149,7 @@ export class AttemptCard extends SubscribableControl {
     this.subscribe(Topics.PULSE, () => this.tickDurations());
     // Handle subscription data (log deltas/full from extension host)
     this.subscribe(Topics.SUBSCRIPTION_DATA, (msg?: { tag?: string; full?: boolean; content?: string }) => {
-      if (msg?.tag && msg.content !== undefined) {
+      if (msg?.tag && typeof msg.content === 'string') {
         this.handleSubscriptionData(msg.tag, msg.content, !!msg.full);
       }
     });
@@ -320,20 +356,52 @@ export class AttemptCard extends SubscribableControl {
     const container = document.querySelector(this.selector) as HTMLElement | null;
     if (!container) return;
 
+    // Determine if we need a full rebuild or can do differential updates
+    const sorted = attempts.slice().sort((a, b) => b.attemptNumber - a.attemptNumber);
+    const currentAttemptNums = new Set(sorted.map(a => a.attemptNumber));
+    const needsFullRebuild = sorted.some(a => !this._renderedAttempts.has(a.attemptNumber));
+
+    if (needsFullRebuild) {
+      // Save page scroll before full innerHTML replacement
+      const savedY = window.scrollY || document.documentElement.scrollTop;
+      const savedX = window.scrollX || document.documentElement.scrollLeft;
+      this._fullRebuild(container, sorted);
+      // Restore page scroll after DOM replacement
+      requestAnimationFrame(() => { window.scrollTo(savedX, savedY); });
+    } else {
+      // All attempts already rendered — do differential updates only
+      for (const att of sorted) {
+        this._differentialUpdate(att);
+      }
+    }
+
+    // Cache latest data
+    for (const att of sorted) {
+      this._lastAttemptData.set(att.attemptNumber, att);
+    }
+  }
+
+  /** Full rebuild — only called when new attempts appear. */
+  private _fullRebuild(container: HTMLElement, sorted: AttemptCardData[]): void {
+
     // Preserve expanded state
     container.querySelectorAll('.attempt-card[data-expanded="true"]').forEach(el => {
       const num = parseInt(el.getAttribute('data-attempt') || '0', 10);
       if (num) this.expandedAttempts.add(num);
     });
 
-    // Build HTML — latest first
-    const sorted = attempts.slice().sort((a, b) => b.attemptNumber - a.attemptNumber);
     // Auto-expand the latest attempt if nothing else is expanded
     if (this.expandedAttempts.size === 0 && sorted.length > 0) {
       this.expandedAttempts.add(sorted[0].attemptNumber);
     }
     const html = sorted.map(att => this.renderCard(att)).join('');
-    container.innerHTML = '<div class="section"><h3>Attempt History (' + attempts.length + ')</h3>' + html + '</div>';
+    container.innerHTML = '<div class="section"><h3>Attempt History (' + sorted.length + ')</h3>' + html + '</div>';
+
+    // Track rendered attempts
+    this._renderedAttempts.clear();
+    for (const att of sorted) {
+      this._renderedAttempts.set(att.attemptNumber, att.status);
+    }
 
     // Wire up click handlers for expand/collapse
     container.querySelectorAll('.attempt-header').forEach(header => {
@@ -426,6 +494,35 @@ export class AttemptCard extends SubscribableControl {
       });
     });
 
+    // Wire up checkpoint sub-job link clicks — navigate to sub-job node detail
+    container.querySelectorAll('.cp-subjob-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const el = e.currentTarget as HTMLElement;
+        const nodeId = el.getAttribute('data-node-id');
+        const planId = el.getAttribute('data-plan-id');
+        if (nodeId && planId) {
+          vscode.postMessage({ type: 'openNode', planId, nodeId });
+        }
+      });
+    });
+
+    // Wire up manifest expand/collapse toggles
+    container.querySelectorAll('.cp-manifest-toggle').forEach(toggle => {
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const el = e.currentTarget as HTMLElement;
+        const targetId = el.getAttribute('data-target');
+        if (!targetId) return;
+        const content = document.getElementById(targetId);
+        if (!content) return;
+        const isHidden = content.style.display === 'none';
+        content.style.display = isHidden ? 'block' : 'none';
+        el.textContent = isHidden ? '\uD83D\uDCCB Manifest \u25BE' : '\uD83D\uDCCB Manifest \u25B8';
+      });
+    });
+
     // Re-subscribe and restore content for all expanded attempts.
     // Always re-subscribe even if buffer exists — the DOM was just replaced,
     // so the extension host needs to know we still want data.
@@ -445,6 +542,193 @@ export class AttemptCard extends SubscribableControl {
         }
       }
     }
+  }
+
+  /**
+   * Differential update — update individual DOM elements within an existing attempt card
+   * without rebuilding the entire HTML. This preserves live controls (context pressure,
+   * log viewers, checkpoint sub-job badges) and prevents DOM destruction.
+   */
+  private _differentialUpdate(att: AttemptCardData): void {
+    const card = document.querySelector('.attempt-card[data-attempt="' + att.attemptNumber + '"]') as HTMLElement | null;
+    if (!card) return;
+
+    const prev = this._lastAttemptData.get(att.attemptNumber);
+
+    // ── Header: status icon + color ──
+    if (!prev || prev.status !== att.status) {
+      const statusColor = att.status === 'succeeded' ? '#4ec9b0'
+        : att.status === 'failed' ? '#f48771'
+        : att.status === 'running' ? '#3794ff' : '#858585';
+      const statusIcon = att.status === 'succeeded' ? '\u2713'
+        : att.status === 'failed' ? '\u2717'
+        : att.status === 'running' ? '\u25B6' : '\u2298';
+      card.style.borderLeftColor = statusColor;
+      const iconEl = card.querySelector('.attempt-status-icon') as HTMLElement;
+      if (iconEl) { iconEl.style.color = statusColor; iconEl.textContent = statusIcon; }
+      this._renderedAttempts.set(att.attemptNumber, att.status);
+    }
+
+    // ── Header: duration ──
+    const durEl = card.querySelector('.attempt-duration') as HTMLElement;
+    if (durEl && att.startedAt) {
+      if (att.status === 'running') {
+        durEl.textContent = formatDuration(Math.round((Date.now() - att.startedAt) / 1000)) + '\u2026';
+        if (!durEl.dataset.started) { durEl.dataset.started = String(att.startedAt); }
+      } else if (att.endedAt) {
+        durEl.textContent = formatDuration(Math.round((att.endedAt - att.startedAt) / 1000));
+        durEl.removeAttribute('data-started');
+      }
+    }
+
+    // ── Header: step status indicators ──
+    if (att.stepStatuses) {
+      const indicators = card.querySelector('.step-indicators');
+      if (indicators) {
+        const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+        const icons = indicators.querySelectorAll('.step-icon');
+        phases.forEach((p, i) => {
+          if (icons[i]) {
+            const s = att.stepStatuses![p];
+            const icon = s === 'success' || s === 'succeeded' ? '\u2713'
+              : s === 'failed' ? '\u2717'
+              : s === 'running' ? '\u27F3'
+              : s === 'skipped' ? '\u2298' : '\u2022';
+            const cls = s === 'success' || s === 'succeeded' ? 'success'
+              : s === 'failed' ? 'failed'
+              : s === 'running' ? 'running'
+              : s === 'skipped' ? 'skipped' : 'pending';
+            icons[i].className = 'step-icon ' + cls;
+            icons[i].textContent = icon;
+          }
+        });
+      }
+    }
+
+    // ── Phase tabs: update status classes ──
+    if (att.stepStatuses) {
+      const tabContainer = card.querySelector('.attempt-phase-tabs');
+      if (tabContainer) {
+        tabContainer.querySelectorAll('.attempt-phase-tab').forEach(tab => {
+          const phase = tab.getAttribute('data-phase');
+          if (!phase || phase === 'all') return;
+          const pStatus = att.stepStatuses![phase] || '';
+          tab.classList.remove('success', 'failed', 'skipped', 'running');
+          if (pStatus === 'success' || pStatus === 'succeeded') tab.classList.add('success');
+          else if (pStatus === 'failed') tab.classList.add('failed');
+          else if (pStatus === 'skipped') tab.classList.add('skipped');
+          else if (pStatus === 'running') tab.classList.add('running');
+        });
+      }
+    }
+
+    // ── Error section: insert if error appeared ──
+    if (att.error && (!prev || !prev.error)) {
+      const body = card.querySelector('.attempt-body') as HTMLElement;
+      if (body) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'attempt-section attempt-error-section';
+        errorDiv.innerHTML = '<div class="attempt-section-title">\u274C Error</div>'
+          + '<div class="attempt-error-body">'
+          + '<div class="attempt-error-msg">' + escapeHtml(att.error) + '</div>'
+          + (att.failedPhase ? '<div class="attempt-error-detail">Failed in phase: <strong>' + escapeHtml(att.failedPhase) + '</strong></div>' : '')
+          + (att.exitCode !== undefined ? '<div class="attempt-error-detail">Exit code: <strong>' + att.exitCode + '</strong></div>' : '')
+          + '</div>';
+        body.insertBefore(errorDiv, body.firstChild);
+      }
+    }
+
+    // ── Metrics section: update if metrics arrived ──
+    if (att.metricsHtml && (!prev || !prev.metricsHtml)) {
+      let metricsSection = card.querySelector('.attempt-section .attempt-section-title');
+      // Find existing metrics section or create one
+      let found = false;
+      card.querySelectorAll('.attempt-section-title').forEach(t => {
+        if (t.textContent?.includes('AI Usage')) { found = true; }
+      });
+      if (!found) {
+        const body = card.querySelector('.attempt-body') as HTMLElement;
+        if (body) {
+          const metricsDiv = document.createElement('div');
+          metricsDiv.className = 'attempt-section';
+          metricsDiv.innerHTML = '<div class="attempt-section-title">\uD83D\uDCCA AI Usage</div>' + att.metricsHtml;
+          // Insert after error section (if exists) or at top of body
+          const errorSection = body.querySelector('.attempt-error-section');
+          if (errorSection && errorSection.nextSibling) {
+            body.insertBefore(metricsDiv, errorSection.nextSibling);
+          } else {
+            body.insertBefore(metricsDiv, body.firstChild);
+          }
+        }
+      }
+    }
+
+    // ── Running placeholder: remove when body content appears ──
+    const runningIndicator = card.querySelector('.attempt-running-indicator');
+    if (runningIndicator && att.status !== 'running') {
+      const section = runningIndicator.closest('.attempt-section');
+      if (section) section.remove();
+    }
+  }
+
+  /** Render the post-split checkpoint summary section. */
+  private renderCheckpointSection(cp: CheckpointData): string {
+    const pressurePct = Math.round(cp.pressure);
+
+    // Sub-job list with status icons and clickable links
+    const subJobListItems = cp.subJobs.map((sj, idx) => {
+      const total = cp.subJobs.length;
+      const connector = idx < total - 1 ? '\u251C\u2500' : '\u2514\u2500'; // ├─ or └─
+      const statusIcon = sj.status === 'succeeded' ? '\u2713' // ✓
+        : sj.status === 'failed' ? '\u2717'                   // ✗
+        : sj.status === 'running' ? '\u27F3'                  // ⟳
+        : '\u25CB';                                            // ○ (pending/ready)
+      const statusCls = sj.status === 'succeeded' ? 'success'
+        : sj.status === 'failed' ? 'failed'
+        : sj.status === 'running' ? 'running'
+        : 'pending';
+      return '<div class="cp-subjob-row">'
+        + '<span class="cp-connector">' + connector + ' </span>'
+        + '<span class="step-icon ' + statusCls + '">' + statusIcon + '</span> '
+        + '<a class="cp-subjob-link" data-node-id="' + escapeHtml(sj.nodeId) + '" '
+        + 'data-plan-id="' + escapeHtml(cp.planId) + '" '
+        + 'title="Open sub-job details">'
+        + escapeHtml(sj.name) + ' (' + (idx + 1) + '/' + total + ')'
+        + '</a>'
+        + '</div>';
+    }).join('');
+
+    // Manifest expander
+    let manifestHtml = '';
+    if (cp.manifestJson) {
+      const manifestId = 'cp-manifest-' + Date.now();
+      manifestHtml = '<div class="cp-manifest-section">'
+        + '<div class="cp-manifest-toggle" data-target="' + manifestId + '">'
+        + '\uD83D\uDCCB Manifest \u25B8'
+        + '</div>'
+        + '<pre class="cp-manifest-content" id="' + manifestId + '" style="display:none;">'
+        + escapeHtml(cp.manifestJson)
+        + '</pre>'
+        + '</div>';
+    }
+
+    // Tokens consumed / max line (shown when backend provides token data)
+    const tokensLine = (cp.tokensConsumed !== undefined && cp.maxTokens)
+      ? '<div class="cp-stat">Tokens consumed: <strong>'
+        + cp.tokensConsumed.toLocaleString() + ' / ' + cp.maxTokens.toLocaleString()
+        + '</strong></div>'
+      : '';
+
+    return '<div class="attempt-section cp-checkpoint-section">'
+      + '<div class="attempt-section-title">\uD83E\uDDE0 Context Pressure \u2014 Checkpointed</div>'
+      + '<div class="cp-summary">'
+      + '<div class="cp-stat">Pressure at checkpoint: <strong>' + pressurePct + '%</strong></div>'
+      + tokensLine
+      + '<div class="cp-stat">Split into: <strong>' + cp.subJobCount + ' sub-jobs</strong></div>'
+      + '</div>'
+      + '<div class="cp-subjob-list">' + subJobListItems + '</div>'
+      + manifestHtml
+      + '</div>';
   }
 
   /** Render a single attempt card. */
@@ -497,8 +781,43 @@ export class AttemptCard extends SubscribableControl {
       : '';
 
     // ── Metrics section ──
-    const metricsHtml = att.metricsHtml
-      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCA AI Usage</div>' + att.metricsHtml + '</div>'
+    // For running attempts, include contextPressureContainer inside the AI Usage section.
+    // The differential update architecture prevents unnecessary rebuilds, so this survives.
+    // For completed attempts, render the persisted snapshot inline.
+    const isRunningAttempt = att.status === 'running';
+    const cpContainerHtml = isRunningAttempt ? '<div id="contextPressureContainer" style="display:none;"></div>' : '';
+    let snapshotHtml = '';
+    if (!isRunningAttempt && att.contextPressureSnapshot && att.contextPressureSnapshot.currentInputTokens > 0) {
+      const snap = att.contextPressureSnapshot;
+      const maxTk = snap.maxPromptTokens || 136000;
+      const pct = Math.round((snap.currentInputTokens / maxTk) * 100);
+      const fmtTk = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+      const levelIcon = snap.level === 'critical' ? '🔴' : snap.level === 'elevated' ? '⚠' : '✅';
+      const levelCap = snap.level.charAt(0).toUpperCase() + snap.level.slice(1);
+      let modelRows = '';
+      if (snap.modelBreakdown && snap.modelBreakdown.length > 0) {
+        const rows = snap.modelBreakdown.map(m => {
+          const cached = m.cachedTokens ? ', ' + fmtTk(m.cachedTokens) + ' cached' : '';
+          return '<div class="model-row"><span class="model-name">' + escapeHtml(m.model) + '</span> ' + fmtTk(m.inputTokens) + ' in, ' + fmtTk(m.outputTokens) + ' out' + cached + ' (' + m.turns + ' turns)</div>';
+        }).join('');
+        const tpm = snap.turnsPerSecond ? ' · ' + snap.turnsPerSecond.toFixed(1) + ' turns/min' : '';
+        modelRows = '<div class="context-pressure-models"><div class="model-breakdown-label">Model Usage (' + (snap.totalTurns || 0) + ' turns' + tpm + '):</div><div class="model-breakdown">' + rows + '</div></div>';
+      }
+      snapshotHtml = '<div class="context-pressure-section">'
+        + '<div class="context-pressure-label">🧠 Context Window (final)</div>'
+        + '<div class="context-pressure-bar-container"><div class="context-pressure-bar context-pressure-' + snap.level + '" style="width:' + Math.min(pct, 100) + '%;background:' + (snap.level === 'critical' ? 'var(--vscode-charts-red)' : snap.level === 'elevated' ? 'var(--vscode-charts-yellow)' : 'var(--vscode-charts-green)') + '"></div></div>'
+        + '<div class="context-pressure-stats">' + pct + '% of ' + fmtTk(maxTk) + '</div>'
+        + '<div class="context-pressure-status context-pressure-' + snap.level + '">Final status: ' + levelIcon + ' ' + levelCap + (snap.compactionDetected ? ' · Compaction detected' : '') + '</div>'
+        + modelRows
+        + '</div>';
+    }
+    const metricsHtml = (att.metricsHtml || snapshotHtml || cpContainerHtml)
+      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDCCA AI Usage</div>' + (att.metricsHtml || '') + snapshotHtml + cpContainerHtml + '</div>'
+      : '';
+
+    // ── Context pressure checkpoint section (post-split view) ──
+    const checkpointHtml = att.contextPressureCheckpoint
+      ? this.renderCheckpointSection(att.contextPressureCheckpoint)
       : '';
 
     // ── Context section ──
@@ -564,6 +883,7 @@ export class AttemptCard extends SubscribableControl {
       + '<div class="attempt-phases" data-attempt="' + att.attemptNumber + '">'
       + '<div class="attempt-phase-tabs">' + tabsHtml + '</div>'
       + '<pre class="attempt-live-log" data-attempt="' + att.attemptNumber + '" data-log-tag="log-attempt-' + att.attemptNumber + '" '
+      + 'tabindex="0" data-selectable="true" '
       + 'style="max-height:500px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;'
       + 'font-size:12px;line-height:1.4;background:var(--vscode-editor-background);'
       + 'padding:8px;border-radius:4px;user-select:text;-webkit-user-select:text;">'
@@ -571,7 +891,7 @@ export class AttemptCard extends SubscribableControl {
       + '</div></div>';
 
     // ── Running placeholder ──
-    const hasBodyContent = errorHtml || metricsHtml || ctxItems.length > 0 || prechecksHtml || workHtml || postchecksHtml;
+    const hasBodyContent = errorHtml || metricsHtml || checkpointHtml || ctxItems.length > 0 || prechecksHtml || workHtml || postchecksHtml;
     const runningPlaceholder = (!hasBodyContent && isRunning)
       ? '<div class="attempt-section"><div class="attempt-running-indicator">\u27F3 Executing\u2026</div></div>'
       : '';
@@ -591,7 +911,7 @@ export class AttemptCard extends SubscribableControl {
       + '</div>'
       + '</div>'
       + '<div class="attempt-body" style="display:' + bodyDisplay + ';">'
-      + runningPlaceholder + errorHtml + metricsHtml + contextHtml + prechecksHtml + workHtml + postchecksHtml + logSection
+      + runningPlaceholder + errorHtml + metricsHtml + checkpointHtml + contextHtml + prechecksHtml + workHtml + postchecksHtml + logSection
       + '</div>'
       + '</div>';
   }

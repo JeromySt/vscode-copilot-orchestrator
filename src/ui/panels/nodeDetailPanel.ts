@@ -58,7 +58,8 @@ function formatWorkSpec(spec: WorkSpec | undefined): string {
       const shell = spec.shell ? `[${spec.shell}] ` : '';
       return `${shell}${spec.command}`;
     case 'agent':
-      return `[agent] ${spec.instructions}`;
+      const effortLabel = spec.effort ? ` effort:${spec.effort}` : '';
+      return `[agent${effortLabel}] ${spec.instructions}`;
     default:
       return JSON.stringify(spec);
   }
@@ -173,8 +174,9 @@ function formatWorkSpecHtml(spec: WorkSpec | undefined, escapeHtml: (s: string) 
       const rendered = renderMarkdown(instructions, escapeHtml);
       const modelLabel = spec.model ? escapeHtml(spec.model) : 'unspecified';
       const tierBadge = spec.modelTier ? `<span class="agent-tier tier-${spec.modelTier}">${escapeHtml(spec.modelTier)}</span>` : '';
+      const effortBadge = spec.effort ? `<span class="agent-effort effort-${spec.effort}">${escapeHtml(spec.effort)} effort</span>` : '';
       return `<div class="work-code-block agent-block">
-        <div class="work-code-header"><span class="work-lang-badge agent">Agent</span><span class="agent-model">${modelLabel}</span>${tierBadge}</div>
+        <div class="work-code-header"><span class="work-lang-badge agent">Agent</span><span class="agent-model">${modelLabel}</span>${tierBadge}${effortBadge}</div>
         <div class="work-instructions">${rendered}</div>
         ${envHtml}
       </div>`;
@@ -424,12 +426,12 @@ export class NodeDetailPanel {
   private _pulseSubscription?: PulseDisposable;
   private _currentPhase: string | null = null;
   private _lastStatus: string | null = null;
-  private _lastWorktreeCleanedUp: boolean | undefined = undefined;
   private _lastAttemptCount = 0;
+  private _lastNodeStructureHash = '';
+  private _pendingInitialData?: { state: any; nodeId: string };
   private _lastAttemptStatus = '';
   private _configSentOnce = false;
   private _logSentOffset = 0; // byte offset for delta log streaming (legacy — being replaced by subscription manager)
-  private _lastDepsStatus = ''; // serialized dependency statuses for change detection
   private _controller: NodeDetailController;
   private _subscriptionManager: import('../webViewSubscriptionManager').WebViewSubscriptionManager;
   
@@ -447,26 +449,48 @@ export class NodeDetailPanel {
     planId: string,
     nodeId: string,
     private _planRunner: PlanRunner,
-    private _pulse: IPulseEmitter
+    private _pulse: IPulseEmitter,
+    processMonitor?: any,
   ) {
     this._panel = panel;
     this._extensionUri = extensionUri;
     this._planId = planId;
     this._nodeId = nodeId;
     
-    // Initialize subscription manager with log file producer
+    // Initialize subscription manager with all data producers
     const { WebViewSubscriptionManager } = require('../webViewSubscriptionManager');
     const { LogFileProducer } = require('../producers/logFileProducer');
+    const { NodeStateProducer } = require('../producers/nodeStateProducer');
+    const { PlanStateProducer } = require('../producers/planStateProducer');
+    const { ProcessStatsProducer } = require('../producers/processStatsProducer');
+    const { AiUsageProducer } = require('../producers/aiUsageProducer');
+    const { DependencyStatusProducer } = require('../producers/dependencyStatusProducer');
+    const { ContextPressureProducer } = require('../producers/contextPressureProducer');
+    const { getMonitor } = require('../../plan/analysis/pressureMonitorRegistry');
     this._subscriptionManager = new WebViewSubscriptionManager();
     this._subscriptionManager.registerProducer(new LogFileProducer());
+    this._subscriptionManager.registerProducer(new NodeStateProducer(this._planRunner));
+    this._subscriptionManager.registerProducer(new PlanStateProducer(this._planRunner));
+    this._subscriptionManager.registerProducer(new ProcessStatsProducer(this._planRunner, processMonitor));
+    this._subscriptionManager.registerProducer(new AiUsageProducer(this._planRunner));
+    this._subscriptionManager.registerProducer(new DependencyStatusProducer(this._planRunner));
+    this._subscriptionManager.registerProducer(new ContextPressureProducer(
+      (planId: string, nodeId: string) => getMonitor(planId, nodeId),
+    ));
     
     // Create controller with VS Code service adapters
     const commands: NodeDetailCommands = {
       executeCommand: (cmd, ...args) => vscode.commands.executeCommand(cmd, ...args),
       openFolder: (p) => vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(p), { forceNewWindow: true }),
-      refresh: () => this._update(),
+      closePanel: () => this.dispose(),
+      refresh: () => this._update(true),
       sendLog: (phase) => { this._currentPhase = phase; this._sendLog(phase); },
-      sendProcessStats: () => this._sendProcessStats(),
+      sendProcessStats: async () => {
+        if (this._disposed) { return; }
+        const stats = await this._planRunner.getProcessStats(this._planId, this._nodeId);
+        if (this._disposed) { return; }
+        this._panel.webview.postMessage({ type: 'processStats', ...stats });
+      },
       subscribeLog: (attemptNumber, tag) => this._subscribeLog(attemptNumber, tag),
       unsubscribeLog: (tag) => this._unsubscribeLog(tag),
       retryNode: (pid, nid, resume) => this._retryNode(pid, nid, resume),
@@ -506,7 +530,6 @@ export class NodeDetailPanel {
       const plan = this._planRunner.get(this._planId);
       const state = plan?.nodeStates.get(this._nodeId);
       this._lastStatus = state?.status || null;
-      this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
       this._lastAttemptCount = state?.attemptHistory?.length || 0;
       this._update();
     });
@@ -526,22 +549,7 @@ export class NodeDetailPanel {
         this._sendConfigUpdate();
       }
 
-      // Always send incremental state change so header phase indicator updates
       if (state) {
-        const phaseStatus = this._getPhaseStatus(state);
-        const currentPhase = getCurrentExecutionPhase(state);
-        this._panel.webview.postMessage({
-          type: 'stateChange',
-          status: state.status,
-          phaseStatus,
-          currentPhase,
-          startedAt: state.startedAt,
-          endedAt: state.endedAt,
-        });
-
-        // Push dependency status updates when any dependency changes
-        if (plan) { this._sendDepsUpdateIfChanged(plan, plan.jobs.get(this._nodeId)); }
-
         // Push incremental attempt history when new attempts are recorded
         // or when a running placeholder is replaced with a completed record
         if (state.attemptHistory && state.attemptHistory.length > 0) {
@@ -555,53 +563,35 @@ export class NodeDetailPanel {
             this._sendAttemptUpdate(state);
           }
         }
-      }
 
-      if (state?.status === 'running' || state?.status === 'scheduled') {
-        // Status changed — send incremental update, NOT full HTML rebuild
-        if (this._lastStatus !== state.status) {
-          this._lastStatus = state.status;
-          // Send state change to webview controls (status badge, duration counter, etc.)
-          const phaseStatus = this._getPhaseStatus(state);
-          const currentPhase = getCurrentExecutionPhase(state);
-          this._panel.webview.postMessage({
-            type: 'stateChange',
-            status: state.status,
-            phaseStatus,
-            currentPhase,
-            startedAt: state.startedAt,
-            endedAt: state.endedAt,
-          });
-        }
-        // Tick subscription manager — delivers log deltas to active subscriptions
-        this._subscriptionManager.tick();
-        // Push process stats on each pulse while active
-        this._sendProcessStats();
-      } else if (this._lastStatus === 'running' || this._lastStatus === 'scheduled') {
-        // Transitioned from running to terminal — send state change + attempt update
-        this._lastStatus = state?.status || null;
-        const phaseStatus = this._getPhaseStatus(state!);
-        this._panel.webview.postMessage({
-          type: 'stateChange',
-          status: state?.status,
-          phaseStatus,
-          startedAt: state?.startedAt,
-          endedAt: state?.endedAt,
-        });
-        // Force-send attempt update after terminal transition with enough delay
-        // for the executor to record the completed attempt in history
-        if (state) {
+        // Detect running→terminal transition: force an attempt update after a short
+        // delay so the executor has time to record the completed attempt in history
+        const wasRunning = this._lastStatus === 'running' || this._lastStatus === 'scheduled';
+        const isTerminal = state.status === 'succeeded' || state.status === 'failed'
+          || state.status === 'canceled' || state.status === 'blocked';
+        if (wasRunning && isTerminal) {
           setTimeout(() => { this._sendAttemptUpdate(state); }, 200);
         }
-      } else {
-        // Terminal state — only send incremental updates for specific changes
-        if (state?.worktreeCleanedUp !== this._lastWorktreeCleanedUp) {
-          this._lastWorktreeCleanedUp = state?.worktreeCleanedUp;
-          // No full rebuild needed — worktree cleanup just changes a label
-        }
+        this._lastStatus = state.status;
       }
+
+      // Tick subscription manager — delivers nodeState, processStats, aiUsage, depsStatus deltas
+      // tick() is async (producers with prepareTick pre-fetch OS data) but fire-and-forget
+      // from the synchronous pulse handler — errors are caught internally by the manager.
+      this._subscriptionManager.tick().catch(() => { /* error logged internally */ });
     });
     
+    // Re-sync subscriptions when plan topology changes (new sub-jobs from reshape)
+    const onPlanReshaped = (reshapedPlanId: string) => {
+      if (reshapedPlanId === this._planId && !this._disposed) {
+        this._resetPersistentSubscriptions();
+      }
+    };
+    this._planRunner.on('planReshaped', onPlanReshaped);
+    this._disposables.push({ dispose: () => {
+      this._planRunner.removeListener('planReshaped', onPlanReshaped);
+    }});
+
     // Pause/resume subscriptions when panel visibility changes
     const panelId = `${planId}:${nodeId}`;
     this._panel.onDidChangeViewState(e => {
@@ -641,7 +631,8 @@ export class NodeDetailPanel {
     nodeId: string,
     planRunner: PlanRunner,
     pulse?: IPulseEmitter,
-    focusAttemptNumber?: number
+    focusAttemptNumber?: number,
+    processMonitor?: any,
   ) {
     const key = `${planId}:${nodeId}`;
     
@@ -672,7 +663,7 @@ export class NodeDetailPanel {
     // Default pulse emitter (no-op) if not provided
     const effectivePulse: IPulseEmitter = pulse ?? { onPulse: () => ({ dispose: () => {} }), isRunning: false };
     
-    const nodePanel = new NodeDetailPanel(panel, extensionUri, planId, nodeId, planRunner, effectivePulse);
+    const nodePanel = new NodeDetailPanel(panel, extensionUri, planId, nodeId, planRunner, effectivePulse, processMonitor);
     NodeDetailPanel.panels.set(key, nodePanel);
     if (focusAttemptNumber) {
       setTimeout(() => nodePanel._focusAttempt(focusAttemptNumber), 300);
@@ -759,9 +750,87 @@ export class NodeDetailPanel {
    * @param message - The message object received from the webview's `postMessage`.
    */
   private _handleMessage(message: any) {
+    if (message.type === 'webviewReady') {
+      // Webview scripts initialized — flush queued initial data
+      this._flushInitialData();
+      return;
+    }
     this._controller.handleMessage(message);
   }
-  
+
+  /**
+   * Flush queued initial data to the webview after it signals readiness.
+   * Replaces the brittle setTimeout chain that could fire before the
+   * webview's EventBus and controls were initialized.
+   */
+  private _flushInitialData(): void {
+    const pending = this._pendingInitialData;
+    if (!pending) { return; }
+    this._pendingInitialData = undefined;
+
+    // Send in dependency order: config → attempts → subscriptions → log → pulse
+    this._sendConfigUpdate();
+    this._sendAttemptUpdate(pending.state).catch(() => {});
+    this._resetPersistentSubscriptions();
+    this._sendFullLog();
+    try { this._panel.webview.postMessage({ type: 'pulse' }); } catch { /* disposed */ }
+  }
+
+  /**
+   * Create persistent subscriptions for the core node data producers.
+   * Called on initial setup and after each HTML rebuild to ensure fresh
+   * initial content is delivered to the newly initialized webview.
+   */
+  private _createPersistentSubscriptions(): void {
+    const panelId = `${this._planId}:${this._nodeId}`;
+    const nodeKey = `${this._planId}:${this._nodeId}`;
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'nodeState', nodeKey, 'nodeState');
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'planState', this._planId, 'planState');
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'processStats', nodeKey, 'processStats');
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'aiUsage', nodeKey, 'aiUsage');
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'depsStatus', nodeKey, 'depsStatus');
+    this._subscriptionManager.subscribe(panelId, this._panel.webview, 'contextPressure', nodeKey, 'contextPressure');
+
+    // Subscribe to checkpoint sub-job states for live status badges
+    const plan = this._planRunner.get(this._planId);
+    const state = plan?.nodeStates.get(this._nodeId);
+    if (state?.contextPressureCheckpoint) {
+      const cp = state.contextPressureCheckpoint;
+      for (const producerId of (cp.subJobIds || [])) {
+        const subNodeId = plan!.producerIdToNodeId?.get(producerId);
+        if (subNodeId) {
+          this._subscriptionManager.subscribe(
+            panelId, this._panel.webview, 'nodeState',
+            `${this._planId}:${subNodeId}`, `cpSubJob:${subNodeId}`
+          );
+        }
+      }
+      // Also subscribe to fan-in job
+      const fanInNodeId = plan!.producerIdToNodeId?.get(cp.fanInJobId);
+      if (fanInNodeId) {
+        this._subscriptionManager.subscribe(
+          panelId, this._panel.webview, 'nodeState',
+          `${this._planId}:${fanInNodeId}`, `cpSubJob:${fanInNodeId}`
+        );
+      }
+    }
+  }
+
+  /**
+   * Remove and recreate the persistent subscriptions for node data producers.
+   * Called after each HTML rebuild so readFull sends fresh initial content
+   * to the newly initialized webview.
+   */
+  private _resetPersistentSubscriptions(): void {
+    const panelId = `${this._planId}:${this._nodeId}`;
+    const nodeKey = `${this._planId}:${this._nodeId}`;
+    for (const type of ['nodeState', 'planState', 'processStats', 'aiUsage', 'depsStatus', 'contextPressure']) {
+      const existing = this._subscriptionManager.findSubscription(panelId, type, nodeKey);
+      if (existing) { this._subscriptionManager.unsubscribe(existing); }
+    }
+    this._createPersistentSubscriptions();
+  }
+
   /**
    * Force a stuck running node to failed state so it can be retried.
    *
@@ -772,7 +841,7 @@ export class NodeDetailPanel {
     try {
       await this._planRunner.forceFailNode(planId, nodeId);
       // Refresh panel after successful force fail
-      this._update();
+      this._update(true);
       vscode.window.showInformationMessage(`Job force failed. You can now retry.`);
     } catch (error) {
       console.debug('forceFailNode failed:', error);
@@ -799,21 +868,10 @@ export class NodeDetailPanel {
     
     if (result.success) {
       vscode.window.showInformationMessage(`Job retry initiated${resumeSession ? ' (resuming session)' : ' (fresh session)'}`);
-      this._update();
+      this._update(true);
     } else {
       vscode.window.showErrorMessage(`Retry failed: ${result.error}`);
     }
-  }
-  
-  /** Query process stats for this node and send them to the webview. */
-  private async _sendProcessStats() {
-    if (this._disposed) { return; }
-    const stats = await this._planRunner.getProcessStats(this._planId, this._nodeId);
-    if (this._disposed) { return; }
-    this._panel.webview.postMessage({
-      type: 'processStats',
-      ...stats
-    });
   }
   
   /**
@@ -963,6 +1021,49 @@ export class NodeDetailPanel {
   }
   
   /**
+   * Build checkpoint data for the webview from node execution state.
+   * Resolves sub-job producer IDs to names and statuses from the plan.
+   */
+  private _buildCheckpointData(state: NodeExecutionState, plan: PlanInstance): any {
+    const cp = state.contextPressureCheckpoint;
+    if (!cp) return undefined;
+
+    const subJobs = (cp.subJobIds || []).map(producerId => {
+      // Resolve producerId → nodeId via plan mapping
+      const nodeId = plan.producerIdToNodeId?.get(producerId) || '';
+      const jobNode = nodeId ? plan.jobs.get(nodeId) : undefined;
+      const nodeState = nodeId ? plan.nodeStates.get(nodeId) : undefined;
+      return {
+        producerId,
+        nodeId,
+        name: jobNode?.name || producerId,
+        status: nodeState?.status || 'pending',
+      };
+    });
+
+    // Try to read manifest JSON from disk
+    let manifestJson: string | undefined;
+    if (cp.manifestPath) {
+      try {
+        manifestJson = fs.readFileSync(cp.manifestPath, 'utf-8');
+        // Pretty-print if it's valid JSON
+        try { manifestJson = JSON.stringify(JSON.parse(manifestJson), null, 2); } catch { /* keep as-is */ }
+      } catch { /* manifest file not available */ }
+    }
+
+    return {
+      pressure: cp.pressure,
+      tokensConsumed: cp.tokensConsumed,
+      maxTokens: cp.maxTokens,
+      subJobCount: cp.subJobCount,
+      subJobs,
+      fanInJobId: cp.fanInJobId,
+      manifestJson,
+      planId: plan.id,
+    };
+  }
+
+  /**
    * Push attempt history updates to the webview for dynamic rendering.
    * 
    * Builds full attempt card data (logs from disk, work spec resolution, metrics)
@@ -1052,6 +1153,8 @@ export class NodeDetailPanel {
           postchecksUsedHtml: postchecksHtml,
           logs,
           metricsHtml: nodeMetrics ? attemptMetricsTemplateHtml(nodeMetrics, state.phaseMetrics) : '',
+          contextPressureCheckpoint: this._buildCheckpointData(state, plan),
+          contextPressureSnapshot: state.contextPressureSnapshot,
         }],
       });
       return;
@@ -1092,8 +1195,11 @@ export class NodeDetailPanel {
       } else {
         workUsedHtml = resolveSpecFromRef(attempt.workRef, storagePath, plan.id, escapeHtml);
       }
-      // For running attempts with no resolved work spec, fall back to node's work spec or disk
-      if (!workUsedHtml && (attempt.status === 'running' || !attempt.workUsed)) {
+      // For RUNNING attempts with no resolved work spec, fall back to node's current work spec.
+      // Do NOT fall back for completed/failed attempts — their work spec was snapshotted at
+      // execution time and should be read from the ref. Falling back to node.work would show
+      // the auto-heal agent spec instead of the original shell command.
+      if (!workUsedHtml && attempt.status === 'running') {
         let fallbackWork = node?.work;
         if (!fallbackWork && plan.definition) {
           try { fallbackWork = await plan.definition.getWorkSpec(this._nodeId); } catch { /* */ }
@@ -1146,6 +1252,8 @@ export class NodeDetailPanel {
           : (attempt.status === 'running' && state.metrics 
             ? attemptMetricsTemplateHtml(state.metrics, state.phaseMetrics) 
             : ''),
+        contextPressureCheckpoint: this._buildCheckpointData(state, plan),
+        contextPressureSnapshot: state.contextPressureSnapshot,
       });
     }
 
@@ -1172,20 +1280,6 @@ export class NodeDetailPanel {
     });
   }
 
-  private _sendAiUsageUpdate(state: NodeExecutionState): void {
-    if (this._disposed) { return; }
-    const metrics = getNodeMetrics(state);
-    if (!metrics) {return;}
-    this._panel.webview.postMessage({
-      type: 'aiUsageUpdate',
-      premiumRequests: metrics.premiumRequests,
-      apiTimeSeconds: metrics.apiTimeSeconds,
-      sessionTimeSeconds: metrics.sessionTimeSeconds,
-      codeChanges: metrics.codeChanges,
-      modelBreakdown: metrics.modelBreakdown,
-    });
-  }
-
   /**
    * Push work summary data to the webview.
    *
@@ -1203,22 +1297,12 @@ export class NodeDetailPanel {
     });
   }
 
-  /** Push dependency status updates only when something changed. */
-  private _sendDepsUpdateIfChanged(plan: PlanInstance, node: JobNode | undefined): void {
-    if (this._disposed || !node) { return; }
-    const deps = node.dependencies.map(depId => {
-      const depNode = plan.jobs.get(depId);
-      const depState = plan.nodeStates.get(depId);
-      return { name: depNode?.name || depId, status: depState?.status || 'pending' };
-    });
-    const key = deps.map(d => d.name + ':' + d.status).join(',');
-    if (key === this._lastDepsStatus) { return; }
-    this._lastDepsStatus = key;
-    this._panel.webview.postMessage({ type: 'depsUpdate', dependencies: deps });
-  }
   
-  /** Re-render the panel HTML with current node state. */
-  private async _update() {
+  /** Re-render the panel HTML with current node state.
+   * Uses a structure hash to skip full HTML replacement when only status changed.
+   * Incremental updates (status, logs, metrics) are handled by the subscription manager.
+   */
+  private async _update(force = false) {
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -1237,7 +1321,19 @@ export class NodeDetailPanel {
     const resolvedWork = node.work || await plan.definition?.getWorkSpec(this._nodeId);
     const resolvedPrechecks = node.prechecks || await plan.definition?.getPrechecksSpec(this._nodeId);
     const resolvedPostchecks = node.postchecks || await plan.definition?.getPostchecksSpec(this._nodeId);
-    
+
+    // Structure hash: only rebuild HTML when structural content changes.
+    // Status updates, log streaming, and metrics are handled by subscriptions.
+    const attemptCount = state.attemptHistory?.length || 0;
+    const structureHash = `${node.name}:${attemptCount}:${state.status === 'running' ? 'r' : 's'}:${node.dependencies?.length || 0}`;
+    if (!force && structureHash === this._lastNodeStructureHash) {
+      // Structure unchanged — subscriptions handle incremental updates.
+      // But send attempt update in case attempt status changed (e.g., running → succeeded).
+      this._sendAttemptUpdate(state).catch(() => {});
+      return;
+    }
+    this._lastNodeStructureHash = structureHash;
+
     this._panel.webview.html = this._getHtml(plan, node, state, resolvedWork, resolvedPrechecks, resolvedPostchecks);
 
     // Set attempt tracking to match current state so the next pulse doesn't
@@ -1249,39 +1345,10 @@ export class NodeDetailPanel {
     this._configSentOnce = false; // Reset — webview was rebuilt, config needs resending
     this._logSentOffset = 0; // Reset delta offset — webview has no log content yet
 
-    // Send initial full log content AFTER the attempt card has been built.
-    // _sendAttemptUpdate fires at 75ms, so we send full log at 250ms to ensure
-    // the <pre> element exists before we populate it.
-    setTimeout(() => { this._sendFullLog(); }, 250);
-    
-    // After HTML rebuild, send messages with delays so the webview scripts
-    // have time to initialize the EventBus and subscribe controls.
-    // Config update must be deferred like stateChange — it's async and the
-    // webview needs its controls wired before it can process the message.
-    setTimeout(() => { this._sendConfigUpdate(); }, 50);
-
-    // Send initial attempt history to the CSR AttemptCard control
-    setTimeout(() => { this._sendAttemptUpdate(state).catch(err => console.error('sendAttemptUpdate failed:', err)); }, 75);
-
-    // After HTML rebuild, send stateChange to re-initialize DurationCounterControl
-    const phaseStatus = this._getPhaseStatus(state);
-    const currentPhase = getCurrentExecutionPhase(state);
-    // Give webview time to initialize before sending state
-    setTimeout(() => {
-      this._panel.webview.postMessage({
-        type: 'stateChange',
-        status: state.status,
-        phaseStatus,
-        currentPhase,
-        startedAt: state.startedAt,
-        endedAt: state.endedAt,
-      });
-    }, 100);
-
-    // Send an immediate pulse so DurationCounterControl gets a tick right away
-    setTimeout(() => {
-      this._panel.webview.postMessage({ type: 'pulse' });
-    }, 150);
+    // Queue initial data delivery — will be flushed when webview sends 'webviewReady'.
+    // This replaces brittle setTimeout delays that could fire before the webview's
+    // EventBus and controls are initialized (causing lost first render on cold start).
+    this._pendingInitialData = { state, nodeId: this._nodeId };
   }
   
   /**
@@ -1337,6 +1404,11 @@ export class NodeDetailPanel {
     const nodeMetrics = getNodeMetrics(state);
     const nodeMetricsHtml = nodeMetrics ? metricsSummaryHtml(nodeMetrics, state.phaseMetrics) : '';
 
+    // Show AI Usage section if metrics exist OR if the work type uses an AI model
+    const normalizedWork = normalizeWorkSpec(node.work);
+    const isAgentWork = normalizedWork?.type === 'agent';
+    const showAiUsage = !!nodeMetricsHtml || isAgentWork;
+
     // Build work summary HTML
     // For leaf nodes, pass aggregated work summary to show total merged work
     const isLeaf = plan.leaves.includes(this._nodeId);
@@ -1385,11 +1457,13 @@ export class NodeDetailPanel {
   
   ${retryButtonsHtml(actionData)}
   
-  <div id="aiUsageStatsContainer" style="${nodeMetricsHtml ? '' : 'display:none;'}">
+  <div id="aiUsageStatsContainer" style="${showAiUsage ? '' : 'display:none;'}">
     ${nodeMetricsHtml}
   </div>
   
   <div class="attempt-history-container"></div>
+  
+  ${processTreeSectionHtml({ status: state.status })}
   
   ${workSummaryHtml}
   <div id="workSummaryContainer" style="display:none;"></div>

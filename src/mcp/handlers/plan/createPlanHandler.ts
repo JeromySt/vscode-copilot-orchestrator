@@ -17,7 +17,7 @@ import {
   resolveBaseBranch,
   resolveTargetBranch,
 } from '../utils';
-import { validateAgentModels } from '../../validation';
+import { validateAgentModels, validateEffortSupport } from '../../validation';
 import type { IGitOperations } from '../../../interfaces/IGitOperations';
 import { Logger } from '../../../core/logger';
 
@@ -162,6 +162,12 @@ export async function handleCreatePlan(args: any, ctx: PlanHandlerContext): Prom
   const modelValidation = await validateAgentModels(args, 'create_copilot_plan', ctx.configProvider);
   if (!modelValidation.valid) {
     return { success: false, error: modelValidation.error };
+  }
+
+  // Validate effort values are supported by installed CLI
+  const effortValidation = await validateEffortSupport(args, 'create_copilot_plan');
+  if (!effortValidation.valid) {
+    return { success: false, error: effortValidation.error };
   }
   
   // Reject PowerShell commands containing 2>&1 (causes false failures)

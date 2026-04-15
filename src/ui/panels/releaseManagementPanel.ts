@@ -20,6 +20,8 @@ import type { IReleaseManager } from '../../interfaces/IReleaseManager';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
 import { getWebviewBundleUri } from '../webviewUri';
 import { renderReleaseStyles, renderReleaseBody, renderReleaseScripts } from '../templates/release';
+import { WebViewSubscriptionManager } from '../webViewSubscriptionManager';
+import { ReleaseStateProducer } from '../producers/releaseStateProducer';
 import type { ReleaseDefinition } from '../../plan/types/release';
 import type { EventEmitter } from 'events';
 
@@ -64,8 +66,8 @@ export class ReleaseManagementPanel {
   private _pulseSubscription?: PulseDisposable;
   private readonly _controller: ReleaseManagementController;
   private _disposed = false;
-  private _planRunnerListeners: Array<{ event: string; fn: (...args: any[]) => void }> = [];
-  private _planRunner?: EventEmitter;
+  private readonly _subscriptionManager: WebViewSubscriptionManager;
+  private readonly _releaseStateProducer: ReleaseStateProducer;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -108,118 +110,41 @@ export class ReleaseManagementPanel {
     };
     this._controller = new ReleaseManagementController(releaseId, dialogService, delegate, this._releaseManager, planRunner as any);
     
-    // Subscribe to plan runner events so the plan selector stays fresh
-    if (planRunner) {
-      this._planRunner = planRunner;
-      const refreshOnPlanChange = () => { if (!this._disposed) { this._forceFullRefresh(); } };
-      for (const evt of ['planCompleted', 'planCreated', 'planDeleted', 'planUpdated']) {
-        planRunner.on(evt, refreshOnPlanChange);
-        this._planRunnerListeners.push({ event: evt, fn: refreshOnPlanChange });
-      }
-    }
-    
-    // Subscribe to release task output for live log streaming
-    // Note: This event may not exist yet in the IReleaseManager interface
-    if (typeof (this._releaseManager as any).on === 'function') {
-      (this._releaseManager as any).on('releaseTaskOutput', (releaseId: string, taskId: string, line: string) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'taskOutput', taskId, line });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward PR monitoring cycle data to webview
-      (this._releaseManager as any).on('releasePRCycle', (releaseId: string, cycle: any) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            // Send cycle data for the timeline dots
-            this._panel.webview.postMessage({ type: 'cycleCompleted', cycle });
-
-            // Compute stats and send for the stat cards
-            const checks = cycle.checks || [];
-            const comments = cycle.comments || [];
-            const alerts = cycle.securityAlerts || [];
-            this._panel.webview.postMessage({
-              type: 'prUpdate',
-              stats: {
-                checksPass: checks.filter((c: any) => c.status === 'passing' || c.status === 'skipped').length,
-                checksFail: checks.filter((c: any) => c.status === 'failing').length,
-                unresolvedThreads: comments.filter((c: any) => !c.isResolved).length,
-                unresolvedAlerts: alerts.filter((a: any) => !a.resolved).length,
-              },
-            });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward individual actions to the webview action log
-      (this._releaseManager as any).on('releaseActionTaken', (releaseId: string, action: any) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'actionTaken', action });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward finding resolution to the webview pending-actions list
-      (this._releaseManager as any).on('findingsResolved', (releaseId: string, findingIds: string[], hasCommit: boolean) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'findingsResolved', findingIds, hasCommit });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward finding processing status to the webview
-      (this._releaseManager as any).on('findingsProcessing', (releaseId: string, findingIds: string[], status: string, sessionId?: string) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'findingsProcessing', findingIds, status, sessionId });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward monitoring stopped to the webview
-      (this._releaseManager as any).on('monitoringStopped', (releaseId: string, totalCycles: number) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'monitoringStopped', totalCycles });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Forward poll interval changes (backoff) to the webview
-      (this._releaseManager as any).on('pollIntervalChanged', (releaseId: string, intervalTicks: number) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          try {
-            this._panel.webview.postMessage({ type: 'pollIntervalChanged', intervalSeconds: intervalTicks });
-          } catch { /* panel disposed */ }
-        }
-      });
-
-      // Full refresh on release progress changes — but ONLY for status transitions.
-      // During monitoring, all updates are incremental (messages), not full re-renders.
-      (this._releaseManager as any).on('releaseProgress', (releaseId: string) => {
-        if (releaseId === this._releaseId && !this._disposed) {
-          const release = this._getReleaseData(this._releaseId);
-          const status = release?.status;
-          // Skip full refresh if we're in a monitoring state — incremental updates handle it
-          if (status === 'monitoring' || status === 'addressing' || status === 'pr-active') {
-            return;
-          }
-          this._forceFullRefresh();
-        }
-      });
-    }
+    // ── Event wiring via producers ──────────────────────────────────────
+    // ALL release data delivery (state, task output, PR cycles, findings,
+    // plan selector) flows through ReleaseStateProducer via the subscription
+    // manager. No direct EventEmitter listeners needed.
+    this._releaseStateProducer = new ReleaseStateProducer(this._releaseManager, this._getAvailablePlans);
+    this._subscriptionManager = new WebViewSubscriptionManager();
+    this._subscriptionManager.registerProducer(this._releaseStateProducer);
     
     // Initial render
     this._update();
+
+    // Set up subscription for this release
+    const panelId = `release:${releaseId}`;
+    this._subscriptionManager.subscribe(
+      panelId,
+      this._panel.webview,
+      'releaseState',
+      releaseId,
+      'releaseState',
+    );
     
-    // Subscribe to pulse — forward to webview for client-side duration ticking
+    // Subscribe to pulse — forward to webview + tick subscriptions
     this._pulseSubscription = this._pulse.onPulse(() => {
       if (!this._disposed) {
         try { this._panel.webview.postMessage({ type: 'pulse' }); } catch { /* panel disposed */ }
+        this._subscriptionManager.tick().catch(() => { /* error logged internally */ });
+      }
+    });
+
+    // Pause/resume on visibility
+    this._panel.onDidChangeViewState(e => {
+      if (e.webviewPanel.visible) {
+        this._subscriptionManager.resumePanel(panelId);
+      } else {
+        this._subscriptionManager.pausePanel(panelId);
       }
     });
     
@@ -325,13 +250,9 @@ export class ReleaseManagementPanel {
       this._pulseSubscription.dispose();
     }
     
-    // Unsubscribe from plan runner events
-    if (this._planRunner) {
-      for (const { event, fn } of this._planRunnerListeners) {
-        this._planRunner.removeListener(event, fn);
-      }
-      this._planRunnerListeners = [];
-    }
+    // Clean up subscription manager and producer
+    this._subscriptionManager.disposePanel(`release:${this._releaseId}`);
+    this._releaseStateProducer.dispose();
     
     this._panel.dispose();
     

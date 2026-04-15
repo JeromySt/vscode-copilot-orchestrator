@@ -21,6 +21,7 @@ export interface JobSpec {
   args?: string[];
   shell?: string;
   model?: string;
+  effort?: 'low' | 'medium' | 'high' | string;
   allowedFolders?: string[];
   allowedUrls?: string[];
   [key: string]: any;
@@ -209,6 +210,10 @@ export class ConfigDisplay extends SubscribableControl {
     
     if (spec.model) {
       html += `<div class="spec-field"><span class="spec-label">Model:</span> <span class="spec-value">${escapeHtml(spec.model)}</span></div>`;
+    }
+
+    if (spec.effort) {
+      html += `<div class="spec-field"><span class="spec-label">Effort:</span> <span class="spec-value effort-${escapeHtml(spec.effort)}">${escapeHtml(spec.effort)}</span></div>`;
     }
     
     if (spec.allowedFolders && spec.allowedFolders.length > 0) {

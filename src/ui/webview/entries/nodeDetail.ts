@@ -19,6 +19,7 @@ import { AttemptCard } from '../controls/attemptCard';
 import { AiUsageStats } from '../controls/aiUsageStats';
 import { WorkSummary } from '../controls/workSummary';
 import { ConfigDisplay } from '../controls/configDisplay';
+import { ContextPressureCard } from '../controls/contextPressureCard';
 import { formatDurationMs, escapeHtml } from '../../templates/helpers';
 
 const api = {
@@ -34,6 +35,7 @@ const api = {
   AiUsageStats,
   WorkSummary,
   ConfigDisplay,
+  ContextPressureCard,
   formatDurationMs,
   escapeHtml,
 };

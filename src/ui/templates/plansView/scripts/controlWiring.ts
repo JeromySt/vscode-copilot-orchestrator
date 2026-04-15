@@ -182,6 +182,12 @@ for (var i = 0; i < contextMenuItems.length; i++) {
     var action = e.currentTarget.dataset.action;
     if (!action) return;
     var selectedIds = multiSelectManager.getSelectedIds();
+    // Fallback: use the right-clicked plan if multi-select is empty
+    if (selectedIds.length === 0) {
+      var menu = document.getElementById('contextMenu');
+      var fallbackId = menu && menu.dataset.contextPlanId;
+      if (fallbackId) { selectedIds = [fallbackId]; }
+    }
     if (selectedIds.length > 0) {
       vscode.postMessage({
         type: 'bulkAction',
@@ -201,6 +207,20 @@ document.addEventListener('click', function(e) {
     menu.style.display = 'none';
   }
 });
+
+// Auto-hide context menu when cursor leaves for 2 seconds
+(function() {
+  var menu = document.getElementById('contextMenu');
+  var hideTimer = null;
+  if (menu) {
+    menu.addEventListener('mouseleave', function() {
+      hideTimer = setTimeout(function() { menu.style.display = 'none'; }, 2000);
+    });
+    menu.addEventListener('mouseenter', function() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    });
+  }
+})();
 
 // Update ordered IDs when plan list changes
 bus.on(PlansTopics.PLANS_UPDATE, function(plans) {
@@ -264,6 +284,7 @@ function computeVisibility(statuses) {
   var hasScaffolding = statuses.indexOf('scaffolding') !== -1;
   var hasArchivable = statuses.indexOf('succeeded') !== -1 || statuses.indexOf('partial') !== -1 || statuses.indexOf('canceled') !== -1 || statuses.indexOf('failed') !== -1;
   var hasRecoverable = statuses.indexOf('canceled') !== -1 || statuses.indexOf('archived') !== -1 || statuses.indexOf('failed') !== -1;
+  var hasSucceeded = statuses.indexOf('succeeded') !== -1;
   return {
     resume: hasPaused,
     pause: hasRunning,
@@ -272,8 +293,8 @@ function computeVisibility(statuses) {
     finalize: hasScaffolding,
     archive: hasArchivable,
     recover: hasRecoverable,
-    assignToRelease: hasArchivable,
-    createReleaseFromPlans: hasArchivable,
+    assignToRelease: hasSucceeded,
+    createReleaseFromPlans: hasSucceeded,
     delete: true
   };
 }

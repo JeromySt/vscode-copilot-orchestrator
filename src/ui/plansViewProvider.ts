@@ -16,6 +16,11 @@ import type { IPRLifecycleManager } from '../interfaces/IPRLifecycleManager';
 import type { ManagedPR } from '../plan/types/prLifecycle';
 import type { IReleaseManager } from '../interfaces/IReleaseManager';
 import type { ReleaseDefinition } from '../plan/types/release';
+import { WebViewSubscriptionManager } from './webViewSubscriptionManager';
+import { PlanListProducer } from './producers/planListProducer';
+import { CapacityProducer } from './producers/capacityProducer';
+import { PRListProducer } from './producers/prListProducer';
+import { ReleaseListProducer } from './producers/releaseListProducer';
 
 /**
  * Sidebar webview provider that displays all top-level Plans and their execution status.
@@ -54,6 +59,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
   private _debounceTimer?: NodeJS.Timeout;
   private _pulseCounter: number = 0;
   private _initialRefreshDone: boolean = false;
+  private _subscriptionManager: WebViewSubscriptionManager;
   
   /**
    * @param _context - The extension context for managing subscriptions and resources.
@@ -69,84 +75,26 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     private readonly _prLifecycleManager?: IPRLifecycleManager,
     private readonly _releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager
   ) {
-    // Listen for Plan events — emit targeted per-plan messages
-    _planRunner.on('planCreated', (plan: PlanInstance) => {
-      this._sendPlanAdded(plan);
-      this._refreshCapacity();  // Capacity changed: new plan registered
-    });
-    _planRunner.on('planStarted', (plan: PlanInstance) => {
-      this._sendPlanStateChange(plan.id);
-      this._refreshCapacity();  // Capacity changed: jobs now running
-    });
-    _planRunner.on('planCompleted', (plan: PlanInstance) => {
-      this._sendPlanStateChange(plan.id);
-      this._refreshCapacity();  // Capacity changed: jobs freed up
-    });
-    _planRunner.on('planDeleted', (planId: string) => {
-      planDetailPanel.closeForPlan(planId);
-      NodeDetailPanel.closeForPlan(planId);
-      this._sendPlanDeleted(planId);
-      this._refreshCapacity();  // Capacity changed: plan removed
-    });
-    _planRunner.on('planUpdated', (planId: string) => {
-      this._sendPlanStateChange(planId);
-    });
-    _planRunner.on('nodeTransition', (event: any) => {
-      const planId = typeof event === 'string' ? event : event?.planId;
-      if (planId) {
-        this._sendPlanStateChange(planId);
-      }
-      this._refreshCapacity();  // Capacity changed: node started/stopped/queued
-    });
-    
-    // Listen for PR lifecycle events
+    // Set up subscription manager for pulse-based plan list deltas
+    this._subscriptionManager = new WebViewSubscriptionManager();
+    this._subscriptionManager.registerProducer(new PlanListProducer(_planRunner));
+    this._subscriptionManager.registerProducer(new CapacityProducer(_planRunner as any));
     if (_prLifecycleManager) {
-      _prLifecycleManager.on('prAdopted', (pr: ManagedPR) => {
-        this._sendPRAdded(pr);
-      });
-      _prLifecycleManager.on('prStatusChanged', (pr: ManagedPR) => {
-        this._sendPRStateChange(pr);
-      });
-      _prLifecycleManager.on('prMonitoringStarted', (pr: ManagedPR) => {
-        this._sendPRStateChange(pr);
-      });
-      _prLifecycleManager.on('prMonitoringStopped', (pr: ManagedPR) => {
-        this._sendPRStateChange(pr);
-      });
-      _prLifecycleManager.on('prAbandoned', (pr: ManagedPR) => {
-        this._sendPRStateChange(pr);
-      });
-      _prLifecycleManager.on('prPromoted', (pr: ManagedPR) => {
-        this._sendPRStateChange(pr);
-      });
-      _prLifecycleManager.on('prDemoted', (pr: ManagedPR) => {
-        this._sendPRStateChange(pr);
-      });
-      _prLifecycleManager.on('prRemoved', (id: string) => {
-        this._sendPRDeleted(id);
-      });
+      this._subscriptionManager.registerProducer(new PRListProducer(_prLifecycleManager));
     }
-    
-    // Listen for release events
     if (_releaseManager) {
-      _releaseManager.on('releaseCreated', (release: ReleaseDefinition) => {
-        this._sendReleaseAdded(release);
-        // Update all plans in this release to show release tag
-        release.planIds.forEach(planId => {
-          this._sendPlanStateChange(planId);
-        });
-      });
-      _releaseManager.on('releaseStatusChanged', (release: ReleaseDefinition) => {
-        this._sendReleaseStateChange(release);
-        // Update all plans in this release to reflect release status change
-        release.planIds.forEach(planId => {
-          this._sendPlanStateChange(planId);
-        });
-      });
-      _releaseManager.on('releaseCompleted', (release: ReleaseDefinition) => {
-        this._sendReleaseStateChange(release);
-      });
+      this._subscriptionManager.registerProducer(new ReleaseListProducer(_releaseManager));
     }
+
+    // ── Event wiring ────────────────────────────────────────────────────
+    // ALL UI data delivery flows through producers via WebViewSubscriptionManager:
+    //   - PlanListProducer: plan add/remove/status (with removal detection)
+    //   - CapacityProducer: global capacity stats
+    //   - PRListProducer: PR add/remove/status changes
+    //   - ReleaseListProducer: release add/remove/status changes
+    //
+    // No direct PlanRunner, PRLifecycleManager, or ReleaseManager event
+    // listeners needed for data delivery.
   }
   
   /**
@@ -174,6 +122,50 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     };
     
     webviewView.webview.html = this._getHtml(webviewView.webview);
+
+    // Subscribe sidebar to PlanListProducer for pulse-based incremental updates
+    const sidebarPanelId = 'sidebar';
+    this._subscriptionManager.disposePanel(sidebarPanelId);
+    this._subscriptionManager.subscribe(
+      sidebarPanelId,
+      webviewView.webview,
+      'planList',
+      'all',
+      'planList',
+    );
+    // Subscribe to capacity updates (running jobs, global parallel limits)
+    this._subscriptionManager.subscribe(
+      sidebarPanelId,
+      webviewView.webview,
+      'capacity',
+      'all',
+      'capacity',
+    );
+    // Subscribe to PR list updates
+    this._subscriptionManager.subscribe(
+      sidebarPanelId,
+      webviewView.webview,
+      'prList',
+      'all',
+      'prList',
+    );
+    // Subscribe to release list updates
+    this._subscriptionManager.subscribe(
+      sidebarPanelId,
+      webviewView.webview,
+      'releaseList',
+      'all',
+      'releaseList',
+    );
+
+    // Pause/resume subscription when sidebar visibility changes
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this._subscriptionManager.resumePanel(sidebarPanelId);
+      } else {
+        this._subscriptionManager.pausePanel(sidebarPanelId);
+      }
+    });
     
     // Handle messages from webview
     webviewView.webview.onDidReceiveMessage(message => {
@@ -253,17 +245,12 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       }
     }, 500);
     
-    // Pulse: 1-second signal forwarding to webview + capacity refresh counter
+    // Pulse: 1-second signal forwarding to webview + subscription tick
     this._pulseSubscription = this._pulse.onPulse(() => {
       if (this._view) {
         this._view.webview.postMessage({ type: 'pulse' });
-      }
-      
-      // Capacity refresh every 10 pulses (10 seconds)
-      this._pulseCounter++;
-      if (this._pulseCounter >= 10) {
-        this._pulseCounter = 0;
-        this._refreshCapacity();
+        // Deliver all subscription deltas (plans, capacity, PRs, releases)
+        this._subscriptionManager.tick().catch(() => { /* error logged internally */ });
       }
     });
     
@@ -277,6 +264,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       if (this._capacityDebounceTimer) {
         clearTimeout(this._capacityDebounceTimer);
       }
+      this._subscriptionManager.disposePanel(sidebarPanelId);
     });
   }
   
@@ -315,7 +303,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     // Standard bulk commands (resume, pause, cancel, retry, finalize, delete)
     const commandAction = action.charAt(0).toUpperCase() + action.slice(1);
-    vscode.commands.executeCommand(
+    await vscode.commands.executeCommand(
       `orchestrator.bulk${commandAction}`,
       planIds
     );
@@ -344,7 +332,7 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     
     const defaultCounts: Record<NodeStatus, number> = {
       pending: 0, ready: 0, scheduled: 0, running: 0,
-      succeeded: 0, failed: 0, blocked: 0, canceled: 0
+      completed_split: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0
     };
     const counts = sm?.getStatusCounts() || defaultCounts;
     const total = plan.jobs.size;
@@ -608,14 +596,8 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
       total: planData.length,
     });
     
-    // Kick off first capacity refresh
-    this._refreshCapacity();
-    
-    // Kick off first PRs refresh
-    this._refreshPRs();
-    
-    // Kick off first releases refresh
-    this._refreshReleases();
+    // PR and release data are delivered by PRListProducer and ReleaseListProducer
+    // via the subscription manager on the next pulse tick. No explicit refresh needed.
   }
   
   /**

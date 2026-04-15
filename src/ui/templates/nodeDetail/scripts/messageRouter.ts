@@ -42,6 +42,37 @@ export function renderMessageRouter(): string {
           break;
         case 'subscriptionData':
           bus.emit(Topics.SUBSCRIPTION_DATA, msg);
+          if (msg.tag === 'planState' && msg.content && msg.content.status === 'deleted') {
+            vscode.postMessage({ type: 'close' });
+          } else if (msg.tag === 'nodeState' && msg.content) {
+            bus.emit(Topics.NODE_STATE_CHANGE, msg.content);
+          } else if (msg.tag === 'processStats' && msg.content) {
+            bus.emit(Topics.PROCESS_STATS, msg.content);
+          } else if (msg.tag === 'aiUsage' && msg.content) {
+            bus.emit(Topics.AI_USAGE_UPDATE, msg.content);
+          } else if (msg.tag === 'contextPressure' && msg.content) {
+            bus.emit(Topics.CONTEXT_PRESSURE_UPDATE, msg.content);
+          } else if (msg.tag && msg.tag.indexOf('cpSubJob:') === 0 && msg.content) {
+            // Checkpoint sub-job status update — update the badge in the checkpoint section
+            var subNodeId = msg.tag.substring(9); // strip 'cpSubJob:'
+            var badge = document.querySelector('.cp-subjob-link[data-node-id="' + subNodeId + '"]');
+            if (badge) {
+              var iconEl = badge.previousElementSibling;
+              if (iconEl && iconEl.classList.contains('step-icon')) {
+                var st = msg.content.status || 'pending';
+                iconEl.className = 'step-icon ' + (st === 'succeeded' ? 'success' : st === 'failed' ? 'failed' : st === 'running' ? 'running' : 'pending');
+                iconEl.textContent = st === 'succeeded' ? '\\u2713' : st === 'failed' ? '\\u2717' : st === 'running' ? '\\u27F3' : '\\u25CB';
+              }
+            }
+          } else if (msg.tag === 'depsStatus' && msg.content && msg.content.dependencies) {
+            var depsList = document.querySelector('.deps-list');
+            if (depsList) {
+              depsList.innerHTML = msg.content.dependencies.map(function(dep) {
+                var name = dep.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return '<span class="dep-badge ' + (dep.status || 'pending') + '">' + name + '</span>';
+              }).join('');
+            }
+          }
           break;
         case 'subscriptionEnd':
           bus.emit(Topics.SUBSCRIPTION_END, msg);

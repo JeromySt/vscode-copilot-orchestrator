@@ -250,6 +250,29 @@ export interface AgentSpec {
 
   /** Failure behavior for this phase */
   onFailure?: OnFailureConfig;
+
+  /**
+   * Reasoning effort level hint for the AI model.
+   *
+   * Controls how much "thinking" effort the model should apply.
+   * Higher effort produces more thorough, higher-quality output
+   * at the cost of increased latency and token usage.
+   *
+   * Requires Copilot CLI support for the `--effort` flag.
+   * If the installed CLI does not support `--effort`, this field is
+   * silently ignored at runtime (but may be rejected at plan creation
+   * if capability detection finds the flag unsupported).
+   *
+   * @example
+   * ```typescript
+   * const spec: AgentSpec = {
+   *   type: 'agent',
+   *   instructions: '# Complex refactor',
+   *   effort: 'high',
+   * };
+   * ```
+   */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 /**

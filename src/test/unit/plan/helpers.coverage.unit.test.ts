@@ -24,17 +24,17 @@ import type { NodeExecutionState, LogEntry, PlanInstance } from '../../../plan/t
 suite('helpers - coverage', () => {
   suite('computeProgress', () => {
     test('returns 0 when total is 0', () => {
-      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
+      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
       assert.strictEqual(computeProgress(counts, 0), 0);
     });
 
     test('returns 0 when total is negative', () => {
-      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
+      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
       assert.strictEqual(computeProgress(counts, -1), 0);
     });
 
     test('computes progress correctly', () => {
-      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 5, failed: 3, blocked: 1, canceled: 1 };
+      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 5, failed: 3, blocked: 1, canceled: 1 };
       assert.strictEqual(computeProgress(counts, 10), 1); // 5+3+1+1 = 10 complete
     });
   });

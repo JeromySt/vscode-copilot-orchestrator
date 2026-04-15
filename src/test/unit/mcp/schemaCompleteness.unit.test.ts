@@ -66,6 +66,7 @@ const KITCHEN_SINK_PLAN = {
         modelTier: 'standard',
         maxTurns: 15,
         resumeSession: true,
+        effort: 'high',
         allowedFolders: ['/shared/libs'],
         allowedUrls: ['https://api.example.com'],
         onFailure: {
@@ -134,6 +135,7 @@ const KITCHEN_SINK_RETRY_NODE = {
     modelTier: 'fast',
     maxTurns: 10,
     resumeSession: false,
+    effort: 'medium',
     allowedFolders: ['/tmp/shared'],
     allowedUrls: ['https://registry.npmjs.org'],
     onFailure: {
@@ -552,6 +554,41 @@ suite('MCP Schema Completeness', () => {
     test('modelTier rejects invalid value', () => {
       const r = validateInput('create_copilot_plan', planWithWork({
         type: 'agent', instructions: '# Task', modelTier: 'ultra',
+      }));
+      assert.strictEqual(r.valid, false);
+    });
+
+    test('effort accepts low', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', effort: 'low',
+      }));
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('effort accepts medium', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', effort: 'medium',
+      }));
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('effort accepts high', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', effort: 'high',
+      }));
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('effort accepts xhigh', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', effort: 'xhigh',
+      }));
+      assert.strictEqual(r.valid, true, r.error);
+    });
+
+    test('effort rejects invalid value', () => {
+      const r = validateInput('create_copilot_plan', planWithWork({
+        type: 'agent', instructions: '# Task', effort: 'maximum',
       }));
       assert.strictEqual(r.valid, false);
     });

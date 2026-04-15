@@ -753,6 +753,8 @@ export class DefaultPlanRepository implements IPlanRepository {
     meta.leaves = serializedState.leaves;
     meta.nodeStates = serializedState.nodeStates;
     meta.groupStates = serializedState.groupStates;
+    if (serializedState.groups) { meta.groups = serializedState.groups; }
+    if (serializedState.groupPathToId) { meta.groupPathToId = serializedState.groupPathToId; }
     meta.startedAt = serializedState.startedAt as number | undefined;
     meta.endedAt = serializedState.endedAt as number | undefined;
     meta.baseCommitAtStart = serializedState.baseCommitAtStart;
@@ -816,6 +818,8 @@ export class DefaultPlanRepository implements IPlanRepository {
       if (serializedState.groupStates) {
         metadata.groupStates = serializedState.groupStates;
       }
+      if (serializedState.groups) { metadata.groups = serializedState.groups; }
+      if (serializedState.groupPathToId) { metadata.groupPathToId = serializedState.groupPathToId; }
       
       this.store.writePlanMetadataSync(metadata);
     } catch (error: any) {

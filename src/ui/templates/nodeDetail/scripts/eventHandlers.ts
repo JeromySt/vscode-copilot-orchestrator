@@ -54,6 +54,19 @@ export function renderEventHandlers(config: ScriptsConfig): string {
           vscode.postMessage({ type: 'copyToClipboard', text: selectedText });
         }
       }
+      // Ctrl+A inside a [data-selectable] container (agent instructions, log viewer)
+      // selects only that container's content, not the whole page.
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        var active = document.activeElement;
+        if (active && active.hasAttribute('data-selectable')) {
+          e.preventDefault();
+          var range = document.createRange();
+          range.selectNodeContents(active);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
     });
 
     // Session ID copy handler

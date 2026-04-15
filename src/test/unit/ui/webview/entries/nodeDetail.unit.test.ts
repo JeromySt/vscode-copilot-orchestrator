@@ -29,6 +29,7 @@ suite('nodeDetail entry', () => {
     assert.ok(Orca.AiUsageStats, 'should export AiUsageStats');
     assert.ok(Orca.WorkSummary, 'should export WorkSummary');
     assert.ok(Orca.ConfigDisplay, 'should export ConfigDisplay');
+    assert.ok(Orca.ContextPressureCard, 'should export ContextPressureCard');
     
     // Check for helpers
     assert.strictEqual(typeof Orca.formatDurationMs, 'function', 'should export formatDurationMs');

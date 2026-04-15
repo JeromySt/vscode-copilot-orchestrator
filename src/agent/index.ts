@@ -4,14 +4,6 @@
  * @module agent
  */
 
-export { 
-  AgentDelegator, 
-  DelegateOptions, 
-  DelegateResult, 
-  DelegatorLogger,
-  DelegatorCallbacks 
-} from './agentDelegator';
-
 export { isCopilotCliAvailable, checkCopilotCliAsync, resetCliCache, isCliCachePopulated } from './cliCheckCore';
 export { ensureCopilotCliInteractive, registerCopilotCliCheck, checkCopilotCliOnStartup } from './cliCheck';
 

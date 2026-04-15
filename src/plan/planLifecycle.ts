@@ -48,6 +48,8 @@ export interface PlanRunnerState {
   copilotRunner?: import('../interfaces/ICopilotRunner').ICopilotRunner;
   powerManager?: PowerManager;
   planRepository?: import('../interfaces/IPlanRepository').IPlanRepository;
+  checkpointManager?: import('../interfaces/ICheckpointManager').ICheckpointManager;
+  jobSplitter?: import('../interfaces/IJobSplitter').IJobSplitter;
 }
 
   /** Manages Plan CRUD operations and lifecycle transitions. */
@@ -421,7 +423,7 @@ export class PlanLifecycleManager {
   getRecursiveStatusCounts(planId: string): { totalNodes: number; counts: Record<NodeStatus, number> } {
     const defaultCounts: Record<NodeStatus, number> = {
       pending: 0, ready: 0, scheduled: 0, running: 0,
-      succeeded: 0, failed: 0, blocked: 0, canceled: 0,
+      completed_split: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0,
     };
     const result = { totalNodes: 0, counts: { ...defaultCounts } };
     const plan = this.state.plans.get(planId);

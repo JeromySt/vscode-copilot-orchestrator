@@ -83,6 +83,7 @@ export function headerRowHtml(nodeName: string, status: string, startedAt?: numb
       <span class="duration-icon">⏱</span>
       <span class="duration-value ${status}" id="duration-timer"${startedAt ? ` data-started-at="${startedAt}"` : ''}${endedAt ? ` data-ended-at="${endedAt}"` : ''} data-status="${status}">${durationText}</span>
     </div>
+    <span id="lastRefresh" style="position:absolute;right:8px;top:4px;font-size:10px;color:#666;opacity:0.6;" title="Last full render">${new Date().toLocaleTimeString()}</span>
   </div>`;
 }
 

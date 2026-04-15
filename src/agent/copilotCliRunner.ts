@@ -6,10 +6,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCopilotCliAvailable, ensureCopilotCliChecked } from './cliCheckCore';
-import { CopilotStatsParser } from './copilotStatsParser';
 import type { CopilotUsageMetrics } from '../plan/types';
 import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSpawner';
 import type { IEnvironment } from '../interfaces/IEnvironment';
+import type { IConfigProvider } from '../interfaces/IConfigProvider';
+import type { IManagedProcessFactory } from '../interfaces/IManagedProcessFactory';
+import type { IManagedProcess } from '../interfaces/IManagedProcess';
+import type { StatsHandler } from './handlers/statsHandler';
+import type { SessionIdHandler } from './handlers/sessionIdHandler';
+import type { TaskCompleteHandler } from './handlers/taskCompleteHandler';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -53,6 +58,16 @@ export interface CopilotRunOptions {
   configDir?: string;
   /** Additional environment variables to inject into the spawned process */
   env?: Record<string, string>;
+  /** Reasoning effort level hint for the AI model (low/medium/high/xhigh). Requires CLI support. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Plan ID for output bus handler context (threaded to IManagedProcessFactory). */
+  planId?: string;
+  /**
+   * Optional spawner override for integration testing.
+   * When set, the runner uses this spawner instead of the DI-injected one,
+   * enabling scripted process output while keeping all real handler/bus/metrics logic.
+   */
+  spawnerOverride?: import('../interfaces/IProcessSpawner').IProcessSpawner;
 }
 
 /**
@@ -136,11 +151,15 @@ export class CopilotCliRunner {
   private logger: CopilotCliLogger;
   private spawner: IProcessSpawner;
   private environment: IEnvironment;
+  private configProvider?: IConfigProvider;
+  private managedFactory?: IManagedProcessFactory;
   
-  constructor(logger?: CopilotCliLogger, spawner?: IProcessSpawner, environment?: IEnvironment) {
+  constructor(logger?: CopilotCliLogger, spawner?: IProcessSpawner, environment?: IEnvironment, configProvider?: IConfigProvider, managedFactory?: IManagedProcessFactory) {
     this.logger = logger ?? noopLogger;
     this.spawner = spawner ?? getFallbackSpawner();
     this.environment = environment ?? fallbackEnvironment;
+    this.configProvider = configProvider;
+    this.managedFactory = managedFactory;
   }
   
   /**
@@ -177,15 +196,18 @@ export class CopilotCliRunner {
       skipInstructionsFile = false,
     } = options;
     
-    // Check if Copilot CLI is available — await any pending detection
-    const cliAvailable = await this.ensureAvailable();
-    if (!cliAvailable) {
-      this.logger.warn(`[${label}] Copilot CLI not available`);
-      return {
-        success: false,
-        error: 'Copilot CLI not available. Install via "npm install -g @github/copilot" or "gh extension install github/gh-copilot", then run "Copilot Orchestrator: Refresh Copilot CLI" from the Command Palette.',
-        exitCode: 127,
-      };
+    // Check if Copilot CLI is available — await any pending detection.
+    // Skip when spawnerOverride is set (integration test with scripted process output).
+    if (!options.spawnerOverride) {
+      const cliAvailable = await this.ensureAvailable();
+      if (!cliAvailable) {
+        this.logger.warn(`[${label}] Copilot CLI not available`);
+        return {
+          success: false,
+          error: 'Copilot CLI not available. Install via "npm install -g @github/copilot" or "gh extension install github/gh-copilot", then run "Copilot Orchestrator: Refresh Copilot CLI" from the Command Palette.',
+          exitCode: 127,
+        };
+      }
     }
     
     // Setup instructions file if not skipped
@@ -215,7 +237,7 @@ export class CopilotCliRunner {
       maxTurns: options.maxTurns,
     });
     
-    this.logger.info(`[${label}] Running: ${copilotCmd.substring(0, 100)}...`);
+    this.logger.info(`[${label}] Running: ${copilotCmd.commandString.substring(0, 100)}...`);
     
     // Execute with transient failure retry
     try {
@@ -237,6 +259,10 @@ export class CopilotCliRunner {
             },
             onProcess,
             env: options.env,
+            planId: options.planId,
+            jobId: options.jobId,
+            logDir: options.logDir,
+            spawnerOverride: options.spawnerOverride,
           });
 
           if (lastResult.success) {
@@ -308,12 +334,106 @@ export class CopilotCliRunner {
       sandboxSection += `- Do NOT attempt to access directories outside this list — commands will fail with "Permission denied"\n`;
     }
 
+    // Build checkpoint protocol preamble if context pressure is enabled
+    let checkpointPreamble = '';
+    if (this.configProvider) {
+      const contextPressureEnabled = this.configProvider.getConfig<boolean>(
+        'copilotOrchestrator.contextPressure', 'enabled', false
+      );
+      if (contextPressureEnabled) {
+        checkpointPreamble = `## Orchestrator Checkpoint Protocol (MANDATORY)
+
+Before EVERY action you take (before each tool call), you MUST check:
+
+\`\`\`bash
+test -f .orchestrator/CHECKPOINT_REQUIRED
+\`\`\`
+
+If this file EXISTS:
+1. **STOP immediately** — do not start any new work
+2. Finish ONLY the current statement/line you are writing (do not leave syntax errors)
+3. Stage and commit all your work:
+   \`\`\`bash
+   git add -A
+   git commit -m "[checkpoint] <one-line summary of what you completed>"
+   \`\`\`
+4. Create the checkpoint manifest — this is your **memory transfer** to the next agent.
+   Write it as richly as possible so the next agent can start productive work immediately:
+   \`\`\`bash
+   cat > .orchestrator/checkpoint-manifest.json << 'MANIFEST_EOF'
+   {
+     "status": "checkpointed",
+     "completed": [
+       {
+         "file": "<path>",
+         "summary": "<what you implemented and key decisions>",
+         "publicApi": "<exports, interfaces, key method signatures>",
+         "patterns": "<coding patterns the remaining work should follow>"
+       }
+     ],
+     "inProgress": {
+       "file": "<file you were working on, if any>",
+       "completedParts": "<what's done in this file>",
+       "remainingParts": "<specific methods/tests NOT done>",
+       "notes": "<any gotchas or decisions made>"
+     },
+     "remaining": [
+       {
+         "file": "<filename>",
+         "description": "<what needs to be built>",
+         "dependsOn": "<what completed items it uses>",
+         "constraints": "<anything you discovered that matters>"
+       }
+     ],
+     "suggestedSplits": [
+       {
+         "name": "<short name for this sub-job>",
+         "files": ["<file1>", "<file2>"],
+         "prompt": "<full prompt for the agent that will do this work — be specific about what to build, what patterns to follow, what APIs are available from completed work, and any pitfalls to avoid>",
+         "priority": 1
+       }
+     ],
+     "codebaseContext": {
+       "buildCommand": "<command that builds the project>",
+       "testCommand": "<command that runs tests>",
+       "conventions": "<naming conventions, patterns used>",
+       "warnings": "<gotchas or issues you encountered>"
+     },
+     "summary": "<one paragraph: what you accomplished and what's left>"
+   }
+   MANIFEST_EOF
+   \`\`\`
+   
+   **Writing effective \`suggestedSplits\`**: You know the remaining work best. Group
+   related items together (e.g., an implementation file + its tests). Write each
+   \`prompt\` as if you're briefing a colleague who has never seen this codebase —
+   include the specific APIs from your completed work they'll need, the patterns
+   they should follow, and any constraints or gotchas you discovered. The more
+   specific your prompt, the faster the next agent starts producing real code.
+5. Force-add the manifest and your instruction file to git (they're in .gitignore):
+   \`\`\`bash
+   git add --force .orchestrator/checkpoint-manifest.json
+   git add --force .github/instructions/orchestrator-job-*.md
+   git commit --amend --no-edit
+   \`\`\`
+6. Print exactly: \`[ORCHESTRATOR:CHECKPOINT_COMPLETE]\`
+7. You are done. Exit immediately.
+
+**IMPORTANT**: The orchestrator will create sub-jobs for the remaining work.
+Your checkpoint commit will be the starting point for those sub-jobs.
+Do not try to rush through remaining items — a clean checkpoint of completed
+work is far more valuable than a hasty attempt at everything.
+
+`;
+      }
+    }
+
     // Build instructions content with frontmatter
     const content = `---
 applyTo: '${applyToScope}'
 ---
 
-# CRITICAL RULES (read before doing ANYTHING)
+${checkpointPreamble}# CRITICAL RULES (read before doing ANYTHING)
 
 ## Command Output Rule
 **NEVER use \`Select-Object -Last\`, \`Select-Object -First\`, \`| head\`, or \`| tail\` to truncate command output.**
@@ -365,7 +485,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
   }
 
   /** Delegates to the standalone {@link buildCommand} pure function. */
-  buildCommand(options: BuildCommandOptions): string {
+  buildCommand(options: BuildCommandOptions): BuiltCommand {
     return buildCommand(options, {
       logger: this.logger,
       fallbackCwd: this.environment.cwd(),
@@ -376,12 +496,17 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
    * Execute the Copilot CLI command.
    */
   private execute(options: {
-    command: string; cwd: string; label: string; sessionId?: string;
+    command: BuiltCommand | string; cwd: string; label: string; sessionId?: string;
     timeout: number; onOutput?: (line: string) => void;
     onProcess?: (proc: ChildProcessLike) => void;
     env?: Record<string, string>;
+    planId?: string; jobId?: string; logDir?: string;
+    spawnerOverride?: import('../interfaces/IProcessSpawner').IProcessSpawner;
   }): Promise<CopilotRunResult> {
-    const { command, cwd, label, sessionId, timeout, onOutput, onProcess } = options;
+    const builtCmd = typeof options.command === 'string'
+      ? { executable: options.command, args: [] as string[], logDir: undefined as string | undefined, commandString: options.command }
+      : options.command;
+    const { cwd, label, sessionId, timeout, onOutput, onProcess } = options;
     
     return new Promise((resolve) => {
       // Clean environment: remove NODE_OPTIONS to avoid passing VS Code flags to CLI
@@ -389,7 +514,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       delete cleanEnv.NODE_OPTIONS;
       
       // Log the full invocation for diagnostics (to both logger AND onOutput for node log visibility)
-      this.logger.info(`[${label}] Spawning: ${command}`);
+      this.logger.info(`[${label}] Spawning: ${builtCmd.commandString}`);
       this.logger.info(`[${label}] CWD: ${cwd}`);
       const defaultKeyPrefixes = ['PATH', 'SYSTEM', 'WIN', 'COM', 'TEMP', 'TMP', 'HOME', 'USER', 'APP', 'LOCAL', 'PROGRAM', 'OS', 'PROCESSOR', 'NUMBER_OF', 'COMPUTER', 'VSCODE', 'ELECTRON', 'CHROME', 'NO_COLOR', 'PROMPT', 'PUBLIC', 'DRIVER', 'SESSION', 'LOGON', 'FPS_', 'GIT_TR', 'WVD_', 'NUGET', 'CONDA', 'PSModule', 'WSLENV', 'WT_', 'YARN', 'npm_', 'MACE', 'UATDATA', 'APPLICATION_INS', 'POWERSHELL_D', 'OneDrive', 'ESPMRepo', 'Chocolatey', 'IsDevBox', 'CLIENTNAME', 'CommonProgram'];
       const envLines: string[] = [];
@@ -402,7 +527,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       // Emit to onOutput so it appears in the node execution log
       if (onOutput) {
-        onOutput(`Spawning: ${command}`);
+        onOutput(`Spawning: ${builtCmd.commandString}`);
         onOutput(`CWD: ${cwd}`);
         if (envLines.length > 0) {
           onOutput(`Environment (non-default):`);
@@ -415,9 +540,10 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         for (const line of envLines) { this.logger.debug(`[${label}] ${line}`); }
       }
       
-      const proc = this.spawner.spawn(command, [], { cwd, shell: true, env: cleanEnv });
-      let capturedSessionId: string | undefined = sessionId;
-      const statsParser = new CopilotStatsParser();
+      const effectiveSpawner = options.spawnerOverride ?? this.spawner;
+      // Use shell: false with structured args to prevent command injection.
+      // Each argument is passed as a separate argv entry — no shell metacharacter interpretation.
+      const rawProc = effectiveSpawner.spawn(builtCmd.executable, builtCmd.args, { cwd, shell: false, env: cleanEnv });
       let timeoutHandle: NodeJS.Timeout | undefined;
       let wasKilledByTimeout = false;
       let statsHangTimer: NodeJS.Timeout | undefined;
@@ -425,135 +551,123 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
       
       // timeout === 0 means no timeout (agent work can run indefinitely)
       const effectiveTimeout = timeout > 0 ? Math.min(timeout, 2147483647) : 0;
-      if (effectiveTimeout > 0) {
-        timeoutHandle = setTimeout(() => {
-          wasKilledByTimeout = true;
-          this.logger.error(`[${label}] Process timed out after ${effectiveTimeout}ms, killing PID ${proc.pid}`);
-          try {
-            if (this.environment.platform === 'win32') {
-              this.spawner.spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t'], { shell: true });
-            } else {
-              proc.kill('SIGTERM');
-            }
-          } catch (e) { /* ignore */ }
-        }, effectiveTimeout);
+
+      // ── Managed process path (bus-based handlers) ──
+      const effectiveLogDir = builtCmd.logDir ?? options.logDir ?? path.join(cwd, '.orchestrator', '.copilot-cli', 'logs');
+      const managed = this.managedFactory?.create(rawProc, {
+        label: 'copilot',
+        planId: options.planId,
+        nodeId: options.jobId,
+        worktreePath: cwd,
+        logSources: [{
+          name: 'debug-log',
+          type: 'directory' as const,
+          path: effectiveLogDir,
+        }],
+      });
+
+      if (!managed) {
+        this.logger.error(`[${label}] IManagedProcessFactory not available — cannot execute without process output bus`);
+        resolve({ success: false, error: 'IManagedProcessFactory not available. Ensure DI is configured correctly.' });
+        return;
       }
 
-      // Track "Task complete" marker for Windows exit-code workaround
-      let sawTaskComplete = false;
-      
-      if (proc.pid) {
-        this.logger.info(`[${label}] Copilot PID: ${proc.pid}`);
-        onProcess?.(proc);
-      }
-      
-      const extractSession = (text: string) => {
-        if (capturedSessionId) { return; }
-        const match = text.match(/Session ID[:\s]+([a-f0-9-]{36})/i) ||
-                     text.match(/session[:\s]+([a-f0-9-]{36})/i) ||
-                     text.match(/Starting session[:\s]+([a-f0-9-]{36})/i);
-        if (match) {
-          capturedSessionId = match[1];
-          this.logger.info(`[${label}] Captured session ID: ${capturedSessionId}`);
+      // ── Bus-based path: handlers do the parsing ──
+      if (effectiveTimeout > 0) {
+          timeoutHandle = setTimeout(() => {
+            wasKilledByTimeout = true;
+            this.logger.error(`[${label}] Process timed out after ${effectiveTimeout}ms, killing PID ${managed.pid}`);
+            try { managed.kill(); } catch { /* ignore */ }
+          }, effectiveTimeout);
         }
-      };
-      
-      proc.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString();
-        text.split('\n').forEach(line => {
-          if (line.trim()) {
-            this.logger.debug(`[${label}] ${line.trim()}`);
-            statsParser.feedLine(line.trim());
-            onOutput?.(line.trim());
-            if (!sawTaskComplete && line.includes('Task complete')) { sawTaskComplete = true; }
-            // Start grace timer when stats summary is detected but process hasn't exited
-            if (!statsHangTimer && statsParser.getStatsStartedAt()) {
+
+        if (managed.pid) {
+          this.logger.info(`[${label}] Copilot PID: ${managed.pid}`);
+          onProcess?.(rawProc);
+        }
+
+        // Forward output lines and drive the stats hang timer
+        managed.on('line', (line: string, source) => {
+          if (source.type === 'stdout' || source.type === 'stderr') {
+            this.logger.debug(`[${label}] ${line}`);
+            onOutput?.(line);
+          }
+          // Start grace timer when stats summary is detected but process hasn't exited
+          if (source.type === 'stdout') {
+            const stats = managed.bus.getHandler<StatsHandler>('stats');
+            if (stats?.getStatsStartedAt() && !statsHangTimer) {
               this.logger.info(`[${label}] Stats summary detected — starting 30s grace timer for process exit`);
               statsHangTimer = setTimeout(() => {
-                this.logger.warn(`[${label}] CLI process hung after stats summary (30s grace expired) — force-killing PID ${proc.pid}`);
+                this.logger.warn(`[${label}] CLI process hung after stats summary (30s grace expired) — force-killing PID ${managed.pid}`);
                 wasKilledByStatsHang = true;
-                try {
-                  if (this.environment.platform === 'win32') {
-                    // Windows: SIGTERM is ignored by Node.js child processes — use taskkill
-                    this.spawner.spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t'], { shell: true });
-                  } else {
-                    proc.kill('SIGTERM');
-                    // If SIGTERM doesn't work, escalate after 5s
-                    setTimeout(() => {
-                      try { proc.kill('SIGKILL'); } catch { /* ignore */ }
-                    }, 5000);
-                  }
-                } catch { /* ignore */ }
+                try { managed.kill(); } catch { /* ignore */ }
               }, 30_000);
             }
           }
         });
-        extractSession(text);
-      });
-      
-      proc.stderr?.on('data', (data: Buffer) => {
-        const text = data.toString();
-        text.split('\n').forEach(line => {
-          if (line.trim()) {
-            this.logger.debug(`[${label}] ${line.trim()}`);
-            statsParser.feedLine(line.trim());
-            onOutput?.(line.trim());
+
+        managed.on('exit', (code: number | null, signal: string | null) => {
+          if (timeoutHandle) { clearTimeout(timeoutHandle); }
+          if (statsHangTimer) { clearTimeout(statsHangTimer); }
+
+          const sessionIdHandler = managed.bus.getHandler<SessionIdHandler>('session-id');
+          const taskCompleteHandler = managed.bus.getHandler<TaskCompleteHandler>('task-complete');
+          const statsHandler = managed.bus.getHandler<StatsHandler>('stats');
+
+          const capturedSessionId = sessionIdHandler?.getSessionId() ?? sessionId;
+          const sawTaskComplete = taskCompleteHandler?.sawTaskComplete() ?? false;
+
+          // Windows: code=null & signal=null after normal completion → treat as 0 if marker seen
+          const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0
+            // Stats-hang kill: the work completed, only the process hung — treat as success
+            : (wasKilledByStatsHang && statsHandler?.getMetrics()) ? 0
+            : code;
+          const metrics = statsHandler?.getMetrics();
+          if (metrics && !metrics.tokenUsage && metrics.modelBreakdown?.length) {
+            const totals = metrics.modelBreakdown.reduce(
+              (acc, m) => ({ input: acc.input + m.inputTokens, output: acc.output + m.outputTokens }),
+              { input: 0, output: 0 }
+            );
+            metrics.tokenUsage = {
+              inputTokens: totals.input, outputTokens: totals.output,
+              totalTokens: totals.input + totals.output, model: metrics.modelBreakdown[0].model,
+            };
+          }
+
+          if (effectiveCode !== 0) {
+            let reason: string;
+            if (wasKilledByTimeout) {
+              reason = `Copilot CLI killed by signal TIMEOUT after ${effectiveTimeout}ms (PID ${managed.pid})`;
+            } else if (wasKilledByStatsHang) {
+              reason = `Copilot CLI hung after stats summary, force-killed after 30s grace (PID ${managed.pid})`;
+            } else if (signal) {
+              reason = `Copilot CLI was killed by signal ${signal} (PID ${managed.pid})`;
+            } else {
+              reason = `Copilot CLI exited with code ${effectiveCode}`;
+            }
+            this.logger.error(`[${label}] ${reason}, code=${code}, signal=${signal}, sawTaskComplete=${sawTaskComplete}`);
+            this.logger.error(`[${label}] Process diagnostics: ${JSON.stringify(managed.diagnostics())}`);
+            resolve({ success: false, sessionId: capturedSessionId, error: reason, exitCode: effectiveCode ?? undefined, metrics });
+          } else {
+            if (code === null) {
+              this.logger.info(`[${label}] Copilot CLI completed (exit code null coerced to 0 — task completion marker was present)`);
+            } else if (wasKilledByStatsHang) {
+              this.logger.warn(`[${label}] Copilot CLI completed (stats-hang force-kill → treated as success since work finished)`);
+            } else {
+              this.logger.info(`[${label}] Copilot CLI completed successfully`);
+            }
+            resolve({ success: true, sessionId: capturedSessionId, exitCode: 0, metrics });
           }
         });
-        extractSession(text);
-      });
-      
-      proc.on('exit', (code, signal) => {
-        if (timeoutHandle) { clearTimeout(timeoutHandle); }
-        if (statsHangTimer) { clearTimeout(statsHangTimer); }
-        // Windows: code=null & signal=null after normal completion → treat as 0 if marker seen
-        const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0
-          // Stats-hang kill: the work completed, only the process hung — treat as success
-          : (wasKilledByStatsHang && statsParser.getMetrics()) ? 0
-          : code;
-        const metrics = statsParser.getMetrics();
-        if (metrics && !metrics.tokenUsage && metrics.modelBreakdown?.length) {
-          const totals = metrics.modelBreakdown.reduce(
-            (acc, m) => ({ input: acc.input + m.inputTokens, output: acc.output + m.outputTokens }),
-            { input: 0, output: 0 }
-          );
-          metrics.tokenUsage = {
-            inputTokens: totals.input, outputTokens: totals.output,
-            totalTokens: totals.input + totals.output, model: metrics.modelBreakdown[0].model,
-          };
-        }
 
-        if (effectiveCode !== 0) {
-          let reason: string;
-          if (wasKilledByTimeout) {
-            reason = `Copilot CLI killed by signal TIMEOUT after ${effectiveTimeout}ms (PID ${proc.pid})`;
-          } else if (wasKilledByStatsHang) {
-            reason = `Copilot CLI hung after stats summary, force-killed after 30s grace (PID ${proc.pid})`;
-          } else if (signal) {
-            reason = `Copilot CLI was killed by signal ${signal} (PID ${proc.pid})`;
-          } else {
-            reason = `Copilot CLI exited with code ${effectiveCode}`;
-          }
-          this.logger.error(`[${label}] ${reason}, code=${code}, signal=${signal}, sawTaskComplete=${sawTaskComplete}`);
-          resolve({ success: false, sessionId: capturedSessionId, error: reason, exitCode: effectiveCode ?? undefined, metrics });
-        } else {
-          if (code === null) {
-            this.logger.info(`[${label}] Copilot CLI completed (exit code null coerced to 0 — task completion marker was present)`);
-          } else if (wasKilledByStatsHang) {
-            this.logger.warn(`[${label}] Copilot CLI completed (stats-hang force-kill → treated as success since work finished)`);
-          } else {
-            this.logger.info(`[${label}] Copilot CLI completed successfully`);
-          }
-          resolve({ success: true, sessionId: capturedSessionId, exitCode: 0, metrics });
-        }
-      });
-      
-      proc.on('error', (err) => {
-        if (timeoutHandle) { clearTimeout(timeoutHandle); }
-        if (statsHangTimer) { clearTimeout(statsHangTimer); }
-        this.logger.error(`[${label}] Copilot CLI error: ${err.message}`);
-        resolve({ success: false, error: err.message });
-      });
+        managed.on('error', (err: Error) => {
+          if (timeoutHandle) { clearTimeout(timeoutHandle); }
+          if (statsHangTimer) { clearTimeout(statsHangTimer); }
+          this.logger.error(`[${label}] Copilot CLI error: ${err.message}`);
+          this.logger.error(`[${label}] Process diagnostics: ${JSON.stringify(managed.diagnostics())}`);
+          resolve({ success: false, error: err.message });
+        });
+
     });
   }
   
@@ -657,11 +771,26 @@ export interface BuildCommandOptions {
   allowedFolders?: string[];
   allowedUrls?: string[];
   maxTurns?: number;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
+}
+
+/** Structured command result for parameterized execution (no shell injection). */
+export interface BuiltCommand {
+  /** The executable name (e.g., 'copilot') */
+  executable: string;
+  /** Argument array — each element is a separate argv entry */
+  args: string[];
+  /** Resolved log directory path (for ManagedProcessFactory logSources) */
+  logDir: string | undefined;
+  /** Legacy: full command string for logging/display only */
+  commandString: string;
 }
 
 /**
- * Build a Copilot CLI command string.
- * Pure function — all I/O (fs.existsSync, process.cwd) must be provided via callbacks.
+ * Build a Copilot CLI command as a structured executable + args array.
+ * 
+ * Returns parameterized args (no shell metacharacter interpretation) to
+ * prevent command injection. The caller should use `shell: false`.
  *
  * @param options  - Command options
  * @param deps     - Optional dependency overrides for testing
@@ -674,10 +803,10 @@ export function buildCommand(
     fallbackCwd?: string;
     urlSanitizer?: (raw: string) => string | null;
   },
-): string {
+): BuiltCommand {
   const log = deps?.logger ?? noopLogger;
   const exists = deps?.existsSync ?? fs.existsSync;
-  const { task, sessionId, model, logDir, sharePath, cwd, allowedFolders, allowedUrls, maxTurns } = options;
+  const { task, sessionId, model, logDir, sharePath, cwd, allowedFolders, allowedUrls, maxTurns, effort } = options;
 
   const allowedPaths: string[] = [];
   if (cwd) {
@@ -710,42 +839,21 @@ export function buildCommand(
     log.info(`[SECURITY]   - ${p}`);
   }
 
-  // Config dir is always inside the worktree so copilot-cli can write to it
-  // without needing extra --add-dir entries. Session state is lost when the
-  // worktree is deleted, which is acceptable.
   const resolvedConfigDir = options.configDir || (cwd ? path.join(cwd, '.orchestrator', '.copilot-cli') : undefined);
 
-  let pathsArg: string;
-  if (allowedPaths.length === 0) {
-    const fallbackPath = cwd || deps?.fallbackCwd || process.cwd();
-    log.warn(`[SECURITY] No allowed paths specified, using explicit cwd: ${fallbackPath}`);
-    pathsArg = `--add-dir ${JSON.stringify(fallbackPath)}`;
-  } else {
-    pathsArg = allowedPaths.map(p => `--add-dir ${JSON.stringify(p)}`).join(' ');
-  }
-
   const doSanitize = deps?.urlSanitizer ?? ((raw: string) => sanitizeUrl(raw, log));
-  let urlsArg = '';
   const sanitizedUrls: string[] = [];
   if (allowedUrls && allowedUrls.length > 0) {
     for (const rawUrl of allowedUrls) {
       const validated = doSanitize(rawUrl);
-      if (validated) {
-        sanitizedUrls.push(validated);
-      }
+      if (validated) { sanitizedUrls.push(validated); }
     }
-
     if (sanitizedUrls.length > 0) {
       log.info(`[SECURITY] Copilot CLI allowed URLs (${sanitizedUrls.length} of ${allowedUrls.length} passed validation):`);
       for (const url of sanitizedUrls) {
-        try {
-          const parsed = new URL(url);
-          log.info(`[SECURITY]   - ${parsed.origin}${parsed.pathname}`);
-        } catch {
-          log.info(`[SECURITY]   - ${url.split('?')[0].split('#')[0]}`);
-        }
+        try { log.info(`[SECURITY]   - ${new URL(url).origin}${new URL(url).pathname}`); }
+        catch { log.info(`[SECURITY]   - ${url.split('?')[0].split('#')[0]}`); }
       }
-      urlsArg = sanitizedUrls.map(u => `--allow-url ${JSON.stringify(u)}`).join(' ');
     } else {
       log.warn(`[SECURITY] All ${allowedUrls.length} provided URLs failed validation — network access disabled`);
     }
@@ -753,22 +861,46 @@ export function buildCommand(
     log.info(`[SECURITY] Copilot CLI allowed URLs: none (network access disabled)`);
   }
 
-  let cmd = `copilot -p ${JSON.stringify(task)} --stream off ${pathsArg} --allow-all-tools --no-auto-update --no-ask-user`;
-  if (urlsArg) { cmd += ` ${urlsArg}`; }
-  if (resolvedConfigDir) { cmd += ` --config-dir ${JSON.stringify(resolvedConfigDir)}`; }
-  if (model) { cmd += ` --model ${model}`; }
-  // Always include --log-dir if available (enables detailed tool call logging)
-  if (logDir) {
-    cmd += ` --log-dir ${JSON.stringify(logDir)} --log-level debug`;
-  } else if (resolvedConfigDir) {
-    // Fallback: use config dir + /logs as log dir
-    const fallbackLogDir = path.join(resolvedConfigDir, 'logs');
-    cmd += ` --log-dir ${JSON.stringify(fallbackLogDir)} --log-level debug`;
-    log.info(`[cli] No explicit logDir — using fallback: ${fallbackLogDir}`);
+  // Build args array — each value is a separate argv entry, no shell quoting needed
+  const cmdArgs: string[] = [
+    '-p', task,
+    '--stream', 'off',
+  ];
+
+  // --add-dir for each allowed path
+  if (allowedPaths.length === 0) {
+    const fallbackPath = cwd || deps?.fallbackCwd || process.cwd();
+    log.warn(`[SECURITY] No allowed paths specified, using explicit cwd: ${fallbackPath}`);
+    cmdArgs.push('--add-dir', fallbackPath);
+  } else {
+    for (const p of allowedPaths) { cmdArgs.push('--add-dir', p); }
   }
-  if (sharePath) { cmd += ` --share ${JSON.stringify(sharePath)}`; }
-  if (sessionId) { cmd += ` --resume ${sessionId}`; }
-  if (maxTurns && maxTurns > 0) { cmd += ` --max-turns ${maxTurns}`; }
-  log.info(`[SECURITY] Copilot CLI command: copilot ${cmd}`);
-  return cmd;
+
+  cmdArgs.push('--allow-all-tools', '--no-auto-update', '--no-ask-user');
+
+  // --allow-url for each sanitized URL
+  for (const url of sanitizedUrls) { cmdArgs.push('--allow-url', url); }
+
+  if (resolvedConfigDir) { cmdArgs.push('--config-dir', resolvedConfigDir); }
+  if (model) { cmdArgs.push('--model', model); }
+
+  // Resolve effective log dir
+  let effectiveLogDir = logDir;
+  if (!effectiveLogDir && resolvedConfigDir) {
+    effectiveLogDir = path.join(resolvedConfigDir, 'logs');
+    log.info(`[cli] No explicit logDir — using fallback: ${effectiveLogDir}`);
+  }
+  if (effectiveLogDir) {
+    cmdArgs.push('--log-dir', effectiveLogDir, '--log-level', 'debug');
+  }
+
+  if (sharePath) { cmdArgs.push('--share', sharePath); }
+  if (sessionId) { cmdArgs.push('--resume', sessionId); }
+  if (maxTurns && maxTurns > 0) { cmdArgs.push('--max-turns', String(maxTurns)); }
+  if (effort) { cmdArgs.push('--effort', effort); }
+
+  const commandString = `copilot ${cmdArgs.map(a => a.includes(' ') ? JSON.stringify(a) : a).join(' ')}`;
+  log.info(`[SECURITY] Copilot CLI command: ${commandString}`);
+
+  return { executable: 'copilot', args: cmdArgs, logDir: effectiveLogDir, commandString };
 }

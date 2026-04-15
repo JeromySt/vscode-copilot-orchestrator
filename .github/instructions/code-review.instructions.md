@@ -37,5 +37,6 @@ When reviewing pull requests in this repository, enforce these critical rules:
 - Direct `fs` calls in `src/plan/executionEngine.ts` for instructions file I/O (auto-heal)
 - Direct `fs` calls in `src/plan/phases/commitPhase.ts` for non-fatal worktree cleanup (removing leaked dirs before commit)
 - Direct `fs` calls in `src/plan/store/FileSystemPlanStore.ts` (storage implementation behind IPlanRepositoryStore)
+- Direct `fs` calls in `src/process/logFileTailer.ts` (log file tailing implementation behind IManagedProcessFactory)
 - `child_process` import in `src/interfaces/IProcessSpawner.ts` (the abstraction boundary itself)
 - `child_process` import in `src/git/core/executor.ts` (the git command executor — wrapped by `IGitOperations`)

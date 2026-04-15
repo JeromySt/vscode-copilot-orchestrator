@@ -290,11 +290,12 @@ export function renderPlansViewStyles(): string {
     .plan-item.selected .plan-status { 
       opacity: 1;
     }
-    .plan-item.running { border-left-color: var(--vscode-progressBar-background); }
-    .plan-item.succeeded { border-left-color: var(--vscode-testing-iconPassed); }
-    .plan-item.failed { border-left-color: var(--vscode-testing-iconFailed); }
+    .plan-item.running { border-left-color: #007acc; background: rgba(0,122,204,0.08); }
+    .plan-item.succeeded { border-left-color: #4ec9b0; }
+    .plan-item.failed { border-left-color: #f48771; }
     .plan-item.partial { border-left-color: var(--vscode-editorWarning-foreground); }
-    .plan-item.canceled { border-left-color: var(--vscode-descriptionForeground); }
+    .plan-item.canceled { border-left-color: var(--vscode-descriptionForeground); opacity: 0.7; }
+    .plan-item.pending { border-left-color: var(--vscode-descriptionForeground); }
     .plan-item.scaffolding {
       border-left: 4px solid transparent;
       border-image: repeating-linear-gradient(
@@ -328,11 +329,12 @@ export function renderPlansViewStyles(): string {
       flex-shrink: 0;
       white-space: nowrap;
     }
-    .plan-status.running { background: rgba(0, 122, 204, 0.2); color: var(--vscode-progressBar-background); }
-    .plan-status.succeeded { background: rgba(78, 201, 176, 0.2); color: var(--vscode-testing-iconPassed); }
-    .plan-status.failed { background: rgba(244, 135, 113, 0.2); color: var(--vscode-testing-iconFailed); }
+    .plan-status.running { background: rgba(0, 122, 204, 0.3); color: #3794ff; font-weight: 700; }
+    .plan-status.succeeded { background: rgba(78, 201, 176, 0.2); color: #4ec9b0; }
+    .plan-status.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
     .plan-status.partial { background: rgba(255, 204, 0, 0.2); color: var(--vscode-editorWarning-foreground); }
     .plan-status.pending { background: rgba(133, 133, 133, 0.2); color: var(--vscode-descriptionForeground); }
+    .plan-status.canceled { background: rgba(128, 128, 128, 0.15); color: var(--vscode-descriptionForeground); }
     .plan-status.paused { background: rgba(255, 165, 0, 0.2); color: #ffa500; }
     .plan-status.pausing { background: rgba(255, 165, 0, 0.15); color: #cc8400; }
     .plan-status.resumed { background: rgba(0, 122, 204, 0.2); color: #3794ff; }

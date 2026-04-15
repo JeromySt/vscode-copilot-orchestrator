@@ -64,12 +64,6 @@ suite('MCP Validation Unit Tests', () => {
   });
   
   suite('hasSchema', () => {
-    test.skip('should return true for known tools', () => {
-      assert.strictEqual(hasSchema('create_copilot_plan'), true);
-      assert.strictEqual(hasSchema('get_copilot_plan_status'), true);
-      assert.strictEqual(hasSchema('list_plans'), true);
-      assert.strictEqual(hasSchema('get_node_details'), true);
-    });
     
     test('should return false for unknown tools', () => {
       assert.strictEqual(hasSchema('unknown_tool'), false);
@@ -199,24 +193,8 @@ suite('MCP Validation Unit Tests', () => {
       
       assert.strictEqual(result.valid, true);
     });
-    
-    test.skip('should require planId and nodeId for node tools', () => {
-      const nodeTools = ['get_node_details', 'get_node_logs', 'retry_node'];
-      
-      nodeTools.forEach(tool => {
-        const invalidInput = {
-          planId: 'plan-123'
-          // Missing nodeId
-        };
-        
-        const result = validateInput(tool, invalidInput);
-        
-        assert.strictEqual(result.valid, false, `Tool ${tool} should require nodeId`);
-        assert.ok(result.error);
-      });
-    });
   });
-  
+
   suite('validateInput - edge cases', () => {
     test('should handle null input', () => {
       const result = validateInput('create_copilot_plan', null);
@@ -237,14 +215,6 @@ suite('MCP Validation Unit Tests', () => {
       
       assert.strictEqual(result.valid, false);
       assert.ok(result.error);
-    });
-    
-    test.skip('should handle unknown tool', () => {
-      const result = validateInput('unknown_tool', { test: 'value' });
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('unknown') || result.error.includes('tool'));
     });
     
     test('should handle additional properties', () => {
@@ -283,35 +253,6 @@ suite('MCP Validation Unit Tests', () => {
       assert.ok(!result.error);
     });
     
-    test.skip('should reject non-existent folders', async () => {
-      const args = {
-        allowedFolders: ['/nonexistent/path']
-      };
-      
-      mockFs.existsSync.withArgs('/nonexistent/path').returns(false);
-      
-      const result = await validateAllowedFolders(args, 'create_copilot_plan');
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('/nonexistent/path'));
-    });
-    
-    test.skip('should reject files (non-directories)', async () => {
-      const args = {
-        allowedFolders: ['/path/to/file.txt']
-      };
-      
-      mockFs.existsSync.withArgs('/path/to/file.txt').returns(true);
-      mockFs.statSync.withArgs('/path/to/file.txt').returns({ isDirectory: () => false });
-      
-      const result = await validateAllowedFolders(args, 'create_copilot_plan');
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
-      assert.ok(result.error.includes('directory'));
-    });
-    
     test('should handle empty allowedFolders array', async () => {
       const args = {
         allowedFolders: []
@@ -329,21 +270,8 @@ suite('MCP Validation Unit Tests', () => {
       
       assert.strictEqual(result.valid, true);
     });
-    
-    test.skip('should handle filesystem errors gracefully', async () => {
-      const args = {
-        allowedFolders: ['/permission/denied']
-      };
-      
-      mockFs.existsSync.withArgs('/permission/denied').throws(new Error('Permission denied'));
-      
-      const result = await validateAllowedFolders(args, 'create_copilot_plan');
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
-    });
   });
-  
+
   suite('validateAllowedUrls', () => {
     test('should validate HTTP and HTTPS URLs', async () => {
       const args = {
@@ -358,28 +286,6 @@ suite('MCP Validation Unit Tests', () => {
       
       assert.strictEqual(result.valid, true);
       assert.ok(!result.error);
-    });
-    
-    test.skip('should reject invalid URLs', async () => {
-      const args = {
-        allowedUrls: ['not-a-url', 'ftp://invalid.com']
-      };
-      
-      const result = await validateAllowedUrls(args, 'create_copilot_plan');
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
-    });
-    
-    test.skip('should reject non-HTTP(S) protocols', async () => {
-      const args = {
-        allowedUrls: ['ftp://example.com', 'file:///path/to/file']
-      };
-      
-      const result = await validateAllowedUrls(args, 'create_copilot_plan');
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
     });
     
     test('should handle empty allowedUrls array', async () => {
@@ -463,7 +369,7 @@ suite('MCP Validation Unit Tests', () => {
       assert.strictEqual(result.valid, true);
     });
   });
-  
+
   suite('Error handling and edge cases', () => {
     test('should handle malformed input gracefully', () => {
       const malformedInputs = [
@@ -506,14 +412,6 @@ suite('MCP Validation Unit Tests', () => {
       
       const result = validateInput('create_copilot_plan', largeInput);
       assert.strictEqual(typeof result.valid, 'boolean');
-    });
-    
-    test.skip('should handle schema compilation errors gracefully', () => {
-      // Test with invalid tool that might cause schema issues
-      const result = validateInput('definitely-not-a-real-tool', { test: 'data' });
-      
-      assert.strictEqual(result.valid, false);
-      assert.ok(result.error);
     });
   });
 });

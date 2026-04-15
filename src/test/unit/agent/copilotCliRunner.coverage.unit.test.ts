@@ -204,18 +204,21 @@ suite('copilotCliRunner', () => {
       existsStub = sandbox.stub().returns(true);
     });
 
+    /** Match the commandString format: args with spaces are JSON.stringify'd, others are bare. */
+    function q(val: string): string { return val.includes(' ') ? JSON.stringify(val) : val; }
+
     test('should build basic command with task and cwd', () => {
       const cmd = buildCommand(
         { task: 'test task', cwd: testCwd },
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('copilot'));
-      assert.ok(cmd.includes('-p "test task"'));
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
-      assert.ok(cmd.includes('--stream off'));
-      assert.ok(cmd.includes('--allow-all-tools'));
-      assert.ok(cmd.includes('--no-auto-update'));
+      assert.ok(cmd.commandString.includes('copilot'));
+      assert.ok(cmd.commandString.includes('-p "test task"'));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
+      assert.ok(cmd.commandString.includes('--stream off'));
+      assert.ok(cmd.commandString.includes('--allow-all-tools'));
+      assert.ok(cmd.commandString.includes('--no-auto-update'));
     });
 
     test('should derive configDir from cwd by default', () => {
@@ -224,7 +227,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes(`--config-dir ${JSON.stringify(path.join(testCwd, '.orchestrator', '.copilot-cli'))}`));
+      assert.ok(cmd.commandString.includes(`--config-dir ${q(path.join(testCwd, '.orchestrator', '.copilot-cli'))}`));
     });
 
     test('should NOT add configDir to --add-dir (inside worktree)', () => {
@@ -234,9 +237,9 @@ suite('copilotCliRunner', () => {
       );
 
       // Should only have one --add-dir for cwd
-      const addDirMatches = cmd.match(/--add-dir/g);
+      const addDirMatches = cmd.commandString.match(/--add-dir/g);
       assert.strictEqual(addDirMatches?.length, 1);
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
     });
 
     test('should use explicit configDir if provided', () => {
@@ -245,8 +248,8 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes(`--config-dir ${JSON.stringify(testCustomConfig)}`));
-      assert.ok(!cmd.includes('.orchestrator'));
+      assert.ok(cmd.commandString.includes(`--config-dir ${q(testCustomConfig)}`));
+      assert.ok(!cmd.commandString.includes('.orchestrator'));
     });
 
     test('should warn and skip non-existent allowedFolders', () => {
@@ -263,8 +266,8 @@ suite('copilotCliRunner', () => {
 
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/does not exist.*does-not-exist/));
       // Should only have cwd in --add-dir
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
-      assert.ok(!cmd.includes('does-not-exist'));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
+      assert.ok(!cmd.commandString.includes('does-not-exist'));
     });
 
     test('should skip relative paths in allowedFolders', () => {
@@ -278,7 +281,7 @@ suite('copilotCliRunner', () => {
       );
 
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/relative.*must be absolute/));
-      assert.ok(!cmd.includes('relative'));
+      assert.ok(!cmd.commandString.includes('relative'));
     });
 
     test('should add valid allowedFolders', () => {
@@ -293,9 +296,9 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testFolder1))}`));
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testFolder2))}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testFolder1))}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testFolder2))}`));
     });
 
     test('should sanitize and add allowedUrls', () => {
@@ -313,9 +316,9 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--allow-url "https://example.com"'));
-      assert.ok(cmd.includes('--allow-url "*.github.com"'));
-      assert.ok(!cmd.includes('bad-url'));
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://example.com') !== -1);
+      assert.ok(cmd.commandString.includes('*.github.com'));
+      assert.ok(!cmd.commandString.includes('bad-url'));
       assert.ok((mockLogger.info as sinon.SinonStub).calledWithMatch(/2 of 3 passed validation/));
     });
 
@@ -331,7 +334,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(!cmd.includes('--allow-url'));
+      assert.ok(!cmd.commandString.includes('--allow-url'));
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/All 2.*failed validation.*network access disabled/));
     });
 
@@ -341,7 +344,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--model claude-sonnet-4.5'));
+      assert.ok(cmd.commandString.includes('--model claude-sonnet-4.5'));
     });
 
     test('should add logDir flag', () => {
@@ -350,8 +353,8 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes(`--log-dir ${JSON.stringify(testLogDir)}`));
-      assert.ok(cmd.includes('--log-level debug'));
+      assert.ok(cmd.commandString.includes(`--log-dir ${q(testLogDir)}`));
+      assert.ok(cmd.commandString.includes('--log-level debug'));
     });
 
     test('should add sharePath flag', () => {
@@ -360,7 +363,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes(`--share ${JSON.stringify(testSharePath)}`));
+      assert.ok(cmd.commandString.includes(`--share ${q(testSharePath)}`));
     });
 
     test('should add sessionId flag', () => {
@@ -369,7 +372,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--resume abc-123'));
+      assert.ok(cmd.commandString.includes('--resume abc-123'));
     });
 
     test('should add maxTurns flag', () => {
@@ -378,7 +381,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes('--max-turns 5'));
+      assert.ok(cmd.commandString.includes('--max-turns 5'));
     });
 
     test('should not add maxTurns if zero', () => {
@@ -387,7 +390,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(!cmd.includes('--max-turns'));
+      assert.ok(!cmd.commandString.includes('--max-turns'));
     });
 
     test('should use fallback cwd when no cwd or allowedPaths', () => {
@@ -396,7 +399,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(testFallback)}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(testFallback)}`));
       assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/No allowed paths.*explicit cwd.*fallback/));
     });
 
@@ -424,17 +427,17 @@ suite('copilotCliRunner', () => {
         }
       );
 
-      assert.ok(cmd.includes('copilot'));
-      assert.ok(cmd.includes('-p "complex task"'));
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testCwd))}`));
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testFolder1))}`));
-      assert.ok(cmd.includes('--allow-url "https://api.example.com"'));
-      assert.ok(cmd.includes(`--config-dir ${JSON.stringify(testConfig)}`));
-      assert.ok(cmd.includes('--model gpt-5'));
-      assert.ok(cmd.includes(`--log-dir ${JSON.stringify(testLogDir)}`));
-      assert.ok(cmd.includes(`--share ${JSON.stringify(testSharePath)}`));
-      assert.ok(cmd.includes('--resume session-123'));
-      assert.ok(cmd.includes('--max-turns 10'));
+      assert.ok(cmd.commandString.includes('copilot'));
+      assert.ok(cmd.commandString.includes('-p "complex task"'));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testFolder1))}`));
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.example.com') !== -1);
+      assert.ok(cmd.commandString.includes(`--config-dir ${q(testConfig)}`));
+      assert.ok(cmd.commandString.includes('--model gpt-5'));
+      assert.ok(cmd.commandString.includes(`--log-dir ${q(testLogDir)}`));
+      assert.ok(cmd.commandString.includes(`--share ${q(testSharePath)}`));
+      assert.ok(cmd.commandString.includes('--resume session-123'));
+      assert.ok(cmd.commandString.includes('--max-turns 10'));
     });
 
     test('should log error if cwd does not exist', () => {
@@ -447,7 +450,7 @@ suite('copilotCliRunner', () => {
 
       assert.ok((mockLogger.error as sinon.SinonStub).calledWithMatch(/does not exist.*nonexistent/));
       // Still add it to the command
-      assert.ok(cmd.includes(`--add-dir ${JSON.stringify(path.resolve(testNonexistent))}`));
+      assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testNonexistent))}`));
     });
   });
 
@@ -497,7 +500,7 @@ suite('copilotCliRunner', () => {
           filePath: 'C:\\worktree\\.github\\instructions\\orchestrator-job.instructions.md',
           dirPath: 'C:\\worktree\\.github\\instructions',
         });
-        sandbox.stub(runner, 'buildCommand').returns('copilot -p "test"');
+        sandbox.stub(runner, 'buildCommand').returns({ executable: 'copilot', args: ['-p', 'test'], logDir: undefined, commandString: 'copilot -p "test"' });
         const cleanupStub = sandbox.stub(runner, 'cleanupInstructionsFile');
 
         const mockProc = {
@@ -524,7 +527,7 @@ suite('copilotCliRunner', () => {
         sandbox.stub(runner, 'isAvailable').returns(true);
         sandbox.stub(runner, 'ensureAvailable').resolves(true);
         const writeStub = sandbox.stub(runner, 'writeInstructionsFile');
-        sandbox.stub(runner, 'buildCommand').returns('copilot -p "test"');
+        sandbox.stub(runner, 'buildCommand').returns({ executable: 'copilot', args: ['-p', 'test'], logDir: undefined, commandString: 'copilot -p "test"' });
 
         const mockProc = {
           pid: 1234,
@@ -552,7 +555,7 @@ suite('copilotCliRunner', () => {
           filePath: instructionsPath,
           dirPath: 'C:\\worktree\\.github\\instructions',
         });
-        sandbox.stub(runner, 'buildCommand').returns('copilot -p "test"');
+        sandbox.stub(runner, 'buildCommand').returns({ executable: 'copilot', args: ['-p', 'test'], logDir: undefined, commandString: 'copilot -p "test"' });
         const cleanupStub = sandbox.stub(runner, 'cleanupInstructionsFile');
 
         const mockProc = {
@@ -581,7 +584,7 @@ suite('copilotCliRunner', () => {
           filePath: instructionsPath,
           dirPath: 'C:\\worktree\\.github\\instructions',
         });
-        sandbox.stub(runner, 'buildCommand').returns('copilot -p "test"');
+        sandbox.stub(runner, 'buildCommand').returns({ executable: 'copilot', args: ['-p', 'test'], logDir: undefined, commandString: 'copilot -p "test"' });
         const cleanupStub = sandbox.stub(runner, 'cleanupInstructionsFile');
 
         const mockProc = {

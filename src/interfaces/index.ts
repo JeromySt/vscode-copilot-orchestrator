@@ -41,3 +41,8 @@ export * from './IReleaseConfigManager';
 export * from './IIsolatedRepoManager';
 export * from './IPRLifecycleManager';
 export * from './IManagedPRStore';
+export * from './IOutputHandler';
+export * from './IProcessOutputBus';
+export * from './IManagedProcess';
+export * from './IManagedProcessFactory';
+export * from './IOutputHandlerRegistry';

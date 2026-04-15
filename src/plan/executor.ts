@@ -17,6 +17,7 @@ import {
 import { JobExecutor } from './runner';
 import { Logger } from '../core/logger';
 import type { IGitOperations } from '../interfaces/IGitOperations';
+import type { IFileSystem } from '../interfaces/IFileSystem';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
@@ -56,20 +57,21 @@ export class DefaultJobExecutor implements JobExecutor {
   private activeExecutionsByNode = new Map<string, string>();
   private executionLogs = new Map<string, LogEntry[]>();
   private logFiles = new Map<string, string>();
-  private agentDelegator?: any;
   private storagePath?: string;
   private processMonitor: IProcessMonitor;
   private evidenceValidator: IEvidenceValidator;
   private spawner: IProcessSpawner;
   private git: IGitOperations;
   private copilotRunner: ICopilotRunner;
+  private fileSystem?: IFileSystem;
 
-  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor, git: IGitOperations, copilotRunner: ICopilotRunner) {
+  constructor(spawner: IProcessSpawner, evidenceValidator: IEvidenceValidator, processMonitor: IProcessMonitor, git: IGitOperations, copilotRunner: ICopilotRunner, fileSystem?: IFileSystem) {
     this.spawner = spawner;
     this.evidenceValidator = evidenceValidator;
     this.processMonitor = processMonitor;
     this.git = git;
     this.copilotRunner = copilotRunner;
+    this.fileSystem = fileSystem;
   }
 
   setStoragePath(storagePath: string): void {
@@ -78,7 +80,6 @@ export class DefaultJobExecutor implements JobExecutor {
     // No need to create a separate logs/ directory
   }
 
-  setAgentDelegator(delegator: any): void { this.agentDelegator = delegator; }
   setEvidenceValidator(validator: IEvidenceValidator): void { this.evidenceValidator = validator; }
 
   // ===========================================================================
@@ -125,14 +126,15 @@ export class DefaultJobExecutor implements JobExecutor {
     // already-merged commits. Skipping it caused data loss when nodes resumed after partial FI.
     const skip = (p: typeof phaseOrder[number]) => p !== 'merge-fi' && phaseOrder.indexOf(p) < resumeIndex;
     const phaseDeps = () => ({ 
-      agentDelegator: this.agentDelegator, 
-      spawner: this.spawner,
+      copilotRunner: context.copilotRunnerOverride ?? this.copilotRunner, 
+      spawner: context.spawnerOverride ?? this.spawner,
       git: this.git,
-      copilotRunner: this.copilotRunner,
+      fileSystem: this.fileSystem,
       configManager: undefined, // TODO: Pass config manager if available
     });
     const makeCtx = (phase: ExecutionPhase): PhaseContext => ({
       node, worktreePath, executionKey, phase,
+      planId: plan.id,
       // Copilot CLI config dir: plans/<planId>/.copilot-cli (plan-level isolation)
       // configDir: derived from cwd by buildCommand() — always <worktree>/.orchestrator/.copilot-cli
       configDir: undefined,
@@ -322,6 +324,14 @@ export class DefaultJobExecutor implements JobExecutor {
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION END ==========');
         if (!r.success) { stepStatuses.work = 'failed'; context.onStepStatusChange?.('work', 'failed'); log.info(`[executor.execute] Returning failure: ${r.error}`, { planId: plan.id, nodeId: node.id }); return this.applyFailureConfig({ success: false, error: `Work failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'work', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, noAutoHeal: r.noAutoHeal, failureMessage: r.failureMessage, overrideResumeFromPhase: r.overrideResumeFromPhase, phaseTiming: context.phaseTiming }, workSpec); }
         stepStatuses.work = 'success'; context.onStepStatusChange?.('work', 'success');
+        // Track agent phase for context pressure checkpoint detection (C7).
+        // The execution engine checks nodeState.agentPhase === 'work' before
+        // triggering the fan-out/fan-in DAG reshape from a checkpoint manifest.
+        const normalizedWork = normalizeWorkSpec(workSpec);
+        if (normalizedWork?.type === 'agent') {
+          const nodeState = context.plan.nodeStates.get(node.id);
+          if (nodeState) { nodeState.agentPhase = 'work'; }
+        }
       } else {
         this.logEntry(executionKey, 'work', 'info', '========== WORK SECTION START ==========');
         this.logEntry(executionKey, 'work', 'info', 'No work specified - skipping');
@@ -349,8 +359,14 @@ export class DefaultJobExecutor implements JobExecutor {
       } else { stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
 
       // ---- POSTCHECKS ----
+      let postchecksWarning = false;
       if (skip('postchecks')) { this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION (SKIPPED - RESUMING) =========='); }
       else if (postchecksSpec_) {
+        // Detect if a checkpoint sentinel exists — if so, postchecks failures become warnings
+        const sentinelPath = path.join(worktreePath, '.orchestrator', 'CHECKPOINT_REQUIRED');
+        const hasSentinel = fs.existsSync(sentinelPath);
+        if (hasSentinel) { this.logEntry(executionKey, 'postchecks', 'info', 'Checkpoint sentinel detected — postchecks failures will be treated as warnings'); }
+
         context.onProgress?.('Running postchecks'); context.onStepStatusChange?.('postchecks', 'running');
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION START ==========');
         const phaseStart = Date.now();
@@ -362,8 +378,19 @@ export class DefaultJobExecutor implements JobExecutor {
         if (r.copilotSessionId) {capturedSessionId = r.copilotSessionId;}
         if (r.metrics) { capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, r.metrics]) : r.metrics; phaseMetrics['postchecks'] = r.metrics; }
         this.logEntry(executionKey, 'postchecks', 'info', '========== POSTCHECKS SECTION END ==========');
-        if (!r.success) { stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return this.applyFailureConfig({ success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, noAutoHeal: r.noAutoHeal, failureMessage: r.failureMessage, overrideResumeFromPhase: r.overrideResumeFromPhase, phaseTiming: context.phaseTiming }, postcheckSpec); }
-        stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
+        if (!r.success) {
+          if (hasSentinel) {
+            // Sentinel present — treat postchecks failure as warning, not job failure
+            log.warn('Postchecks failed but sentinel present — treating as warning', { executionKey, error: r.error });
+            this.logEntry(executionKey, 'postchecks', 'info', `Postchecks failed (warning — checkpoint sentinel present): ${r.error}`);
+            postchecksWarning = true;
+            stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
+          } else {
+            stepStatuses.postchecks = 'failed'; context.onStepStatusChange?.('postchecks', 'failed'); return this.applyFailureConfig({ success: false, error: `Postchecks failed: ${r.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'postchecks', exitCode: r.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, noAutoHeal: r.noAutoHeal, failureMessage: r.failureMessage, overrideResumeFromPhase: r.overrideResumeFromPhase, phaseTiming: context.phaseTiming }, postcheckSpec);
+          }
+        } else {
+          stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
+        }
       } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
       if (pendingCommitFailure) { return { success: false, error: `Commit failed: ${pendingCommitFailure}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, phaseTiming: context.phaseTiming };}
@@ -380,7 +407,23 @@ export class DefaultJobExecutor implements JobExecutor {
         // If a snapshot branch exists, merge into it instead of targetBranch.
         ctx.targetBranch = context.snapshotBranch || context.targetBranch;
         ctx.baseCommitAtStart = context.baseCommitAtStart;
-        ctx.completedCommit = cr.commit;
+        // Always use the worktree HEAD as the merge source for RI merges.
+        // The worktree HEAD is the canonical source of truth — it contains:
+        //   - For normal leaf nodes: the agent's committed work (same as cr.commit)
+        //   - For SV nodes: all accumulated FI-merged leaf work + prechecks rebase
+        // The hasChangesBetween() check inside merge-RI handles "no actual changes."
+        // Previously, we used cr.commit (from the commit phase), which was undefined
+        // for SV nodes (verification doesn't modify files), causing merge-RI to skip
+        // entirely and ALL plan work to be lost.
+        try {
+          ctx.completedCommit = await this.git.worktrees.getHeadCommit(worktreePath) ?? undefined;
+        } catch {
+          ctx.completedCommit = cr.commit; // last resort: use commit phase result
+        }
+        if (ctx.completedCommit) {
+          this.logEntry(executionKey, 'merge-ri', 'info',
+            `RI merge source: ${ctx.completedCommit.slice(0, 8)} (worktree HEAD)`);
+        }
         ctx.baseCommit = context.baseCommit;
         const r = await new MergeRiPhaseExecutor(phaseDeps()).execute(ctx);
         context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
@@ -397,7 +440,10 @@ export class DefaultJobExecutor implements JobExecutor {
       const ws = await computeWorkSummary(node, worktreePath, context.baseCommit, this.git);
       context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
       stepStatuses['cleanup'] = 'success'; context.onStepStatusChange?.('cleanup', 'success');
-      return { success: true, completedCommit: cr.commit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
+      // Use cr.commit if available, otherwise the worktree HEAD (same fallback as merge-RI).
+      // This ensures the engine's nodeState.completedCommit is set correctly for downstream FI.
+      const resolvedCommit = cr.commit || ((await this.git.worktrees.getHeadCommit(worktreePath).catch(() => null)) ?? undefined);
+      return { success: true, completedCommit: resolvedCommit, workSummary: ws, stepStatuses, copilotSessionId: capturedSessionId, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, postchecksWarning: postchecksWarning || undefined, phaseTiming: context.phaseTiming };
     } catch (error: any) {
       log.error(`Execution error: ${node.name}`, { error: error.message });
       // Ensure any in-flight phase timing entry has an endedAt timestamp

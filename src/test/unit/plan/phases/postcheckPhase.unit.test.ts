@@ -48,8 +48,8 @@ suite('PostcheckPhaseExecutor', () => {
   });
 
   test('delegates agent work', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true, sessionId: 'ss', metrics: { durationMs: 10 } }) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const mockRunner: any = { run: sinon.stub().resolves({ success: true, sessionId: 'ss', metrics: { durationMs: 10 } }) };
+    const executor = new PostcheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'verify' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -64,17 +64,17 @@ suite('PostcheckPhaseExecutor', () => {
     assert.ok(result.error?.includes('Unknown work type'));
   });
 
-  test('agent fails without delegator', async () => {
+  test('agent fails without copilot runner', async () => {
     const executor = new PostcheckPhaseExecutor({ spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
-    assert.ok(result.error?.includes('agent delegator'));
+    assert.ok(result.error?.includes('Copilot runner'));
   });
 
   test('agent failure returns error', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: false, error: 'nope', exitCode: 2 }) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const mockRunner: any = { run: sinon.stub().resolves({ success: false, error: 'nope', exitCode: 2 }) };
+    const executor = new PostcheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'verify' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -82,8 +82,8 @@ suite('PostcheckPhaseExecutor', () => {
   });
 
   test('agent exception caught', async () => {
-    const delegator = { delegate: sinon.stub().rejects(new Error('crash')) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const mockRunner: any = { run: sinon.stub().rejects(new Error('crash')) };
+    const executor = new PostcheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'verify' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -98,8 +98,8 @@ suite('PostcheckPhaseExecutor', () => {
   });
 
   test('normalises @agent string', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new PostcheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const mockRunner: any = { run: sinon.stub().resolves({ success: true }) };
+    const executor = new PostcheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: '@agent review code' });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);

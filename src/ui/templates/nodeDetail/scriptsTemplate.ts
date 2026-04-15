@@ -43,7 +43,7 @@ export interface ScriptsConfig {
 export function webviewScripts(config: ScriptsConfig): string {
   return `
     // Destructure bundled controls from window.Orca
-    const { EventBus, Topics, StatusBadge, DurationCounter, LogViewer, ProcessTree, PhaseTabBar, AttemptCard, AiUsageStats, WorkSummary, ConfigDisplay } = window.Orca;
+    const { EventBus, Topics, StatusBadge, DurationCounter, LogViewer, ProcessTree, PhaseTabBar, AttemptCard, AiUsageStats, WorkSummary, ConfigDisplay, ContextPressureCard } = window.Orca;
 
     // Initialize vscode API and constants
     var vscode = acquireVsCodeApi();
@@ -60,5 +60,9 @@ export function webviewScripts(config: ScriptsConfig): string {
     ${renderControlWiring(config)}
 
     ${renderEventHandlers(config)}
+
+    // Signal extension host that all controls are wired and ready for data.
+    // This replaces brittle setTimeout delays for initial data delivery.
+    vscode.postMessage({ type: 'webviewReady' });
   `;
 }

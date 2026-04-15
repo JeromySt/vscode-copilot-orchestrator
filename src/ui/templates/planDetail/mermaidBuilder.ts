@@ -119,6 +119,31 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
   // Track all edges to add at the end
   const edgesToAdd: Array<{ from: string; to: string; status?: string }> = [];
   
+  // Build context pressure checkpoint metadata for visual indicators
+  const checkpointedNodeIds = new Set<string>();
+  const fanInNodeIds = new Set<string>();
+  const subJobIndexMap = new Map<string, { index: number; total: number }>();
+
+  for (const [nodeId] of plan.jobs) {
+    const state = plan.nodeStates.get(nodeId);
+    const cp = state?.contextPressureCheckpoint;
+    if (!cp) { continue; }
+
+    checkpointedNodeIds.add(nodeId);
+
+    for (let i = 0; i < cp.subJobIds.length; i++) {
+      const subNodeId = plan.producerIdToNodeId.get(cp.subJobIds[i]);
+      if (subNodeId) {
+        subJobIndexMap.set(subNodeId, { index: i + 1, total: cp.subJobCount });
+      }
+    }
+
+    const fanInNodeId = plan.producerIdToNodeId.get(cp.fanInJobId);
+    if (fanInNodeId) {
+      fanInNodeIds.add(fanInNodeId);
+    }
+  }
+
   // Helper function to render a single job node
   const renderJobNode = (
     node: JobNode,
@@ -140,6 +165,23 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
     const label = escapeForMermaid(node.name);
     const icon = getStatusIcon(status);
     
+    // Context pressure visual indicators
+    const isCheckpointed = checkpointedNodeIds.has(nodeId);
+    const isFanIn = fanInNodeIds.has(nodeId);
+    const subJobInfo = subJobIndexMap.get(nodeId);
+    
+    let cpLabelPrefix = '';
+    let cpLabelSuffix = '';
+    if (isCheckpointed) {
+      cpLabelPrefix = '⑃ ';
+      cpLabelSuffix = ' (split)';
+    } else if (isFanIn) {
+      cpLabelPrefix = '⇉ ';
+      cpLabelSuffix = node.postchecks ? ' (validate ✓)' : ' (validate)';
+    } else if (subJobInfo) {
+      cpLabelSuffix = ` (${subJobInfo.index}/${subJobInfo.total})`;
+    }
+    
     // Calculate duration for completed or running nodes.
     // ALL nodes get rendered with ' | 00h 00s ' sizing template so Mermaid
     // allocates consistent rect widths. Client-side strips the suffix from
@@ -153,12 +195,14 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
     }
     
     // Truncate long node labels using the sizing template width.
-    const displayLabel = truncateLabel(label, DURATION_TEMPLATE, MAX_NODE_LABEL_CHARS);
+    // Account for context pressure prefix/suffix in available width.
+    const effectiveMaxChars = MAX_NODE_LABEL_CHARS - cpLabelPrefix.length;
+    const displayLabel = truncateLabel(label, cpLabelSuffix + DURATION_TEMPLATE, effectiveMaxChars > 0 ? effectiveMaxChars : MAX_NODE_LABEL_CHARS);
     if (displayLabel !== label) {
       nodeTooltips[sanitizedId] = node.name;
     }
     
-    lines.push(`${indent}${sanitizedId}["${icon} ${displayLabel}${durationLabel}"]`);
+    lines.push(`${indent}${sanitizedId}["${cpLabelPrefix}${icon} ${displayLabel}${cpLabelSuffix}${durationLabel}"]`);
     lines.push(`${indent}class ${sanitizedId} ${isScaffolding ? 'draft' : status}`);
     
     nodeEntryExitMap.set(sanitizedId, { entryIds: [sanitizedId], exitIds: [sanitizedId] });
@@ -194,8 +238,41 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
     const groupedNodes = new Map<string, { nodeId: string; node: PlanNode }[]>();
     const ungroupedNodes: { nodeId: string; node: PlanNode }[] = [];
     
+    // Build virtual group overrides for context pressure sub-job clusters
+    const virtualGroupOverrides = new Map<string, string>();
+    const checkpointGroupPaths = new Set<string>();
+
+    for (const [nodeId] of d.jobs) {
+      if (!checkpointedNodeIds.has(nodeId)) { continue; }
+      const parentNode = d.jobs.get(nodeId)!;
+      const state = d.nodeStates.get(nodeId);
+      const cp = state?.contextPressureCheckpoint;
+      if (!cp) { continue; }
+
+      const cpGroupPath = parentNode.group
+        ? `${parentNode.group}/${parentNode.name}`
+        : parentNode.name;
+      checkpointGroupPaths.add(cpGroupPath);
+
+      if (!parentNode.group) { virtualGroupOverrides.set(nodeId, cpGroupPath); }
+
+      for (const subProducerId of cp.subJobIds) {
+        const subNodeId = d.producerIdToNodeId.get(subProducerId);
+        if (subNodeId) {
+          const subNode = d.jobs.get(subNodeId);
+          if (subNode && !subNode.group) { virtualGroupOverrides.set(subNodeId, cpGroupPath); }
+        }
+      }
+
+      const fanInNodeId = d.producerIdToNodeId.get(cp.fanInJobId);
+      if (fanInNodeId) {
+        const fanInNode = d.jobs.get(fanInNodeId);
+        if (fanInNode && !fanInNode.group) { virtualGroupOverrides.set(fanInNodeId, cpGroupPath); }
+      }
+    }
+
     for (const [nodeId, node] of d.jobs) {
-      const groupTag = node.group;
+      const groupTag = virtualGroupOverrides.get(nodeId) || node.group;
       if (groupTag) {
         if (!groupedNodes.has(groupTag)) {
           groupedNodes.set(groupTag, []);
@@ -280,8 +357,59 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
       currentIndent: string
     ): void => {
       // Look up the group UUID from the path
-      const groupUuid = d.groupPathToId.get(groupPath);
-      const groupState = groupUuid ? d.groupStates.get(groupUuid) : undefined;
+      let groupUuid = d.groupPathToId.get(groupPath);
+      // Fallback: search groups by path when groupPathToId is stale
+      if (!groupUuid) {
+        for (const [gId, g] of d.groups) {
+          if (g.path === groupPath) { groupUuid = gId; break; }
+        }
+      }
+      // Fallback: search job nodes for a matching groupId
+      if (!groupUuid) {
+        for (const [, n] of d.jobs) {
+          if ((n as any).group === groupPath && (n as any).groupId) {
+            groupUuid = (n as any).groupId; break;
+          }
+        }
+      }
+      let groupState = groupUuid ? d.groupStates.get(groupUuid) : undefined;
+
+      // Last-resort fallback: derive group status from constituent node states
+      // when all UUID resolution paths fail (empty groups/groupPathToId maps).
+      if (!groupState) {
+        const allDescendantIds: string[] = [];
+        const collectNodes = (tn: GroupTreeNode): void => {
+          for (const { nodeId } of tn.nodes) { allDescendantIds.push(nodeId); }
+          for (const child of tn.children.values()) { collectNodes(child); }
+        };
+        collectNodes(treeNode);
+        if (allDescendantIds.length > 0) {
+          let running = 0, succeeded = 0, failed = 0, blocked = 0, canceled = 0, total = 0;
+          let minStartedAt: number | undefined;
+          let maxEndedAt: number | undefined;
+          for (const nid of allDescendantIds) {
+            const ns = d.nodeStates.get(nid);
+            if (!ns) { continue; }
+            total++;
+            if (ns.startedAt && (!minStartedAt || ns.startedAt < minStartedAt)) { minStartedAt = ns.startedAt; }
+            if (ns.endedAt && (!maxEndedAt || ns.endedAt > maxEndedAt)) { maxEndedAt = ns.endedAt; }
+            switch (ns.status) {
+              case 'running': case 'scheduled': running++; break;
+              case 'succeeded': succeeded++; break;
+              case 'failed': failed++; break;
+              case 'blocked': blocked++; break;
+              case 'canceled': canceled++; break;
+            }
+          }
+          let derivedStatus: string = 'pending';
+          if (running > 0) { derivedStatus = 'running'; }
+          else if (failed > 0 || blocked > 0) { derivedStatus = 'failed'; }
+          else if (succeeded === total && total > 0) { derivedStatus = 'succeeded'; }
+          else if (canceled === total && total > 0) { derivedStatus = 'canceled'; }
+          else if (minStartedAt) { derivedStatus = 'running'; }
+          groupState = { status: derivedStatus as any, startedAt: minStartedAt, endedAt: maxEndedAt } as any;
+        }
+      }
       const groupStatus = groupState?.status || 'pending';
       
       // Use sanitized group UUID as the subgraph ID (same pattern as nodes)
@@ -312,17 +440,19 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
       };
       const colors = groupColors[groupStatus] || groupColors.pending;
       
-      // Truncate group names based on the widest descendant node's rendered
-      // label width, so the group title never overflows its content box.
-      // However, ensure group names are never truncated below their natural
-      // length — mermaid subgraphs expand to fit their title.
+      // Context pressure checkpoint groups get ⑃ prefix and (split) suffix
+      const isCheckpointGroup = checkpointGroupPaths.has(groupPath);
+      const cpGroupPrefix = isCheckpointGroup ? '⑃ ' : '';
+      const cpGroupSuffix = isCheckpointGroup ? ' (split)' : '';
+
       const displayName = treeNode.name;
       const escapedName = escapeForMermaid(displayName);
       const maxWidth = groupMaxWidths.get(groupPath) || 0;
-      const groupNameTotal = 3 + escapedName.length + GROUP_DURATION_TEMPLATE.length; // ICON_WIDTH + name + duration
+      const groupNameTotal = 3 + cpGroupPrefix.length + escapedName.length + cpGroupSuffix.length + GROUP_DURATION_TEMPLATE.length;
       const effectiveMaxWidth = Math.max(maxWidth, groupNameTotal);
-      const truncatedGroupName = effectiveMaxWidth > 0
-        ? truncateLabel(escapedName, GROUP_DURATION_TEMPLATE, effectiveMaxWidth)
+      const truncMaxWidth = effectiveMaxWidth - cpGroupPrefix.length;
+      const truncatedGroupName = truncMaxWidth > 0
+        ? truncateLabel(escapedName, cpGroupSuffix + GROUP_DURATION_TEMPLATE, truncMaxWidth)
         : escapedName;
       // Show full path in tooltip for nested groups or when truncated
       if (truncatedGroupName !== escapedName || groupPath.includes('/')) {
@@ -330,7 +460,7 @@ export function buildMermaidDiagram(plan: PlanInstance): MermaidDiagramResult {
       }
       const padding = ''; // no extra padding — sizing template handles width
       
-      lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${icon} ${truncatedGroupName}${groupDurationLabel}${padding}"]`);
+      lines.push(`${currentIndent}subgraph ${sanitizedGroupId}["${cpGroupPrefix}${icon} ${truncatedGroupName}${cpGroupSuffix}${groupDurationLabel}${padding}"]`);
       
       const childIndent = currentIndent + '  ';
       

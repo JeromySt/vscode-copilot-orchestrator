@@ -238,27 +238,6 @@ suite('Git Merge Operations', () => {
       assert.deepStrictEqual(result.conflictFiles, []);
     });
 
-    test.skip('detects conflicts from merge-tree output', async () => {
-      const conflictOutput = [
-        'abc123',
-        'CONFLICT (content): Merge conflict in src/app.ts',
-        'CONFLICT (content): Merge conflict in README.md',
-      ].join('\n');
-
-      execAsyncStub.resolves(fail('', conflictOutput));
-
-      const result = await merge.mergeWithoutCheckout({
-        source: 'feature/b',
-        target: 'main',
-        repoPath: '/repo',
-      });
-
-      assert.strictEqual(result.success, false);
-      assert.strictEqual(result.hasConflicts, true);
-      assert.deepStrictEqual(result.conflictFiles, ['src/app.ts', 'README.md']);
-      assert.strictEqual(result.error, 'Merge conflicts detected');
-    });
-
     test('handles old git version (merge-tree not available)', async () => {
       execAsyncStub.resolves(
         fail('git merge-tree is not a git command'),

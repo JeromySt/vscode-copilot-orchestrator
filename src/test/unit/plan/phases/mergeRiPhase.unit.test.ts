@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @fileoverview Unit tests for MergeRiPhaseExecutor
  */
 

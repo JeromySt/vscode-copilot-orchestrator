@@ -104,28 +104,29 @@ suite('AI Review Invocation', () => {
   });
   
   suite('AI Review uses standard invocation pattern', () => {
-    test('should use agentDelegator.delegate like current implementation', async () => {
-      // Mock agentDelegator with delegate method
-      const mockDelegate = sinon.stub().resolves({
+    test('should use copilotRunner.run with correct parameters', async () => {
+      // Mock ICopilotRunner with run method (the current pattern since v0.16.0)
+      const mockRun = sinon.stub().resolves({
         success: true,
         sessionId: 'test-session',
         metrics: { tokensUsed: 100 }
       });
       
-      const agentDelegator = {
-        delegate: mockDelegate
+      const copilotRunner = {
+        run: mockRun
       };
       
-      // Simulate a simple AI review method that would use the standard pattern
+      // Simulate the AI review invocation pattern used by CommitPhaseExecutor
       const runAiReview = async (worktreePath: string, nodeId: string, logs: string, task: string) => {
         const _instructionsPath = await writeAiReviewInstructions(worktreePath, nodeId, logs, task);
         
-        const result = await agentDelegator.delegate({
+        const result = await copilotRunner.run({
           task: 'Complete the task described in the instructions.',
           instructions: `Review task: ${task}`,
-          worktreePath,
+          cwd: worktreePath,
           model: 'claude-haiku-4.5',
           jobId: nodeId,
+          timeout: 0,
         });
         
         return result;
@@ -137,10 +138,10 @@ suite('AI Review Invocation', () => {
       
       await runAiReview('/worktree', 'node123', 'execution logs', 'test task');
       
-      assert.ok(mockDelegate.calledWith(
+      assert.ok(mockRun.calledWith(
         sinon.match({
           task: 'Complete the task described in the instructions.',
-          worktreePath: '/worktree',
+          cwd: '/worktree',
           jobId: 'node123'
         })
       ));

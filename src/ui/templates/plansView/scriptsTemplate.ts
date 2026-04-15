@@ -85,9 +85,13 @@ class PlanListCardControl extends SubscribableControl {
       // Show context menu, clamped to viewport
       var menu = document.getElementById('contextMenu');
       if (menu) {
+        // Store the right-clicked planId as fallback when multi-select is empty
+        menu.dataset.contextPlanId = this.planId;
         // Update visibility of menu items based on selected plans
+        var selectedIds = window._planMultiSelect.getSelectedIds();
+        if (selectedIds.length === 0) { selectedIds = [this.planId]; }
         if (typeof updateContextMenuVisibility === 'function') {
-          updateContextMenuVisibility(window._planMultiSelect.getSelectedIds());
+          updateContextMenuVisibility(selectedIds);
         }
         menu.style.display = 'block';
         // Measure menu size then clamp to viewport
@@ -194,20 +198,22 @@ class PlanListCardControl extends SubscribableControl {
       existingRecoverBtn.parentNode.removeChild(existingRecoverBtn);
     }
     
-    // Update or add/remove release tag
-    var existingReleaseTag = this.element.querySelector('.release-tag');
-    if (data.release && !existingReleaseTag) {
-      var releaseTag = document.createElement('span');
-      releaseTag.className = 'release-tag';
-      releaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
-      releaseTag.textContent = '$(package) ' + data.release.name;
-      var planNameEl = this.element.querySelector('.plan-name');
-      if (planNameEl) planNameEl.appendChild(releaseTag);
-    } else if (!data.release && existingReleaseTag) {
-      existingReleaseTag.parentNode.removeChild(existingReleaseTag);
-    } else if (data.release && existingReleaseTag) {
-      existingReleaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
-      existingReleaseTag.textContent = '$(package) ' + data.release.name;
+    // Update or add/remove release tag (only when release field is present in update)
+    if ('release' in data) {
+      var existingReleaseTag = this.element.querySelector('.release-tag');
+      if (data.release && !existingReleaseTag) {
+        var releaseTag = document.createElement('span');
+        releaseTag.className = 'release-tag';
+        releaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
+        releaseTag.textContent = '$(package) ' + data.release.name;
+        var planNameEl = this.element.querySelector('.plan-name');
+        if (planNameEl) planNameEl.appendChild(releaseTag);
+      } else if (!data.release && existingReleaseTag) {
+        existingReleaseTag.parentNode.removeChild(existingReleaseTag);
+      } else if (data.release && existingReleaseTag) {
+        existingReleaseTag.title = 'Release: ' + data.release.name + ' (' + data.release.status + ')';
+        existingReleaseTag.textContent = '$(package) ' + data.release.name;
+      }
     }
     
     var countEl = this.element.querySelector('.plan-node-count');
@@ -640,6 +646,10 @@ class PlanListContainerControl extends SubscribableControl {
     var card = new PlanListCardControl(bus, cardId, element, planData.id);
     this.planCards.set(planData.id, card);
     card._onUpdate(planData);
+    // Update ordered IDs for multi-select manager so right-click works immediately
+    var allIds = [];
+    for (var existingId of this.planCards.keys()) { allIds.push(existingId); }
+    this.publishUpdate(allIds.map(function(pid) { return { id: pid }; }));
   }
 
   removePlan(planId) {
@@ -652,6 +662,9 @@ class PlanListContainerControl extends SubscribableControl {
       document.getElementById('archivedDivider').style.display = 'none';
     }
   }
+
+  hasCard(planId) { return this.planCards.has(planId); }
+  getCount() { return this.planCards.size; }
 
   _managePulseSub() {}
 

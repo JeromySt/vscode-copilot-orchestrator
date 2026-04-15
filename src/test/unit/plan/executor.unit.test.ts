@@ -96,13 +96,6 @@ suite('DefaultJobExecutor', () => {
     assert.ok(true); // Just verify no error
   });
 
-  test('setAgentDelegator stores delegator', () => {
-    const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
-    const delegator = { run: () => {} };
-    executor.setAgentDelegator(delegator);
-    // No assertion needed - just verifying no throw
-  });
-
   test('setEvidenceValidator stores validator', () => {
     const executor = new DefaultJobExecutor(new DefaultProcessSpawner(), new DefaultEvidenceValidator(), new ProcessMonitor(new DefaultProcessSpawner()), createMockGitOps(), mockCopilotRunner);
     executor.setEvidenceValidator({ validate: async () => ({ isValid: true }) } as any);

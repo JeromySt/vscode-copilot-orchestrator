@@ -64,22 +64,22 @@ suite('Plan Helpers (extended coverage)', () => {
 
   suite('computeProgress', () => {
     test('returns 0 for zero total', () => {
-      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
+      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
       assert.strictEqual(computeProgress(counts, 0), 0);
     });
 
     test('returns 0 for negative total', () => {
-      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
+      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 };
       assert.strictEqual(computeProgress(counts, -1), 0);
     });
 
     test('computes ratio correctly', () => {
-      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 3, failed: 1, blocked: 0, canceled: 0 };
+      const counts = { pending: 0, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 3, failed: 1, blocked: 0, canceled: 0 };
       assert.strictEqual(computeProgress(counts, 4), 1.0);
     });
 
     test('partial progress', () => {
-      const counts = { pending: 1, ready: 0, scheduled: 0, running: 0, succeeded: 1, failed: 0, blocked: 0, canceled: 0 };
+      const counts = { pending: 1, ready: 0, scheduled: 0, running: 0, completed_split: 0, succeeded: 1, failed: 0, blocked: 0, canceled: 0 };
       assert.strictEqual(computeProgress(counts, 2), 0.5);
     });
   });

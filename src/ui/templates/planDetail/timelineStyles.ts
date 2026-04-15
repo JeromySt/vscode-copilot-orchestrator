@@ -387,25 +387,5 @@ export function renderTimelineStyles(): string {
       50% { opacity: 0.6; }
     }
 
-    /* Dependency Arrows */
-    .timeline-arrows {
-      position: absolute;
-      top: 30px;
-      left: 200px;
-      width: calc(100% - 200px);
-      height: 100%;
-      pointer-events: none;
-      z-index: 5;
-      overflow: visible;
-    }
-
-    .timeline-arrows path {
-      transition: stroke-width 0.2s ease, opacity 0.2s ease;
-    }
-
-    .timeline-arrows path:hover {
-      stroke-width: 2.5;
-      opacity: 0.8;
-    }
   `;
 }

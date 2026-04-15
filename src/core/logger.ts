@@ -47,7 +47,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Components that can have logging enabled
  */
-export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'plan-archiver' | 'job-executor' | 'init' | 'global-capacity' | 'gitignore-debouncer';
+export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'plan-archiver' | 'job-executor' | 'init' | 'global-capacity' | 'gitignore-debouncer' | 'cli-log-parser' | 'context-pressure' | 'checkpoint-manager' | 'job-splitter' | 'process-output-bus';
 
 /**
  * Configuration keys for logging settings
@@ -76,6 +76,11 @@ interface DebugConfig {
   init: boolean;
   'global-capacity': boolean;
   'gitignore-debouncer': boolean;
+  'cli-log-parser': boolean;
+  'context-pressure': boolean;
+  'checkpoint-manager': boolean;
+  'job-splitter': boolean;
+  'process-output-bus': boolean;
 }
 
 /**
@@ -105,7 +110,12 @@ export class Logger {
     'job-executor': false,
     init: false,
     'global-capacity': false,
-    'gitignore-debouncer': false
+    'gitignore-debouncer': false,
+    'cli-log-parser': false,
+    'context-pressure': false,
+    'checkpoint-manager': false,
+    'job-splitter': false,
+    'process-output-bus': false
   };
   private configListener: { dispose: () => void } | undefined;
   private configProvider?: IConfigProvider;
@@ -205,6 +215,11 @@ export class Logger {
         init: this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'init', false),
         'global-capacity': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'global-capacity', false),
         'gitignore-debouncer': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'gitignore-debouncer', false),
+        'cli-log-parser': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'cli-log-parser', false),
+        'context-pressure': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'context-pressure', false),
+        'checkpoint-manager': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'checkpoint-manager', false),
+        'job-splitter': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'job-splitter', false),
+        'process-output-bus': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'process-output-bus', false),
       };
     } else if (vscode) {
       // Use VS Code directly (backward compatibility)
@@ -229,6 +244,11 @@ export class Logger {
         init: vscodeConfig.get('debug.init', false),
         'global-capacity': vscodeConfig.get('debug.global-capacity', false),
         'gitignore-debouncer': vscodeConfig.get('debug.gitignore-debouncer', false),
+        'cli-log-parser': vscodeConfig.get('debug.cli-log-parser', false),
+        'context-pressure': vscodeConfig.get('debug.context-pressure', false),
+        'checkpoint-manager': vscodeConfig.get('debug.checkpoint-manager', false),
+        'job-splitter': vscodeConfig.get('debug.job-splitter', false),
+        'process-output-bus': vscodeConfig.get('debug.process-output-bus', false),
       };
     } else {
       // Not in VS Code and no provider, keep default config (all false)
