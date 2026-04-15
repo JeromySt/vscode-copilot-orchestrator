@@ -162,6 +162,9 @@ export async function remove(worktreePath: string, repoPath: string, log?: GitLo
     // Git worktree remove sometimes leaves empty directories behind
     try {
       await fs.promises.access(worktreePath);
+      // Unlink any symlinks/junctions before recursive rm to prevent
+      // accidentally deleting the symlink targets (e.g., node_modules in main repo)
+      await unlinkSymlinksInDir(worktreePath, log);
       await fs.promises.rm(worktreePath, { recursive: true, force: true });
       log?.(`[worktree] ✓ Removed leftover directory`);
     } catch {
@@ -210,6 +213,9 @@ export async function removeSafe(
     // Clean up any remaining directory
     try {
       await fs.promises.access(worktreePath);
+      // Unlink any symlinks/junctions before recursive rm to prevent
+      // accidentally deleting the symlink targets (e.g., node_modules in main repo)
+      await unlinkSymlinksInDir(worktreePath, log);
       await fs.promises.rm(worktreePath, { recursive: true, force: true });
       log?.(`[worktree] ✓ Removed leftover directory`);
     } catch {
@@ -409,6 +415,40 @@ export async function list(repoPath: string): Promise<Array<{ path: string; bran
  */
 export async function prune(repoPath: string): Promise<void> {
   await execAsync(['worktree', 'prune'], { cwd: repoPath });
+}
+
+// =============================================================================
+// SYMLINK CLEANUP (before recursive directory removal)
+// =============================================================================
+
+/**
+ * Unlink all symlinks/junctions in the top level of a directory.
+ *
+ * Must be called BEFORE `fs.promises.rm(dir, { recursive: true })` to prevent
+ * the recursive removal from following symlinks and deleting content in the
+ * symlink targets (e.g., `node_modules` in the main repo).
+ *
+ * Only unlinks top-level entries — nested symlinks inside real subdirectories
+ * are handled by `rm` which correctly removes the containing directory.
+ */
+async function unlinkSymlinksInDir(dirPath: string, log?: GitLogger): Promise<void> {
+  try {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      try {
+        const entryPath = path.join(dirPath, entry.name);
+        const stats = await fs.promises.lstat(entryPath);
+        if (stats.isSymbolicLink()) {
+          await fs.promises.unlink(entryPath);
+          log?.(`[worktree] ✓ Unlinked symlink before cleanup: ${entry.name}`);
+        }
+      } catch {
+        // Best-effort: if we can't unlink one entry, continue with others
+      }
+    }
+  } catch {
+    // Directory doesn't exist or can't be read — nothing to unlink
+  }
 }
 
 // =============================================================================

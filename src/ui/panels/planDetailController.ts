@@ -27,6 +27,8 @@ export interface PlanDetailDelegate {
   sendAllProcessStats(): void;
   /** Open a file in the editor by relative path. */
   openFile(relativePath: string): void;
+  /** Close/dispose this panel (e.g., when plan is deleted). */
+  closePanel(): void;
 }
 
 /**
@@ -93,6 +95,9 @@ export class PlanDetailController {
       }
       case 'refresh':
         this._delegate.forceFullRefresh();
+        break;
+      case 'close':
+        this._delegate.closePanel();
         break;
       case 'showWorkSummary':
         this._delegate.showWorkSummaryDocument();

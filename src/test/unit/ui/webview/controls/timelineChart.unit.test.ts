@@ -290,8 +290,8 @@ suite('TimelineChart', () => {
     });
   });
 
-  suite('dependency arrows', () => {
-    test('should render arrows for nodes with dependencies', () => {
+  suite('nodes with dependencies render without arrows', () => {
+    test('should render nodes with dependencies field without errors', () => {
       const container = makeContainer();
       restoreDoc = mockDocument({ 'timeline-container': container });
       

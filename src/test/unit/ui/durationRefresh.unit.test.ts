@@ -30,7 +30,9 @@ class MockPlanRunner {
       id: plan.id,
       jobs: new Map(),
       spec: { name: `Plan ${plan.id}` },
-      startedAt: plan.startedAt
+      startedAt: plan.startedAt,
+      stateVersion: 1,
+      createdAt: Date.now(),
     }));
   }
 
@@ -47,6 +49,20 @@ class MockPlanRunner {
       computePlanStatus: () => plan.status
     } : undefined;
   }
+
+  getStatus(planId: string) {
+    const plan = this.mockPlans.find(p => p.id === planId);
+    if (!plan) { return undefined; }
+    return {
+      status: plan.status,
+      counts: { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 },
+      progress: plan.status === 'succeeded' ? 100 : 50,
+    };
+  }
+
+  getEffectiveStartedAt(planId: string) { return this.mockPlans.find(p => p.id === planId)?.startedAt; }
+  getEffectiveEndedAt(_planId: string) { return undefined; }
+  removeListener() {}
 
   setMockPlans(plans: Array<{ id: string; status: string; startedAt?: number }>) {
     this.mockPlans = plans;

@@ -43,7 +43,7 @@ export function renderPlanDag(data: PlanDagData): string {
       <button class="zoom-btn" onclick="zoomFit()" title="Fit to View">⊡</button>
     </div>
     <div class="legend" id="dagLegend">
-      <span class="legend-title legend-toggle" onclick="document.getElementById('dagLegend').classList.toggle('collapsed')">Legend</span>
+      <span class="legend-title legend-toggle" onclick="var el=document.getElementById('dagLegend');if(el)el.classList.toggle('collapsed')">Legend</span>
       <div class="legend-items">
         <div class="legend-item">
           <span class="legend-icon pending">○</span>

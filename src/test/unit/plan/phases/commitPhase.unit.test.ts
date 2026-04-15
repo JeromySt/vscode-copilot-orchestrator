@@ -206,8 +206,8 @@ suite('CommitPhaseExecutor', () => {
 
     const logs: LogEntry[] = [];
     const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "already done"}');
+      run: sinon.stub().callsFake(async (opts: any) => {
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "already done"}');
         return { success: true, metrics: { durationMs: 50 } };
       }),
     };
@@ -215,7 +215,7 @@ suite('CommitPhaseExecutor', () => {
       logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
     });
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123', logInfo,
       getExecutionLogs: () => logs,
@@ -232,8 +232,8 @@ suite('CommitPhaseExecutor', () => {
 
     const logs: LogEntry[] = [];
     const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
-        opts.logOutput('[ai-review] {"legitimate": false, "reason": "agent failed"}');
+      run: sinon.stub().callsFake(async (opts: any) => {
+        opts.onOutput('[ai-review] {"legitimate": false, "reason": "agent failed"}');
         return { success: true, metrics: { durationMs: 50 } };
       }),
     };
@@ -241,7 +241,7 @@ suite('CommitPhaseExecutor', () => {
       logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
     });
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123', logInfo, logError: sinon.stub(),
       getExecutionLogs: () => logs,
@@ -256,8 +256,8 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
-    const delegator = { delegate: sinon.stub().resolves({ success: false, error: 'timeout' }) };
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const delegator = { run: sinon.stub().resolves({ success: false, error: 'timeout' }) };
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, false);
   });
@@ -268,8 +268,8 @@ suite('CommitPhaseExecutor', () => {
     (git.repository.hasUncommittedChanges as sinon.SinonStub).resolves(false);
     (git.worktrees.getHeadCommit as sinon.SinonStub).resolves('abc123');
 
-    const delegator = { delegate: sinon.stub().rejects(new Error('network error')) };
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const delegator = { run: sinon.stub().rejects(new Error('network error')) };
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, false);
   });
@@ -354,15 +354,15 @@ suite('CommitPhaseExecutor', () => {
     }
 
     const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         // Check that instructions contain truncation message
         assert.ok(opts.instructions.includes('(10 earlier lines omitted)'));
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "logs truncated"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "logs truncated"}');
         return { success: true, metrics: { durationMs: 50 } };
       }),
     };
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     
     // We need to track the logs that include the AI review output
     const reviewLogs: any[] = [...manyLogs];
@@ -395,9 +395,9 @@ suite('CommitPhaseExecutor', () => {
     const logs: LogEntry[] = [];
     let capturedAllowedFolders: string[] | undefined;
     const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         capturedAllowedFolders = opts.allowedFolders;
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "done"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "done"}');
         return { success: true, metrics: { durationMs: 50 } };
       }),
     };
@@ -406,7 +406,7 @@ suite('CommitPhaseExecutor', () => {
     });
 
     const logFilePath = '/storage/plans/test-plan/specs/test-node/current/execution.log';
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123',
       logInfo,
@@ -429,9 +429,9 @@ suite('CommitPhaseExecutor', () => {
     const logs: LogEntry[] = [];
     let capturedAllowedFolders: string[] | undefined;
     const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         capturedAllowedFolders = opts.allowedFolders;
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "done"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "done"}');
         return { success: true, metrics: { durationMs: 50 } };
       }),
     };
@@ -439,7 +439,7 @@ suite('CommitPhaseExecutor', () => {
       logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
     });
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     // Note: NOT providing getLogFilePath in context
     const ctx = makeCtx({
       baseCommit: 'abc123',
@@ -463,9 +463,9 @@ suite('CommitPhaseExecutor', () => {
     const logs: LogEntry[] = [];
     let capturedAllowedFolders: string[] | undefined;
     const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         capturedAllowedFolders = opts.allowedFolders;
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "done"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "done"}');
         return { success: true, metrics: { durationMs: 50 } };
       }),
     };
@@ -473,7 +473,7 @@ suite('CommitPhaseExecutor', () => {
       logs.push({ timestamp: Date.now(), phase: 'commit', type: 'info', message: msg });
     });
 
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     const result = await executor.execute(makeCtx({
       baseCommit: 'abc123',
       logInfo,
@@ -494,36 +494,36 @@ suite('CommitPhaseExecutor', () => {
     // Test process work type
     const processWork = { type: 'process' as const, executable: 'node', args: ['script.js'] };
     let delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         assert.ok(opts.instructions.includes('Process: node script.js'));
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "test"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "test"}');
         return { success: true };
       }),
     };
-    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     await executor.execute(makeCtx({ baseCommit: 'abc123', node: makeNode({ work: processWork }) }));
 
     // Test agent work type
     const agentWork = { type: 'agent' as const, instructions: 'Do something with AI' };
     delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         assert.ok(opts.instructions.includes('Agent: Do something with AI'));
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "test"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "test"}');
         return { success: true };
       }),
     };
-    const executor2 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor2 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     await executor2.execute(makeCtx({ baseCommit: 'abc123', node: makeNode({ work: agentWork }) }));
 
     // Test no work
     delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+      run: sinon.stub().callsFake(async (opts: any) => {
         assert.ok(opts.instructions.includes('No work specified'));
-        opts.logOutput('[ai-review] {"legitimate": true, "reason": "test"}');
+        opts.onOutput('[ai-review] {"legitimate": true, "reason": "test"}');
         return { success: true };
       }),
     };
-    const executor3 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), agentDelegator: delegator, git });
+    const executor3 = new CommitPhaseExecutor({ evidenceValidator: mockEvidenceValidator(), copilotRunner: delegator as any, git });
     await executor3.execute(makeCtx({ baseCommit: 'abc123', node: makeNode({ work: undefined }) }));
   });
 });

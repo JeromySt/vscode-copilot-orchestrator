@@ -15,13 +15,11 @@ import { registerMcpDefinitionProvider } from '../mcp/mcpDefinitionProvider';
 import { McpIpcServer } from '../mcp/ipc/server';
 import { Logger } from './logger';
 
-import { CopilotStatsParser } from '../agent/copilotStatsParser';
 import { IMcpManager } from '../interfaces/IMcpManager';
 import type { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import type { IConfigProvider } from '../interfaces/IConfigProvider';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import type { IProcessMonitor } from '../interfaces/IProcessMonitor';
-import type { CopilotUsageMetrics } from '../plan/types';
 import type { ServiceContainer } from './container';
 import type { DefaultJobExecutor } from '../plan/executor';
 import * as Tokens from './tokens';
@@ -79,70 +77,6 @@ export function loadConfiguration(configProvider?: IConfigProvider): ExtensionCo
 // ============================================================================
 
 // ============================================================================
-// AGENT DELEGATOR ADAPTER
-// ============================================================================
-
-/**
- * Create an agent delegator adapter for the executor.
- * 
- * This bridges the executor's expected interface to the Copilot CLI.
- * Uses the DI-resolved ICopilotRunner for all Copilot CLI interactions.
- */
-function createAgentDelegatorAdapter(runner: ICopilotRunner, log: any) {
-  return {
-    async delegate(options: {
-      task: string;
-      instructions?: string;
-      worktreePath: string;
-      model?: string;
-      contextFiles?: string[];
-      maxTurns?: number;
-      sessionId?: string;
-      jobId?: string;
-      logOutput?: (line: string) => void;
-      onProcess?: (proc: any) => void;
-      allowedFolders?: string[];
-      allowedUrls?: string[];
-      configDir?: string;
-    }): Promise<{
-      success: boolean;
-      sessionId?: string;
-      error?: string;
-      exitCode?: number;
-      metrics?: CopilotUsageMetrics;
-    }> {
-      const { task, instructions, worktreePath, sessionId, logOutput, onProcess, model, jobId, allowedFolders, allowedUrls, configDir } = options;
-      
-      const statsParser = new CopilotStatsParser();
-      
-      const result = await runner.run({
-        cwd: worktreePath,
-        task,
-        instructions,
-        label: 'agent',
-        sessionId,
-        model,
-        jobId,
-        allowedFolders,
-        allowedUrls,
-        configDir,
-        timeout: 0, // No timeout — agent work can run for a long time
-        onOutput: logOutput ? (line) => {
-          statsParser.feedLine(line);
-          logOutput(`[copilot] ${line}`);
-        } : (line) => {
-          statsParser.feedLine(line);
-        },
-        onProcess,
-      });
-      
-      const parsedMetrics = statsParser.getMetrics();
-      return { ...result, metrics: parsedMetrics };
-    }
-  };
-}
-
-// ============================================================================
 // CORE SERVICES
 // ============================================================================
 
@@ -189,16 +123,19 @@ export async function initializePlanRunner(
     : path.join(context.globalStorageUri.fsPath);
   executor.setStoragePath(logsPath);
   
-  // Create agent delegator adapter using DI-resolved ICopilotRunner
-  const copilotRunner = container.resolve<ICopilotRunner>(Tokens.ICopilotRunner);
-  const agentDelegator = createAgentDelegatorAdapter(copilotRunner, log);
-  executor.setAgentDelegator(agentDelegator);
-  
   planRunner.setExecutor(executor);
   
   // Wire plan repository from DI container BEFORE initialize() so legacy migration can run
   const planRepository = container.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
   planRunner.setPlanRepository(planRepository);
+
+  // Wire context pressure services (checkpoint detection and DAG reshape)
+  const { DefaultCheckpointManager } = await import('../plan/analysis/checkpointManager');
+  const { DefaultJobSplitter } = await import('../plan/analysis/jobSplitter');
+  const fileSystem = container.resolve<import('../interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+  const configProvider = container.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
+  planRunner.setCheckpointManager(new DefaultCheckpointManager(fileSystem));
+  planRunner.setJobSplitter(new DefaultJobSplitter(configProvider));
 
   // Register PlanRecovery service now that PlanRunner exists
   // (IPlanRecovery needs IPlanRunner, so it must be registered after PlanRunner is created)
@@ -284,9 +221,12 @@ export async function initializeMcpServer(
     const { PlanRecovery } = require('../plan/planRecovery');
     const planRecovery = new PlanRecovery(planRunner, repo, git, copilotRunner);
     
+    const managedProcessFactory = c.resolve<import('../interfaces/IManagedProcessFactory').IManagedProcessFactory>(Tokens.IManagedProcessFactory);
+    
     return new McpHandler(planRunner, workspacePath, git, repo, configProvider, archiver, planRecovery,
       undefined, undefined, // releaseManager, prLifecycleManager — injected later if experimental flag is on
       { enableReleaseManagement: configProvider?.getConfig?.('copilotOrchestrator.experimental', 'enableReleaseManagement', false) ?? false },
+      managedProcessFactory,
     );
   });
 
@@ -557,7 +497,8 @@ export function registerPlanCommands(
       }
       
       const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
-      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner, pulse, attemptNumber);
+      const pm = container ? container.resolve(Tokens.IProcessMonitor) : undefined;
+      NodeDetailPanel.createOrShow(context.extensionUri, planId, nodeId, planRunner, pulse, attemptNumber, pm);
     })
   );
   
@@ -729,6 +670,11 @@ export function registerPlanCommands(
       
       if (confirm === 'Delete') {
         planRunner.delete(planId);
+        // Close any open detail panels for this plan
+        const { planDetailPanel } = require('../ui/panels/planDetailPanel');
+        const { NodeDetailPanel } = require('../ui/panels/nodeDetailPanel');
+        planDetailPanel.closeForPlan(planId);
+        NodeDetailPanel.closeForPlan(planId);
         vscode.window.showInformationMessage(`Plan "${plan.spec.name}" deleted`);
       }
     })

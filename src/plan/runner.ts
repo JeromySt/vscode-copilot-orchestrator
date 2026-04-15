@@ -197,6 +197,7 @@ export class PlanRunner extends EventEmitter {
     fwd('nodeCompleted');
     fwd('nodeRetry');
     fwd('nodeUpdated');
+    fwd('planReshaped');
     // planCompleted also triggers wake lock update
     this._events.on('planCompleted', (plan: PlanInstance, status: PlanStatus) => {
       this.emit('planCompleted', plan, status);
@@ -224,6 +225,14 @@ export class PlanRunner extends EventEmitter {
 
   setPlanRepository(repo: import('../interfaces/IPlanRepository').IPlanRepository): void {
     this._state.planRepository = repo;
+  }
+
+  setCheckpointManager(mgr: import('../interfaces/ICheckpointManager').ICheckpointManager): void {
+    this._state.checkpointManager = mgr;
+  }
+
+  setJobSplitter(splitter: import('../interfaces/IJobSplitter').IJobSplitter): void {
+    this._state.jobSplitter = splitter;
   }
 
   // -- Lifecycle -------------------------------------------------------------

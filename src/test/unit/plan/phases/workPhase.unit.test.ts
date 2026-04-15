@@ -48,10 +48,10 @@ suite('WorkPhaseExecutor', () => {
   });
 
   test('delegates agent work correctly', async () => {
-    const delegator = {
-      delegate: sinon.stub().resolves({ success: true, sessionId: 'sess', metrics: { durationMs: 200 } }),
+    const runner = {
+      run: sinon.stub().resolves({ success: true, sessionId: 'sess', metrics: { durationMs: 200 } }),
     };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const ctx = makeCtx({
       workSpec: { type: 'agent', instructions: 'implement feature', model: 'gpt-5', contextFiles: ['a.ts'], maxTurns: 10, context: 'ctx', allowedFolders: ['/x'], allowedUrls: ['example.com'] },
       sessionId: 'prev-sess',
@@ -60,16 +60,16 @@ suite('WorkPhaseExecutor', () => {
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.copilotSessionId, 'sess');
     assert.ok(result.metrics);
-    const call = delegator.delegate.firstCall.args[0];
+    const call = runner.run.firstCall.args[0];
     assert.strictEqual(call.task, 'implement feature');
     assert.strictEqual(call.sessionId, 'prev-sess');
   });
 
   test('agent failure returns error with exit code', async () => {
-    const delegator = {
-      delegate: sinon.stub().resolves({ success: false, error: 'broke', exitCode: 42, sessionId: 's1' }),
+    const runner = {
+      run: sinon.stub().resolves({ success: false, error: 'broke', exitCode: 42, sessionId: 's1' }),
     };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -78,8 +78,8 @@ suite('WorkPhaseExecutor', () => {
   });
 
   test('agent exception caught', async () => {
-    const delegator = { delegate: sinon.stub().rejects(new Error('timeout')) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const runner = { run: sinon.stub().rejects(new Error('timeout')) };
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -95,12 +95,12 @@ suite('WorkPhaseExecutor', () => {
     assert.ok(result.error?.includes('Unknown work type'));
   });
 
-  test('without agent delegator returns error for agent spec', async () => {
+  test('without Copilot runner returns error for agent spec', async () => {
     const executor = new WorkPhaseExecutor({ spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'hi' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
-    assert.ok(result.error?.includes('agent delegator'));
+    assert.ok(result.error?.includes('Copilot runner'));
   });
 
   test('string workSpec normalised to shell', async () => {
@@ -111,8 +111,8 @@ suite('WorkPhaseExecutor', () => {
   });
 
   test('@agent string normalised to agent spec', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: '@agent fix bug' });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -120,8 +120,8 @@ suite('WorkPhaseExecutor', () => {
 
   test('logs agent parameters', async () => {
     const logInfo = sinon.stub();
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const ctx = makeCtx({
       workSpec: { type: 'agent', instructions: 'instr', model: 'm', contextFiles: ['f'], maxTurns: 5, context: 'c', allowedFolders: ['/a'], allowedUrls: ['u'] },
       sessionId: 'sid', logInfo,
@@ -133,27 +133,27 @@ suite('WorkPhaseExecutor', () => {
     assert.ok(logInfo.calledWith('Resuming Copilot session: sid'));
   });
 
-  test('agent with legacy tokenUsage fallback', async () => {
-    const delegator = {
-      delegate: sinon.stub().resolves({ success: true, tokenUsage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, model: 'm' } }),
+  test('agent with no metrics returns durationMs only', async () => {
+    const runner = {
+      run: sinon.stub().resolves({ success: true }),
     };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
-    assert.ok(result.metrics?.tokenUsage);
+    assert.ok(result.metrics?.durationMs !== undefined);
   });
 
   test('agent uses node instructions over spec context', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new WorkPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const executor = new WorkPhaseExecutor({ copilotRunner: runner as any, spawner: stubSpawner });
     const node = makeNode({ instructions: 'node-level instructions' });
     const ctx = makeCtx({
       node,
       workSpec: { type: 'agent', instructions: 'task', context: 'spec-context' },
     });
     await executor.execute(ctx);
-    assert.strictEqual(delegator.delegate.firstCall.args[0].instructions, 'node-level instructions');
+    assert.strictEqual(runner.run.firstCall.args[0].instructions, 'node-level instructions');
   });
 });
 
@@ -170,48 +170,48 @@ suite('adaptCommandForPowerShell', () => {
 suite('runAgent (standalone)', () => {
   test('handles onProcess callback', async () => {
     const fakeProc = {};
-    const delegator = {
-      delegate: sinon.stub().callsFake(async (opts: any) => {
+    const runner = {
+      run: sinon.stub().callsFake(async (opts: any) => {
         opts.onProcess(fakeProc);
         return { success: true };
       }),
     };
     const setProcess = sinon.stub();
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'x' }, setProcess });
-    await runAgent({ type: 'agent', instructions: 'x' }, ctx, delegator);
+    await runAgent({ type: 'agent', instructions: 'x' }, ctx, runner as any);
     assert.ok(setProcess.calledWith(fakeProc));
   });
 
   test('resolves modelTier to concrete model via suggestModel', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
+    const runner = { run: sinon.stub().resolves({ success: true }) };
     const ctx = makeCtx();
     // Stub the dynamic import by pre-loading the module and stubbing suggestModel
     const modelDiscovery = await import('../../../../agent/modelDiscovery');
     const stub = sinon.stub(modelDiscovery, 'suggestModel').resolves({ id: 'claude-haiku-4.5', vendor: 'anthropic', family: 'haiku', tier: 'fast' } as any);
     try {
-      await runAgent({ type: 'agent', instructions: 'test', modelTier: 'fast' }, ctx, delegator);
-      const call = delegator.delegate.firstCall.args[0];
+      await runAgent({ type: 'agent', instructions: 'test', modelTier: 'fast' }, ctx, runner as any);
+      const call = runner.run.firstCall.args[0];
       assert.strictEqual(call.model, 'claude-haiku-4.5');
     } finally { stub.restore(); }
   });
 
   test('falls back to undefined model when suggestModel fails', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
+    const runner = { run: sinon.stub().resolves({ success: true }) };
     const ctx = makeCtx();
     const modelDiscovery = await import('../../../../agent/modelDiscovery');
     const stub = sinon.stub(modelDiscovery, 'suggestModel').rejects(new Error('no models'));
     try {
-      await runAgent({ type: 'agent', instructions: 'test', modelTier: 'fast' }, ctx, delegator);
-      const call = delegator.delegate.firstCall.args[0];
+      await runAgent({ type: 'agent', instructions: 'test', modelTier: 'fast' }, ctx, runner as any);
+      const call = runner.run.firstCall.args[0];
       assert.strictEqual(call.model, undefined);
     } finally { stub.restore(); }
   });
 
   test('explicit model takes precedence over modelTier', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
+    const runner = { run: sinon.stub().resolves({ success: true }) };
     const ctx = makeCtx();
-    await runAgent({ type: 'agent', instructions: 'test', model: 'gpt-5', modelTier: 'fast' }, ctx, delegator);
-    const call = delegator.delegate.firstCall.args[0];
+    await runAgent({ type: 'agent', instructions: 'test', model: 'gpt-5', modelTier: 'fast' }, ctx, runner as any);
+    const call = runner.run.firstCall.args[0];
     assert.strictEqual(call.model, 'gpt-5');
   });
 });

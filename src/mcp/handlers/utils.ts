@@ -42,6 +42,8 @@ export interface PlanHandlerContext extends ToolHandlerContext {
   releaseManager?: IReleaseManager;
   /** PR lifecycle manager for PR adoption and monitoring */
   prLifecycleManager?: IPRLifecycleManager;
+  /** Managed process factory for creating processes with output bus + handlers */
+  managedProcessFactory?: import('../../interfaces/IManagedProcessFactory').IManagedProcessFactory;
 }
 
 /**

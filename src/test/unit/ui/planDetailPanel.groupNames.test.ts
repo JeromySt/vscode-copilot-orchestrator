@@ -550,6 +550,81 @@ suite('planDetailPanel - Group Name Display', () => {
       assert.ok(result.diagram, 'Should handle empty group names without error');
     });
   });
+
+  // =========================================================================
+  // GROUP STATUS FALLBACK (empty groupPathToId)
+  // =========================================================================
+  suite('Group status fallback when groupPathToId is empty', () => {
+    test('resolves group status from groups map when groupPathToId is empty', () => {
+      const groupId = uuidv4();
+      const node1 = makeJobNode('node1', 'Build Service', 'setup');
+      (node1 as any).groupId = groupId;
+      const node1Id = node1.id;
+
+      const plan = makePlanInstance({
+        jobs: new Map([[node1Id, node1]]),
+        nodeStates: new Map([[node1Id, makeNodeState('succeeded')]]),
+        groups: new Map([[groupId, makeGroupInstance(groupId, 'setup', 'setup')]]),
+        groupStates: new Map([[groupId, makeGroupState('succeeded')]]),
+        groupPathToId: new Map(), // empty — simulates stale persistence
+      });
+
+      const result = buildMermaidDiagram(plan);
+
+      // The group should use the succeeded status icon (✓) not the pending icon (○)
+      const subgraphs = extractGroupSubgraphs(result.diagram);
+      assert.strictEqual(subgraphs.length, 1, 'Should have one subgraph');
+      // Check the style directive uses succeeded color
+      assert.ok(result.diagram.includes('#1a3a2e'), 'Group should use succeeded fill color');
+      assert.ok(result.diagram.includes('#4ec9b0'), 'Group should use succeeded stroke color');
+    });
+
+    test('derives group status from constituent node states when all maps are empty', () => {
+      const groupId = uuidv4();
+      const node1 = makeJobNode('node1', 'Build Service', 'setup');
+      // groupId is NOT set on the node — simulates plan loaded without groupPathToId
+      const node1Id = node1.id;
+
+      const plan = makePlanInstance({
+        jobs: new Map([[node1Id, node1]]),
+        nodeStates: new Map([[node1Id, makeNodeState('failed')]]),
+        groups: new Map(), // empty
+        groupStates: new Map([[groupId, makeGroupState('failed')]]),
+        groupPathToId: new Map(), // empty
+      });
+
+      const result = buildMermaidDiagram(plan);
+
+      const subgraphs = extractGroupSubgraphs(result.diagram);
+      assert.strictEqual(subgraphs.length, 1, 'Should have one subgraph');
+      // The node-state derivation fallback should compute 'failed' from the node
+      assert.ok(result.diagram.includes('#3a1a1e'), 'Group should use failed fill color (derived from nodes)');
+      assert.ok(result.diagram.includes('#f48771'), 'Group should use failed stroke color (derived from nodes)');
+    });
+
+    test('derives succeeded status when all nodes in group succeeded', () => {
+      const groupId = uuidv4();
+      const node1 = makeJobNode('node1', 'Task A', 'pipeline');
+      const node2 = makeJobNode('node2', 'Task B', 'pipeline');
+      const node1Id = node1.id;
+      const node2Id = node2.id;
+
+      const plan = makePlanInstance({
+        jobs: new Map([[node1Id, node1], [node2Id, node2]]),
+        nodeStates: new Map([
+          [node1Id, makeNodeState('succeeded')],
+          [node2Id, makeNodeState('succeeded')],
+        ]),
+        groups: new Map(),
+        groupStates: new Map([[groupId, makeGroupState('succeeded')]]),
+        groupPathToId: new Map(),
+      });
+
+      const result = buildMermaidDiagram(plan);
+      assert.ok(result.diagram.includes('#1a3a2e'), 'Group should use succeeded fill color');
+      assert.ok(result.diagram.includes('#4ec9b0'), 'Group should use succeeded stroke color');
+    });
+  });
 });
 
 

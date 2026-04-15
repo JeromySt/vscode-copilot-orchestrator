@@ -192,8 +192,8 @@ suite('CopilotCliRunner Instructions Tests', () => {
         allowedUrls: undefined
       });
 
-      assert.ok(cmd.includes('test'));
-      assert.ok(cmd.includes('copilot'));
+      assert.ok(cmd.commandString.includes('test'));
+      assert.ok(cmd.commandString.includes('copilot'));
     });
 
     test('handles empty strings', () => {
@@ -204,7 +204,7 @@ suite('CopilotCliRunner Instructions Tests', () => {
           cwd: ''
       });
 
-      assert.ok(cmd.includes('copilot'));
+      assert.ok(cmd.commandString.includes('copilot'));
     });
 
     test('handles null values gracefully', () => {
@@ -214,8 +214,8 @@ suite('CopilotCliRunner Instructions Tests', () => {
         model: null as any
       });
 
-      assert.ok(cmd.includes('test'));
-      assert.ok(cmd.includes('copilot'));
+      assert.ok(cmd.commandString.includes('test'));
+      assert.ok(cmd.commandString.includes('copilot'));
     });
 
     test('quotes paths with spaces correctly', () => {
@@ -226,9 +226,9 @@ suite('CopilotCliRunner Instructions Tests', () => {
         sharePath: '/yet another/path with spaces/share.md'
       });
 
-      assert.ok(cmd.includes('"'));
-      assert.ok(cmd.includes('path with spaces'));
-      assert.ok(cmd.includes('.copilot-cli'));
+      assert.ok(cmd.commandString.includes('"'));
+      assert.ok(cmd.commandString.includes('path with spaces'));
+      assert.ok(cmd.commandString.includes('.copilot-cli'));
     });
 
     test('includes all expected flags', () => {
@@ -243,16 +243,16 @@ suite('CopilotCliRunner Instructions Tests', () => {
         allowedUrls: ['https://example.com']
       });
 
-      assert.ok(cmd.includes('--stream off'));
-      assert.ok(cmd.includes('--allow-all-tools'));
-      assert.ok(cmd.includes('--model test-model'));
-      assert.ok(cmd.includes('--resume test-session'));
-      assert.ok(cmd.includes('--config-dir'));
-      assert.ok(cmd.includes('--log-dir'));
-      assert.ok(cmd.includes('--log-level debug'));
-      assert.ok(cmd.includes('--share'));
-      assert.ok(cmd.includes('--add-dir'));
-      assert.ok(cmd.includes('--allow-url'));
+      assert.ok(cmd.commandString.includes('--stream off'));
+      assert.ok(cmd.commandString.includes('--allow-all-tools'));
+      assert.ok(cmd.commandString.includes('--model test-model'));
+      assert.ok(cmd.commandString.includes('--resume test-session'));
+      assert.ok(cmd.commandString.includes('--config-dir'));
+      assert.ok(cmd.commandString.includes('--log-dir'));
+      assert.ok(cmd.commandString.includes('--log-level debug'));
+      assert.ok(cmd.commandString.includes('--share'));
+      assert.ok(cmd.commandString.includes('--add-dir'));
+      assert.ok(cmd.commandString.includes('--allow-url'));
     });
   });
 });

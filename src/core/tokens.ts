@@ -114,12 +114,6 @@ export const IProcessSpawner = Symbol('IProcessSpawner');
 export const ICopilotRunner = Symbol('ICopilotRunner');
 
 /**
- * Token for IAgentDelegator service.
- * Provides agent delegation and orchestration.
- */
-export const IAgentDelegator = Symbol('IAgentDelegator');
-
-/**
  * Token for IMcpRequestRouter service.
  * Provides MCP request routing and handling.
  */
@@ -232,3 +226,33 @@ export const IPRLifecycleManager = Symbol('IPRLifecycleManager');
  * Provides storage backend for managed PR persistence.
  */
 export const IManagedPRStore = Symbol('IManagedPRStore');
+
+/**
+ * Token for IContextPressureMonitor service.
+ * Provides context pressure detection and tracking.
+ */
+export const IContextPressureMonitor = Symbol('IContextPressureMonitor');
+
+/**
+ * Token for ICheckpointManager service.
+ * Provides checkpoint sentinel and manifest file operations.
+ */
+export const ICheckpointManager = Symbol('ICheckpointManager');
+
+/**
+ * Token for IJobSplitter service.
+ * Provides manifest-to-subjob conversion for context pressure splitting.
+ */
+export const IJobSplitter = Symbol('IJobSplitter');
+
+/**
+ * Token for IOutputHandlerRegistry service.
+ * Provides handler factory registration and handler creation for managed processes.
+ */
+export const IOutputHandlerRegistry = Symbol('IOutputHandlerRegistry');
+
+/**
+ * Token for IManagedProcessFactory service.
+ * Provides factory for wrapping spawned processes with output bus + handlers.
+ */
+export const IManagedProcessFactory = Symbol('IManagedProcessFactory');

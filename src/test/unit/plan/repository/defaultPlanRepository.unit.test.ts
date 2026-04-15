@@ -1259,6 +1259,56 @@ suite('DefaultPlanRepository', () => {
 
       assert.ok(!mockStore.writePlanMetadataSync.called);
     });
+
+    test('should persist groups and groupPathToId', () => {
+      const planId = 'test-plan';
+      const existingMetadata: StoredPlanMetadata = {
+        id: planId,
+        spec: { name: 'Test', status: 'running', jobs: [] },
+        jobs: [],
+        producerIdToNodeId: {},
+        roots: [],
+        leaves: [],
+        nodeStates: {},
+        groups: {},
+        groupStates: {},
+        groupPathToId: {},
+        repoPath: '/test/repo',
+        baseBranch: 'main',
+        worktreeRoot: '/test/worktrees',
+        createdAt: Date.now(),
+        maxParallel: 4,
+        cleanUpSuccessfulWork: true
+      };
+
+      mockStore.readPlanMetadataSync = sandbox.stub().returns(existingMetadata);
+
+      const plan: any = {
+        id: planId,
+        spec: { name: 'Test', status: 'running', jobs: [] },
+        jobs: new Map(),
+        nodeStates: new Map(),
+        producerIdToNodeId: new Map(),
+        roots: [],
+        leaves: [],
+        stateVersion: 1,
+        isPaused: false,
+        groups: new Map([['group-1', { id: 'group-1', name: 'setup', path: 'setup', nodeIds: [], allNodeIds: [], childGroupIds: [], totalNodes: 0 }]]),
+        groupStates: new Map([['group-1', { status: 'succeeded', version: 1 }]]),
+        groupPathToId: new Map([['setup', 'group-1']]),
+      };
+
+      repository.saveStateSync(plan);
+
+      assert.ok(mockStore.writePlanMetadataSync.calledOnce);
+      const savedMetadata = mockStore.writePlanMetadataSync.firstCall.args[0];
+      assert.ok(savedMetadata.groups);
+      assert.strictEqual(savedMetadata.groups['group-1'].name, 'setup');
+      assert.ok(savedMetadata.groupPathToId);
+      assert.strictEqual(savedMetadata.groupPathToId['setup'], 'group-1');
+      assert.ok(savedMetadata.groupStates);
+      assert.strictEqual(savedMetadata.groupStates['group-1'].status, 'succeeded');
+    });
   });
 
   suite('list', () => {

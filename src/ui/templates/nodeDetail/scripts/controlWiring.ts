@@ -23,7 +23,17 @@ export function renderControlWiring(config: ScriptsConfig): string {
     var phaseTabBar = new PhaseTabBar(bus, 'nd-phase-tabs', 'phaseTabs');
     var attemptList = new AttemptCard(bus, 'nd-attempt-list', '.attempt-history-container');
     var aiUsageStats = new AiUsageStats(bus, 'nd-ai-usage', 'liveAiUsage');
+    var contextPressureCard = new ContextPressureCard(bus, 'nd-context-pressure', 'contextPressureContainer');
     var workSummaryCtrl = new WorkSummary(bus, 'nd-work-summary', 'workSummaryContainer');
     var configDisplay = new ConfigDisplay(bus, 'nd-config-display', 'configDisplayContainer');
+
+    // Hide Force Fail button when node is no longer running
+    bus.on(Topics.NODE_STATE_CHANGE, function(data) {
+      if (!data) return;
+      var btn = document.getElementById('forceFailBtn');
+      if (btn) {
+        btn.style.display = data.status === 'running' ? '' : 'none';
+      }
+    });
   `;
 }

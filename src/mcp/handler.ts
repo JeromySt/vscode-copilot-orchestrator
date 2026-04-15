@@ -18,6 +18,7 @@ import { IMcpRequestRouter } from '../interfaces/IMcpManager';
 import { getPlanToolDefinitions } from './tools/planTools';
 import { getJobToolDefinitions } from './tools/jobTools';
 import { getReleaseToolDefinitions } from './tools/releaseTools';
+import { getTestToolDefinitions } from './tools/testTools';
 import { getPRLifecycleToolDefinitions } from './tools/prLifecycleTools';
 import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
 import { BUILD_COMMIT, BUILD_TIMESTAMP, BUILD_VERSION } from '../core/buildInfo';
@@ -38,6 +39,7 @@ import {
   handleGetJobFailureContext,
   handleUpdatePlanJob,
   handleUpdatePlan,
+  handleBulkUpdatePlanJobs,
   handleGetJob,
   handleListJobs,
   handleRetryJob,
@@ -67,6 +69,7 @@ import {
   handleDemotePR,
   handleAbandonPR,
   handleRemovePR,
+  handleRunIntegrationTest,
 } from './handlers';
 
 /** MCP component logger */
@@ -143,6 +146,7 @@ export class McpHandler implements IMcpRequestRouter {
     releaseManager?: import('../interfaces/IReleaseManager').IReleaseManager,
     prLifecycleManager?: import('../interfaces/IPRLifecycleManager').IPRLifecycleManager,
     options?: { enableReleaseManagement?: boolean },
+    managedProcessFactory?: import('../interfaces/IManagedProcessFactory').IManagedProcessFactory,
   ) {
     this.context = { 
       PlanRunner, 
@@ -154,6 +158,7 @@ export class McpHandler implements IMcpRequestRouter {
       PlanRecovery: planRecovery,
       releaseManager,
       prLifecycleManager,
+      managedProcessFactory,
       // Legacy fields - kept for type compatibility
       runner: null as any,
       plans: null as any,
@@ -217,7 +222,7 @@ export class McpHandler implements IMcpRequestRouter {
     log.info('Initialize request received');
     const result = {
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: { tools: {} },
+      capabilities: { tools: { listChanged: true } },
       serverInfo: SERVER_INFO
     };
     log.debug('Initialize response', result);
@@ -248,6 +253,7 @@ export class McpHandler implements IMcpRequestRouter {
       ...(await getJobToolDefinitions()),
       ...(this._enableReleaseManagement ? await getReleaseToolDefinitions() : []),
       ...(this._enableReleaseManagement ? await getPRLifecycleToolDefinitions() : []),
+      ...getTestToolDefinitions(),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
@@ -344,6 +350,10 @@ export class McpHandler implements IMcpRequestRouter {
         
       case 'update_copilot_plan_job':
         result = await handleUpdatePlanJob(args || {}, this.context);
+        break;
+
+      case 'bulk_update_copilot_plan_jobs':
+        result = await handleBulkUpdatePlanJobs(args || {}, this.context);
         break;
 
       case 'update_copilot_plan':
@@ -479,6 +489,10 @@ export class McpHandler implements IMcpRequestRouter {
       
       case 'remove_pr':
         result = await handleRemovePR(args || {}, this.context);
+        break;
+
+      case 'run_copilot_integration_test':
+        result = await handleRunIntegrationTest(args || {}, this.context);
         break;
         
       default:

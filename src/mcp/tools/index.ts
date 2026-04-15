@@ -7,6 +7,7 @@
 export { getPlanToolDefinitions, PRODUCER_ID_PATTERN } from './planTools';
 export { getJobToolDefinitions } from './jobTools';
 export { getReleaseToolDefinitions } from './releaseTools';
+export { getTestToolDefinitions } from './testTools';
 
 import { McpTool } from '../types';
 import { getPlanToolDefinitions } from './planTools';

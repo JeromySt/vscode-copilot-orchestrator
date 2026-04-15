@@ -19,14 +19,15 @@ import type { PlanSpec, PhaseStatus, JobWorkSummary, AttemptRecord, GroupInfo } 
  * Terminal states: succeeded, failed, blocked, canceled
  */
 export type NodeStatus =
-  | 'pending'     // Waiting for dependencies
-  | 'ready'       // Dependencies met, can be scheduled
-  | 'scheduled'   // Handed to executor
-  | 'running'     // Currently executing
-  | 'succeeded'   // Completed successfully
-  | 'failed'      // Execution failed
-  | 'blocked'     // Dependency failed, can never run
-  | 'canceled';   // User canceled
+  | 'pending'           // Waiting for dependencies
+  | 'ready'             // Dependencies met, can be scheduled
+  | 'scheduled'         // Handed to executor
+  | 'running'           // Currently executing
+  | 'completed_split'   // Checkpoint detected, DAG reshaping in progress
+  | 'succeeded'         // Completed successfully
+  | 'failed'            // Execution failed
+  | 'blocked'           // Dependency failed, can never run
+  | 'canceled';         // User canceled
 
 /**
  * Terminal states - nodes in these states will never change
@@ -37,14 +38,15 @@ export const TERMINAL_STATES: readonly NodeStatus[] = ['succeeded', 'failed', 'b
  * Valid state transitions
  */
 export const VALID_TRANSITIONS: Record<NodeStatus, readonly NodeStatus[]> = {
-  'pending':   ['ready', 'blocked', 'canceled'],
-  'ready':     ['scheduled', 'blocked', 'canceled'],
-  'scheduled': ['running', 'failed', 'canceled'],
-  'running':   ['succeeded', 'failed', 'canceled'],
-  'succeeded': [],  // Terminal
-  'failed':    [],  // Terminal
-  'blocked':   [],  // Terminal
-  'canceled':  [],  // Terminal
+  'pending':         ['ready', 'blocked', 'canceled'],
+  'ready':           ['scheduled', 'blocked', 'canceled'],
+  'scheduled':       ['running', 'failed', 'canceled'],
+  'running':         ['succeeded', 'completed_split', 'failed', 'canceled'],
+  'completed_split': ['succeeded', 'failed'],  // succeeded after reshape; failed if reshape throws
+  'succeeded':       [],  // Terminal
+  'failed':          [],  // Terminal
+  'blocked':         [],  // Terminal
+  'canceled':        [],  // Terminal
 };
 
 /**

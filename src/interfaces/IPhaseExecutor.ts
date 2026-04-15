@@ -53,6 +53,9 @@ export interface PhaseContext {
   /** Merged environment variables (plan-level + work-spec-level) to inject into spawned processes */
   env?: Record<string, string>;
 
+  /** Plan ID for context pressure handler registration */
+  planId?: string;
+
   // --- Callbacks ---
   /** Log an info message */
   logInfo: (message: string) => void;

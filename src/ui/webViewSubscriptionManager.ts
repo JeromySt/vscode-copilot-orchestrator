@@ -13,6 +13,20 @@
  */
 
 import type * as vscode from 'vscode';
+import { Logger } from '../core/logger';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const smLog = Logger.for('ui');
+
+/** Crash-safe disk logger — writes synchronously so data survives OOM/crash. */
+function crashLog(msg: string): void {
+  try {
+    const logPath = path.join(process.cwd(), '.orchestrator', 'debug-events.log');
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch { /* best-effort */ }
+}
 
 /**
  * Interface for data producers that generate content for webview subscriptions.
@@ -21,6 +35,17 @@ import type * as vscode from 'vscode';
 export interface EventProducer<TCursor = any> {
   /** Unique type identifier, e.g., 'log', 'processStats', 'aiUsage' */
   readonly type: string;
+
+  /**
+   * Optional async pre-tick hook. Called once per tick cycle BEFORE any
+   * readDelta calls. Use this for producers that need to fetch data
+   * asynchronously (e.g., OS process snapshots) and cache it for
+   * synchronous reads.
+   *
+   * This runs once per tick, not once per subscription — so a producer
+   * serving 10 subscriptions only fetches once.
+   */
+  prepareTick?(): Promise<void>;
 
   /**
    * Read the full initial state for a subscription.
@@ -113,6 +138,13 @@ export class WebViewSubscriptionManager {
     const id = `sub-${this.nextId++}`;
     const initial = producer.readFull(producerKey);
 
+    // Diagnostic: track subscription creation for debugging re-creation loops
+    const totalSubs = this.subs.size;
+    if (totalSubs > 50) {
+      crashLog(`subscribe(${producerType}, ${tag}) — total subs now ${totalSubs + 1} for panel ${panelId}`);
+      smLog.warn(`subscribe(${producerType}, ${tag}) — total subs now ${totalSubs + 1} for panel ${panelId}`);
+    }
+
     const sub: Subscription = {
       id,
       panelId,
@@ -202,10 +234,50 @@ export class WebViewSubscriptionManager {
 
   /**
    * Process all active subscriptions. Called on each pulse tick (~1 second).
-   * Reads deltas from producers and sends them to the appropriate webviews.
+   *
+   * First calls `prepareTick()` on any producers that implement it (async
+   * pre-fetch for OS data, etc.), then reads deltas synchronously from all
+   * active subscriptions.
+   *
    * Paused subscriptions are skipped entirely — zero IO.
    */
-  tick(): void {
+  private _ticking = false;
+  private _tickCount = 0;
+  async tick(): Promise<void> {
+    if (this._ticking) { return; }
+    this._ticking = true;
+    this._tickCount++;
+    // Log every 10th tick to disk for crash diagnosis
+    if (this._tickCount % 10 === 1) {
+      crashLog(`tick #${this._tickCount}, subs=${this.subs.size}, producers=${this.producers.size}`);
+    }
+    try {
+      await this._doTick();
+    } catch (err: any) {
+      crashLog(`tick() EXCEPTION: ${err.message}\n${err.stack}`);
+      smLog.error(`tick() error: ${err.message}`);
+    } finally {
+      this._ticking = false;
+    }
+  }
+
+  private async _doTick(): Promise<void> {
+    // Phase 1: Async pre-fetch — producers that need OS data cache it here
+    const producersNeedingPrep: EventProducer[] = [];
+    for (const producer of this.producers.values()) {
+      if (producer.prepareTick) {
+        producersNeedingPrep.push(producer);
+      }
+    }
+    if (producersNeedingPrep.length > 0) {
+      await Promise.all(producersNeedingPrep.map(p => 
+        p.prepareTick!().catch((err: any) => smLog.error(`prepareTick error in ${p.type}: ${err.message}`))
+      ));
+    }
+
+    // Phase 2: Synchronous delta reads + webview delivery
+    let deliveredCount = 0;
+    const deliveredTags: string[] = [];
     for (const sub of this.subs.values()) {
       if (sub.state !== 'active') { continue; }
       if (sub.cursor === null) { continue; }
@@ -213,10 +285,19 @@ export class WebViewSubscriptionManager {
       const producer = this.producers.get(sub.producerType);
       if (!producer) { continue; }
 
-      const delta = producer.readDelta(sub.producerKey, sub.cursor);
+      let delta: { content: any; cursor: any } | null;
+      try {
+        delta = producer.readDelta(sub.producerKey, sub.cursor);
+      } catch (err: any) {
+        crashLog(`readDelta ERROR in ${sub.producerType}[${sub.tag}]: ${err.message}`);
+        smLog.error(`readDelta error in ${sub.producerType}[${sub.tag}]: ${err.message}`);
+        continue;
+      }
       if (!delta) { continue; }
 
       sub.cursor = delta.cursor;
+      deliveredCount++;
+      deliveredTags.push(sub.tag);
       try {
         sub.webview.postMessage({
           type: 'subscriptionData',
@@ -226,6 +307,12 @@ export class WebViewSubscriptionManager {
           content: delta.content,
         });
       } catch { /* webview disposed */ }
+    }
+
+    // Diagnostic: log when excessive messages are delivered per tick
+    if (deliveredCount > 10) {
+      crashLog(`tick delivered ${deliveredCount} deltas: ${deliveredTags.slice(0, 10).join(', ')}`);
+      smLog.warn(`tick delivered ${deliveredCount} deltas: ${deliveredTags.slice(0, 10).join(', ')}${deliveredTags.length > 10 ? '...' : ''}`);
     }
   }
 

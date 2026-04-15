@@ -25,6 +25,9 @@ export async function getJobToolDefinitions(): Promise<McpTool[]> {
     ? modelResult.rawChoices
     : ['gpt-5', 'claude-sonnet-4.5'];
 
+  const effortSupported = modelResult.capabilities?.effort ?? false;
+  const effortChoices = modelResult.capabilities?.effortChoices ?? ['low', 'medium', 'high'];
+
   return [
     // =========================================================================
     // STATUS & QUERIES
@@ -88,7 +91,8 @@ The job must be in 'failed' state to be retried.
 WORKFLOW:
 1. Use get_copilot_job_failure_context to analyze the failure
 2. Call retry_copilot_job with optional newWork
-3. Monitor with get_copilot_job`,
+3. Monitor with get_copilot_job
+${effortSupported ? `\nTIP: When retrying complex failures, consider setting effort: 'high' in the newWork agent spec to give the model more reasoning depth for diagnosing and fixing the issue.` : ''}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -194,7 +198,7 @@ Each stage (prechecks/work/postchecks) can be:
 1. String: "npm run test" or "@agent Check implementation"
 2. Process spec: { "type": "process", "executable": "node", "args": ["test.js"] }
 3. Shell spec: { "type": "shell", "command": "Get-ChildItem", "shell": "powershell" }
-4. Agent spec: { "type": "agent", "instructions": "# Task\\n1. Validate code", "model": "${modelEnum[0]}" }`,
+4. Agent spec: { "type": "agent", "instructions": "# Task\\n1. Validate code", "model": "${modelEnum[0]}" }${effortSupported ? `\n5. Agent with effort: { "type": "agent", "instructions": "# Complex review\\n1. Deep analysis", "effort": "high" }\n\nEFFORT (agent work only, values: ${effortChoices.join(', ')}): Controls reasoning depth.\n- 'low': Simple/boilerplate. Fast and cheap.\n- 'medium': Standard development (default when omitted).\n- 'high': Complex/security-critical. Deepest reasoning for maximum quality.` : ''}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -225,6 +229,54 @@ Can be string or object with type (process/shell/agent).`
           }
         },
         required: ['planId', 'jobId']
+      }
+    },
+    // --- Bulk Update Tool ---
+    {
+      name: 'bulk_update_copilot_plan_jobs',
+      description: `Apply common AgentSpec attributes to multiple jobs at once.
+
+Use this to set model, modelTier, effort, maxTurns, resumeSession, or env across all (or selected) agent jobs in a plan.
+
+BULK-SAFE FIELDS (can be set across jobs):
+- model: Specific model name (e.g., "${modelEnum[0]}")
+- modelTier: "fast" | "standard" | "premium"
+- effort: ${effortChoices.join(' | ')}
+- maxTurns: number
+- resumeSession: boolean
+- env: { key: value } environment variables
+
+NOT BULK-SAFE (use update_copilot_plan_job individually):
+- instructions, contextFiles, allowedFolders, allowedUrls
+
+If jobIds is omitted, ALL agent-type jobs in the plan are updated.
+Running/terminal jobs are skipped automatically.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          planId: {
+            type: 'string',
+            description: 'The plan ID'
+          },
+          jobIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional array of job IDs (UUID, producerId, or name) to scope the update. If omitted, updates ALL agent jobs.'
+          },
+          updates: {
+            type: 'object',
+            description: 'Object with bulk-safe AgentSpec fields to apply',
+            properties: {
+              model: { type: 'string', description: `Model name (e.g., "${modelEnum[0]}")` },
+              modelTier: { type: 'string', enum: ['fast', 'standard', 'premium'] },
+              effort: { type: 'string', enum: effortChoices },
+              maxTurns: { type: 'number', description: 'Max agent turns' },
+              resumeSession: { type: 'boolean' },
+              env: { type: 'object', description: 'Environment variables', additionalProperties: { type: 'string' } },
+            },
+          }
+        },
+        required: ['planId', 'updates']
       }
     },
   ];

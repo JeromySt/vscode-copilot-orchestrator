@@ -335,6 +335,47 @@ export interface NodeExecutionState {
    * 'prechecks', 'work', 'commit', 'postchecks', 'merge-fi', 'merge-ri', 'setup'.
    */
   phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup', CopilotUsageMetrics>>;
+
+  /**
+   * Which agent phase is currently executing.
+   * Set by the executor when delegating to a Copilot agent.
+   */
+  agentPhase?: 'prechecks' | 'work' | 'postchecks' | 'auto-heal';
+
+  /**
+   * Set when this job was checkpointed due to context pressure.
+   * Records the sub-job fan-out and fan-in created by the DAG reshape.
+   */
+  contextPressureCheckpoint?: {
+    /** Pressure percentage at checkpoint time */
+    pressure: number;
+    /** Token count at checkpoint time (input_tokens from last turn) */
+    tokensConsumed?: number;
+    /** Maximum prompt tokens for the model */
+    maxTokens?: number;
+    /** Number of sub-jobs created */
+    subJobCount: number;
+    /** Producer IDs of sub-jobs (fan-out) */
+    subJobIds: string[];
+    /** Producer ID of the fan-in validation job */
+    fanInJobId: string;
+    /** Path to the persisted manifest in plan specs directory */
+    manifestPath: string;
+  };
+
+  /**
+   * Snapshot of context pressure state at job completion.
+   * Persisted so the UI can show final pressure metrics after the monitor is disposed.
+   */
+  contextPressureSnapshot?: {
+    level: string;
+    currentInputTokens: number;
+    maxPromptTokens?: number;
+    compactionDetected: boolean;
+    modelBreakdown?: Array<{ model: string; inputTokens: number; outputTokens: number; cachedTokens: number; turns: number }>;
+    totalTurns?: number;
+    turnsPerSecond?: number;
+  };
 }
 
 /**
@@ -348,7 +389,7 @@ export interface AttemptRecord {
   status: 'running' | 'succeeded' | 'failed' | 'canceled';
   
   /** What triggered this attempt */
-  triggerType?: 'initial' | 'auto-heal' | 'retry' | 'postchecks-revalidation';
+  triggerType?: 'initial' | 'auto-heal' | 'retry' | 'postchecks-revalidation' | 'context-pressure-reshape';
   
   /** When the attempt started */
   startedAt: number;
@@ -791,6 +832,14 @@ export interface JobExecutionResult {
    * Takes precedence over the default (resume from failedPhase).
    */
   overrideResumeFromPhase?: 'merge-fi' | 'prechecks' | 'work' | 'postchecks' | 'commit' | 'merge-ri';
+
+  /**
+   * When true, postchecks failed but were treated as a warning because a
+   * checkpoint sentinel was present (context pressure split in progress).
+   * The job still succeeds so the split workflow can proceed.
+   * @see docs/CONTEXT_PRESSURE_DESIGN.md §7.1 step 4
+   */
+  postchecksWarning?: boolean;
   
   /** Per-phase timing information collected during this execution */
   phaseTiming?: PhaseTiming[];
@@ -859,6 +908,19 @@ export interface ExecutionContext {
   
   /** Per-phase timing information collected during execution */
   phaseTiming?: PhaseTiming[];
+
+  /**
+   * Optional process spawner override for this execution.
+   * When set (e.g., by the integration test tool), phases use this spawner
+   * instead of the DI-singleton DefaultProcessSpawner.
+   */
+  spawnerOverride?: import('../../interfaces/IProcessSpawner').IProcessSpawner;
+
+  /**
+   * Optional Copilot runner override for this execution.
+   * When set, agent work uses this runner instead of the DI-singleton CopilotCliRunner.
+   */
+  copilotRunnerOverride?: import('../../interfaces/ICopilotRunner').ICopilotRunner;
 }
 
 // ============================================================================

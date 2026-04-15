@@ -83,8 +83,19 @@ export function renderMermaidInit(data: PlanScriptsData): string {
           }
         });
 
-        // Strip duration from ALL nodes — initial render shows only "<icon> <title>"
+        // Strip sizing-template duration from pending/ready nodes.
+        // Terminal nodes (succeeded, failed, canceled, blocked) keep their server-rendered duration.
+        // Running nodes get duration re-added by the pulse timer.
         element.querySelectorAll('.node').forEach(function(ng) {
+          // Find the sanitized ID from the Mermaid group element
+          var gId = ng.getAttribute('id') || '';
+          var idMatch = gId.match(/flowchart-([^-]+)-/);
+          var sanitizedId = idMatch ? idMatch[1] : '';
+          var nd = sanitizedId ? nodeData[sanitizedId] : null;
+          var keepDur = nd && nd.startedAt && (nd.status === 'running' || nd.status === 'scheduled' ||
+            nd.status === 'succeeded' || nd.status === 'failed');
+          if (keepDur) return;
+
           var textEls = ng.querySelectorAll('foreignObject *, text, tspan, .nodeLabel, .label');
           for (var i = 0; i < textEls.length; i++) {
             var el = textEls[i];
@@ -98,8 +109,17 @@ export function renderMermaidInit(data: PlanScriptsData): string {
           }
         });
 
-        // Strip duration from ALL cluster/subgraph labels — initial render shows only "<icon> <title>"
+        // Strip sizing-template duration from pending/ready cluster labels.
         element.querySelectorAll('.cluster').forEach(function(cg) {
+          var cgId = cg.getAttribute('id') || '';
+          var nd = null;
+          for (var key in nodeData) {
+            if (cgId.includes(key)) { nd = nodeData[key]; break; }
+          }
+          var keepDur = nd && nd.startedAt && (nd.status === 'running' || nd.status === 'scheduled' ||
+            nd.status === 'succeeded' || nd.status === 'failed');
+          if (keepDur) return;
+
           var textEls = cg.querySelectorAll('.cluster-label .nodeLabel, .cluster-label text, .cluster-label span');
           for (var i = 0; i < textEls.length; i++) {
             var el = textEls[i];

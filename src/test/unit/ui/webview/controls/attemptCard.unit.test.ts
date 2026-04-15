@@ -10,16 +10,32 @@ import { AttemptCard } from '../../../../../ui/webview/controls/attemptCard';
 
 function mockDocument(containerEl?: any): () => void {
   const prev = (globalThis as any).document;
+  const prevWindow = (globalThis as any).window;
   (globalThis as any).document = {
     getElementById(id: string) { return null; },
     querySelector(sel: string) {
       if (containerEl && sel === '.attempt-history-container') return containerEl;
       return null;
     },
+    documentElement: { scrollTop: 0, scrollLeft: 0 },
   };
+  (globalThis as any).window = {
+    scrollY: 0,
+    scrollX: 0,
+    scrollTo() {},
+    getSelection() { return null; },
+    requestAnimationFrame(cb: Function) { cb(); },
+  };
+  // Also patch globalThis.requestAnimationFrame for non-window access
+  const prevRaf = (globalThis as any).requestAnimationFrame;
+  (globalThis as any).requestAnimationFrame = (cb: Function) => { cb(); return 0; };
   return () => {
     if (prev === undefined) { delete (globalThis as any).document; }
     else { (globalThis as any).document = prev; }
+    if (prevWindow === undefined) { delete (globalThis as any).window; }
+    else { (globalThis as any).window = prevWindow; }
+    if (prevRaf === undefined) { delete (globalThis as any).requestAnimationFrame; }
+    else { (globalThis as any).requestAnimationFrame = prevRaf; }
   };
 }
 
@@ -162,14 +178,15 @@ suite('AttemptCard', () => {
     ac.dispose();
   });
 
-  test('rebuild with empty attempts clears container', () => {
+  test('rebuild with empty attempts does not crash', () => {
     const container = makeContainer();
     restoreDoc = mockDocument(container);
 
     const ac = new AttemptCard(bus, 'ac', '.attempt-history-container');
     bus.emit(Topics.ATTEMPT_UPDATE, { attempts: [] });
 
-    assert.ok(container.innerHTML.includes('Attempt History (0)'));
+    // Empty attempts array — no new attempts to render, differential path is a no-op
+    assert.strictEqual(container.innerHTML, '');
     ac.dispose();
   });
 

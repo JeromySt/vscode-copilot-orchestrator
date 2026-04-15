@@ -33,9 +33,9 @@ suite('CopilotCliRunner', () => {
         cwd: '/path/to/worktree'
       });
       
-      assert.ok(cmd.includes('--config-dir'), 'Command should include --config-dir flag');
-      assert.ok(cmd.includes('.orchestrator'), 'Config dir should be derived from cwd');
-      assert.ok(cmd.includes('.copilot-cli'), 'Config dir should use .copilot-cli suffix');
+      assert.ok(cmd.commandString.includes('--config-dir'), 'Command should include --config-dir flag');
+      assert.ok(cmd.commandString.includes('.orchestrator'), 'Config dir should be derived from cwd');
+      assert.ok(cmd.commandString.includes('.copilot-cli'), 'Config dir should use .copilot-cli suffix');
     });
     
     test('omits --config-dir when cwd not provided', () => {
@@ -44,7 +44,7 @@ suite('CopilotCliRunner', () => {
         task: 'test task'
       });
       
-      assert.ok(!cmd.includes('--config-dir'), 'Command should not include --config-dir when cwd not provided');
+      assert.ok(!cmd.commandString.includes('--config-dir'), 'Command should not include --config-dir when cwd not provided');
     });
     
     test('config dir path with spaces is properly quoted', () => {
@@ -54,10 +54,10 @@ suite('CopilotCliRunner', () => {
         cwd: '/path/with spaces/worktree'
       });
       
-      assert.ok(cmd.includes('--config-dir'), 'Command should include --config-dir flag');
+      assert.ok(cmd.commandString.includes('--config-dir'), 'Command should include --config-dir flag');
       // The path should be JSON-quoted in the command and contain the worktree path
-      assert.ok(cmd.includes('with spaces'), 'Config dir should preserve spaces from cwd');
-      assert.ok(cmd.includes('.copilot-cli"'), 'Config dir path should be quoted');
+      assert.ok(cmd.commandString.includes('with spaces'), 'Config dir should preserve spaces from cwd');
+      assert.ok(cmd.commandString.includes('.copilot-cli"'), 'Config dir path should be quoted');
     });
     
     test('includes task parameter', () => {
@@ -66,7 +66,7 @@ suite('CopilotCliRunner', () => {
         task: 'test task'
       });
       
-      assert.ok(cmd.includes('-p "test task"'), 'Command should include the task parameter');
+      assert.ok(cmd.commandString.includes('-p "test task"'), 'Command should include the task parameter');
     });
     
     test('includes all standard flags', () => {
@@ -75,10 +75,10 @@ suite('CopilotCliRunner', () => {
         task: 'test task'
       });
       
-      assert.ok(cmd.includes('--stream off'), 'Command should include --stream off');
-      assert.ok(cmd.includes('--add-dir'), 'Command should include --add-dir for secure path handling');
-      assert.ok(cmd.includes('--allow-all-tools'), 'Command should include --allow-all-tools');
-      assert.ok(!cmd.includes('--allow-all-urls'), 'Command should NOT include --allow-all-urls for security');
+      assert.ok(cmd.commandString.includes('--stream off'), 'Command should include --stream off');
+      assert.ok(cmd.commandString.includes('--add-dir'), 'Command should include --add-dir for secure path handling');
+      assert.ok(cmd.commandString.includes('--allow-all-tools'), 'Command should include --allow-all-tools');
+      assert.ok(!cmd.commandString.includes('--allow-all-urls'), 'Command should NOT include --allow-all-urls for security');
     });
     
     test('includes model when provided', () => {
@@ -88,7 +88,7 @@ suite('CopilotCliRunner', () => {
         model: 'claude-sonnet-4.5'
       });
       
-      assert.ok(cmd.includes('--model claude-sonnet-4.5'), 'Command should include the model parameter');
+      assert.ok(cmd.commandString.includes('--model claude-sonnet-4.5'), 'Command should include the model parameter');
     });
     
     test('includes logDir when provided', () => {
@@ -98,9 +98,9 @@ suite('CopilotCliRunner', () => {
         logDir: '/path/to/logs'
       });
       
-      assert.ok(cmd.includes('--log-dir'), 'Command should include --log-dir flag');
-      assert.ok(cmd.includes('/path/to/logs'), 'Command should include the log directory path');
-      assert.ok(cmd.includes('--log-level debug'), 'Command should include --log-level debug');
+      assert.ok(cmd.commandString.includes('--log-dir'), 'Command should include --log-dir flag');
+      assert.ok(cmd.commandString.includes('/path/to/logs'), 'Command should include the log directory path');
+      assert.ok(cmd.commandString.includes('--log-level debug'), 'Command should include --log-level debug');
     });
     
     test('includes sharePath when provided', () => {
@@ -110,8 +110,8 @@ suite('CopilotCliRunner', () => {
         sharePath: '/path/to/share.json'
       });
       
-      assert.ok(cmd.includes('--share'), 'Command should include --share flag');
-      assert.ok(cmd.includes('/path/to/share.json'), 'Command should include the share path');
+      assert.ok(cmd.commandString.includes('--share'), 'Command should include --share flag');
+      assert.ok(cmd.commandString.includes('/path/to/share.json'), 'Command should include the share path');
     });
     
     test('includes sessionId when provided', () => {
@@ -121,7 +121,7 @@ suite('CopilotCliRunner', () => {
         sessionId: 'test-session-123'
       });
       
-      assert.ok(cmd.includes('--resume test-session-123'), 'Command should include --resume with session ID');
+      assert.ok(cmd.commandString.includes('--resume test-session-123'), 'Command should include --resume with session ID');
     });
     
     test('combines multiple options correctly', () => {
@@ -135,11 +135,11 @@ suite('CopilotCliRunner', () => {
         sessionId: 'session-123'
       });
       
-      assert.ok(cmd.includes('--config-dir'), 'Command should include --config-dir');
-      assert.ok(cmd.includes('--model gpt-5'), 'Command should include --model');
-      assert.ok(cmd.includes('--log-dir'), 'Command should include --log-dir');
-      assert.ok(cmd.includes('--share'), 'Command should include --share');
-      assert.ok(cmd.includes('--resume session-123'), 'Command should include --resume');
+      assert.ok(cmd.commandString.includes('--config-dir'), 'Command should include --config-dir');
+      assert.ok(cmd.commandString.includes('--model gpt-5'), 'Command should include --model');
+      assert.ok(cmd.commandString.includes('--log-dir'), 'Command should include --log-dir');
+      assert.ok(cmd.commandString.includes('--share'), 'Command should include --share');
+      assert.ok(cmd.commandString.includes('--resume session-123'), 'Command should include --resume');
     });
   });
   
@@ -150,8 +150,8 @@ suite('CopilotCliRunner', () => {
         task: 'test task'
       });
       
-      assert.ok(!cmd.includes('--allow-url'), 'Command should not include --allow-url by default');
-      assert.ok(!cmd.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
+      assert.ok(!cmd.commandString.includes('--allow-url'), 'Command should not include --allow-url by default');
+      assert.ok(!cmd.commandString.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
     });
     
     test('includes --allow-url flags when allowedUrls provided', () => {
@@ -161,9 +161,9 @@ suite('CopilotCliRunner', () => {
         allowedUrls: ['https://api.github.com', 'https://registry.npmjs.org']
       });
       
-      assert.ok(cmd.includes('--allow-url "https://api.github.com"'), 'Command should include first allowed URL');
-      assert.ok(cmd.includes('--allow-url "https://registry.npmjs.org"'), 'Command should include second allowed URL');
-      assert.ok(!cmd.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.github.com') !== -1, 'Command should include first allowed URL');
+      assert.ok(cmd.commandString.indexOf('https://registry.npmjs.org') !== -1, 'Command should include second allowed URL');
+      assert.ok(!cmd.commandString.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
     });
     
     test('handles empty allowedUrls array', () => {
@@ -173,8 +173,8 @@ suite('CopilotCliRunner', () => {
         allowedUrls: []
       });
       
-      assert.ok(!cmd.includes('--allow-url'), 'Command should not include --allow-url with empty array');
-      assert.ok(!cmd.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
+      assert.ok(!cmd.commandString.includes('--allow-url'), 'Command should not include --allow-url with empty array');
+      assert.ok(!cmd.commandString.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
     });
     
     test('properly quotes URLs with special characters', () => {
@@ -184,7 +184,7 @@ suite('CopilotCliRunner', () => {
         allowedUrls: ['https://api.example.com/v1?key=value&other=param']
       });
       
-      assert.ok(cmd.includes('--allow-url "https://api.example.com/v1?key=value&other=param"'), 'Command should properly quote URL with query params');
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://api.example.com/v1?key=value&other=param'), 'Command should properly quote URL with query params');
     });
   });
 

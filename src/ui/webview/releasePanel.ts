@@ -1189,6 +1189,54 @@ function setupMessageListener(): void {
   window.addEventListener('message', event => {
     const message = event.data;
     switch (message.type) {
+      case 'subscriptionData':
+        // Route producer deltas to existing handlers.
+        // ReleaseStateProducer delivers state snapshots + buffered streaming events.
+        if (message.tag === 'releaseState' && message.content) {
+          const content = message.content;
+          // Forward buffered streaming events to existing controls
+          if (content.events && Array.isArray(content.events)) {
+            for (const evt of content.events) {
+              switch (evt.type) {
+                case 'taskOutput':
+                  if (prepTasks && evt.data.taskId && evt.data.line)
+                    prepTasks.appendLogLine(evt.data.taskId, evt.data.line);
+                  break;
+                case 'cycleCompleted':
+                  if (prMonitor && evt.data) prMonitor.addCycle(evt.data);
+                  if (pendingActions && evt.data) pendingActions.updateFromCycle(evt.data);
+                  break;
+                case 'prUpdate':
+                  if (prMonitor && evt.data.stats) prMonitor.update(evt.data.stats);
+                  break;
+                case 'actionTaken':
+                  if (actionLog) actionLog.addAction(evt.data);
+                  break;
+                case 'findingsResolved':
+                  if (pendingActions && evt.data.findingIds) pendingActions.markResolved(evt.data.findingIds);
+                  break;
+                case 'findingsProcessing':
+                  if (pendingActions && evt.data.findingIds)
+                    pendingActions.setProcessing(evt.data.findingIds, evt.data.status, evt.data.sessionId);
+                  break;
+                case 'monitoringStopped':
+                  if (prMonitor) prMonitor.onStopped();
+                  break;
+                case 'pollIntervalChanged':
+                  if (prMonitor && evt.data.intervalSeconds) prMonitor.updatePollInterval(evt.data.intervalSeconds);
+                  break;
+              }
+            }
+          }
+          // If release status changed (non-monitoring), request full refresh
+          if (content.release && content.release.status !== releaseData?.status) {
+            const newStatus = content.release.status;
+            if (newStatus !== 'monitoring' && newStatus !== 'addressing' && newStatus !== 'pr-active') {
+              vscode.postMessage({ type: 'refresh' });
+            }
+          }
+        }
+        break;
       case 'gitAccount':
         updateGitAccountDisplay(message.username);
         break;

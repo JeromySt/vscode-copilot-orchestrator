@@ -19,6 +19,8 @@ export interface NodeDetailCommands {
   executeCommand(command: string, ...args: any[]): void;
   /** Open a folder in a new window */
   openFolder(path: string): void;
+  /** Close and dispose this panel */
+  closePanel(): void;
   /** Refresh the panel content */
   refresh(): void;
   /** Send log content for a phase */
@@ -138,6 +140,14 @@ export class NodeDetailController {
         if (message.path) {
           this._commands.openFile(message.path);
         }
+        break;
+      case 'openNode':
+        if (message.planId && message.nodeId) {
+          this._commands.executeCommand('orchestrator.showNodeDetails', message.planId, message.nodeId);
+        }
+        break;
+      case 'close':
+        this._commands.closePanel();
         break;
     }
   }

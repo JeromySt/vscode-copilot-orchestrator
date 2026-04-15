@@ -511,20 +511,6 @@ suite('Node Handlers', () => {
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
-
-    test.skip('should return error when agent model invalid', async () => {
-      const { handleRetryJob } = require('../../../mcp/handlers/jobHandlers');
-      sinon.stub(modelDiscovery, 'getCachedModels').resolves({
-        models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
-        rawChoices: ['gpt-5'],
-        discoveredAt: Date.now(),
-      });
-      const result = await handleRetryJob({
-        planId: 'plan-1', jobId: 'n1',
-        newWork: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
   });
 
   suite('handleForceFailNode producer ID lookup', () => {

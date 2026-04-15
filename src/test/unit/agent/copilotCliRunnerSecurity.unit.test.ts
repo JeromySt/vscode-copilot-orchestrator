@@ -87,12 +87,16 @@ suite('CopilotCliRunner - Directory Security', () => {
   // ==========================================================================
 
   /**
-   * Helper: Check if a path is in the command (handles JSON escaping of backslashes)
+   * Helper: Check if a path is in the command (handles quoting of paths with spaces)
    */
-  function cmdIncludesPath(cmd: string, dirPath: string): boolean {
-    // JSON.stringify adds quotes and escapes backslashes, matching what buildCommand does
-    const jsonPath = JSON.stringify(dirPath);
-    return cmd.includes(`--add-dir ${jsonPath}`);
+  function cmdIncludesPath(cmd: any, dirPath: string): boolean {
+    // buildCommand returns BuiltCommand — use commandString for assertion
+    const cmdStr = typeof cmd === 'string' ? cmd : cmd.commandString;
+    // commandString quotes args with spaces using JSON.stringify, but leaves space-free paths bare
+    if (dirPath.includes(' ')) {
+      return cmdStr.includes(`--add-dir ${JSON.stringify(dirPath)}`);
+    }
+    return cmdStr.includes(`--add-dir ${dirPath}`);
   }
 
   test('worktree directory (cwd) is always included in allowed paths', () => {
@@ -102,7 +106,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: []
-    });
+    }).commandString;
 
     // Verify worktree is in the command (JSON.stringify adds quotes and escapes)
     assert.ok(cmdIncludesPath(cmd, EXISTING_DIR_1),
@@ -121,7 +125,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1
       // allowedFolders not specified
-    });
+    }).commandString;
 
     assert.ok(cmdIncludesPath(cmd, EXISTING_DIR_1));
   });
@@ -137,7 +141,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: [EXISTING_DIR_2, EXISTING_DIR_3]
-    });
+    }).commandString;
 
     // Verify all paths are in the command
     assert.ok(cmd.includes('--add-dir'), 'Should have --add-dir flags');
@@ -156,7 +160,7 @@ suite('CopilotCliRunner - Directory Security', () => {
     const cmd = runner.buildCommand({
       task: 'test task',
       cwd: EXISTING_DIR_1,
-    });
+    }).commandString;
 
     // The command should have --add-dir flags
     assert.ok(cmd.includes('--add-dir'), 'Command should have --add-dir flags');
@@ -178,7 +182,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: [relativePath, anotherRelative]
-    });
+    }).commandString;
 
     // Relative paths should NOT be in the command
     assert.ok(!cmd.includes('--add-dir "relative/path"'), 'Should NOT include relative path');
@@ -202,7 +206,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: [NONEXISTENT_PATH]
-    });
+    }).commandString;
 
     // Non-existent should NOT be in command
     assert.ok(!cmd.includes(NONEXISTENT_PATH), 'Should NOT include non-existent path');
@@ -223,11 +227,11 @@ suite('CopilotCliRunner - Directory Security', () => {
     const cmd = runner.buildCommand({
       task: 'test task'
       // No cwd, no allowedFolders
-    });
+    }).commandString;
 
     // Should fallback to explicit process.cwd() (not ".")
     assert.ok(!cmd.includes('--add-dir .'), 'Should NOT use relative "." path');
-    assert.ok(cmd.includes('--add-dir "'), 'Should use quoted absolute path');
+    assert.ok(cmd.includes('--add-dir '), 'Should have --add-dir with an absolute path');
 
     // Security log should mention fallback
     const warnings = loggerMessages.filter(m => m.level === 'warn');
@@ -270,11 +274,11 @@ suite('CopilotCliRunner - Directory Security', () => {
     const cmd = runner.buildCommand({
       task: 'test task',
       cwd: EXISTING_DIR_1
-    });
+    }).commandString;
 
-    // The path should be JSON-quoted (surrounded by ")
-    const match = cmd.match(/--add-dir "([^"]+)"/);
-    assert.ok(match, 'Paths should be properly quoted with double quotes');
+    // Path is included — quoted if spaces, bare if not
+    const match = cmd.match(/--add-dir ("[^"]+"|[^\s]+)/);
+    assert.ok(match, 'Should have --add-dir with a path');
   });
 
   test('command does NOT include --allow-all-paths', () => {
@@ -284,7 +288,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: [EXISTING_DIR_2]
-    });
+    }).commandString;
 
     // Should never include --allow-all-paths (that would disable security)
     assert.ok(!cmd.includes('--allow-all-paths'),
@@ -307,7 +311,7 @@ suite('CopilotCliRunner - Directory Security', () => {
         NONEXISTENT_PATH,        // invalid: doesn't exist
         EXISTING_DIR_3           // valid absolute, exists
       ]
-    });
+    }).commandString;
 
     // Valid absolute existing paths should be included
     assert.ok(cmdIncludesPath(cmd, EXISTING_DIR_1), 'Should include worktree');
@@ -332,7 +336,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: [] // No additional folders
-    });
+    }).commandString;
 
     // Count --add-dir occurrences
     const addDirMatches = cmd.match(/--add-dir/g);
@@ -347,7 +351,7 @@ suite('CopilotCliRunner - Directory Security', () => {
       task: 'test task',
       cwd: EXISTING_DIR_1,
       allowedFolders: [EXISTING_DIR_1, EXISTING_DIR_1] // Same path twice
-    });
+    }).commandString;
 
     // Implementation doesn't dedupe - CLI handles that
     // Just verify it doesn't crash and includes the path

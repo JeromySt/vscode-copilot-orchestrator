@@ -9,7 +9,7 @@
 
 import Ajv, { ErrorObject, ValidateFunction } from 'ajv';
 import { schemas } from './schemas';
-import { getCachedModels } from '../../agent/modelDiscovery';
+import { getCachedModels, hasEffortSupport } from '../../agent/modelDiscovery';
 import type { IConfigProvider } from '../../interfaces/IConfigProvider';
 import { Logger } from '../../core/logger';
 
@@ -393,6 +393,100 @@ export async function validateAgentModels(args: any, toolName: string, configPro
   } catch (error: any) {
     // Discovery error — warn but don't block plan creation
     log.warn(`Model validation error for '${toolName}': ${error.message || 'Unknown error'}`);
+    return { valid: true };
+  }
+}
+
+/**
+ * Extract all effort values from work specifications in input args.
+ */
+function extractEffortValues(obj: any, path: string = ''): Array<{ value: string; path: string }> {
+  const efforts: Array<{ value: string; path: string }> = [];
+
+  if (!obj || typeof obj !== 'object') {
+    return efforts;
+  }
+
+  const parsed = obj;
+  const currentPath = path || 'args';
+
+  if (Array.isArray(parsed)) {
+    for (let i = 0; i < parsed.length; i++) {
+      const itemPath = `${currentPath}[${i}]`;
+      efforts.push(...extractEffortValues(parsed[i], itemPath));
+    }
+  } else {
+    // Check if this object has type: 'agent' and effort
+    if (parsed.type === 'agent' && typeof parsed.effort === 'string') {
+      efforts.push({ value: parsed.effort, path: `${currentPath}.effort` });
+    }
+
+    // Recurse into work spec fields
+    for (const key of ['work', 'prechecks', 'postchecks', 'verifyRi', 'newWork', 'newPrechecks', 'newPostchecks']) {
+      if (parsed[key] && typeof parsed[key] === 'object') {
+        efforts.push(...extractEffortValues(parsed[key], `${currentPath}.${key}`));
+      }
+    }
+
+    // Recurse into jobs array
+    if (Array.isArray(parsed.jobs)) {
+      for (let i = 0; i < parsed.jobs.length; i++) {
+        efforts.push(...extractEffortValues(parsed.jobs[i], `${currentPath}.jobs[${i}]`));
+      }
+    }
+
+    // Recurse into operations (reshape)
+    if (Array.isArray(parsed.operations)) {
+      for (let i = 0; i < parsed.operations.length; i++) {
+        const op = parsed.operations[i];
+        if (op.spec) {
+          efforts.push(...extractEffortValues(op.spec, `${currentPath}.operations[${i}].spec`));
+        }
+      }
+    }
+  }
+
+  return efforts;
+}
+
+/**
+ * Validate that effort values in work specs are supported by the installed CLI.
+ *
+ * If the CLI does not support `--effort`, any effort values in the input will
+ * cause a validation error. This prevents users from specifying effort on a
+ * CLI that would silently ignore it.
+ *
+ * @param args - The MCP tool arguments to validate
+ * @param toolName - The tool name for error formatting
+ * @returns Validation result indicating success or failure
+ */
+export async function validateEffortSupport(args: any, toolName: string): Promise<ValidationResult> {
+  try {
+    const effortReferences = extractEffortValues(args);
+
+    if (effortReferences.length === 0) {
+      return { valid: true };
+    }
+
+    const supported = await hasEffortSupport();
+
+    if (!supported) {
+      const fields = effortReferences.map(({ value, path }) =>
+        `effort '${value}' at field '${path}'`
+      );
+
+      return {
+        valid: false,
+        error: `The installed Copilot CLI does not support the --effort flag. ` +
+          `Remove the 'effort' field from: ${fields.join(', ')}. ` +
+          `Update your Copilot CLI to a version that supports --effort, or remove the effort field.`,
+      };
+    }
+
+    return { valid: true };
+  } catch (error: any) {
+    // Discovery error — warn but don't block plan creation
+    log.warn(`Effort validation error for '${toolName}': ${error.message || 'Unknown error'}`);
     return { valid: true };
   }
 }

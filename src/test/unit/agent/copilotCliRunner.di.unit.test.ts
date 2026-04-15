@@ -15,6 +15,7 @@ import { resetCliCache } from '../../../agent/cliCheckCore';
 import type { IProcessSpawner, ChildProcessLike } from '../../../interfaces/IProcessSpawner';
 import type { IEnvironment } from '../../../interfaces/IEnvironment';
 import type { CopilotCliLogger } from '../../../agent/copilotCliRunner';
+import type { IManagedProcessFactory } from '../../../interfaces/IManagedProcessFactory';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -45,6 +46,73 @@ function createMockEnv(overrides?: Partial<IEnvironment>): IEnvironment {
     env: overrides?.env ?? { HOME: '/home/test' },
     platform: overrides?.platform ?? 'linux',
     cwd: overrides?.cwd ?? (() => '/mock/cwd'),
+  };
+}
+
+/** Create a mock IManagedProcessFactory that wraps a raw process with simple handler stubs. */
+function createMockManagedFactory(): IManagedProcessFactory {
+  return {
+    create(proc: any, _options: any) {
+      const emitter = new EventEmitter();
+      let sessionId: string | undefined;
+      let sawComplete = false;
+      let statsStarted: number | null = null;
+      let metrics: any;
+
+      const mockBus = {
+        getHandler: <T>(name: string): T | undefined => {
+          if (name === 'session-id') return { getSessionId: () => sessionId } as any;
+          if (name === 'task-complete') return { sawTaskComplete: () => sawComplete } as any;
+          if (name === 'stats') return { getStatsStartedAt: () => statsStarted, getMetrics: () => metrics } as any;
+          return undefined;
+        },
+        dispose: () => {},
+      };
+
+      const processLine = (line: string) => {
+        const sm = line.match(/Session ID[:\s]+([a-f0-9-]{36})/i) ||
+                   line.match(/session[:\s]+([a-f0-9-]{36})/i) ||
+                   line.match(/Starting session[:\s]+([a-f0-9-]{36})/i);
+        if (sm && !sessionId) { sessionId = sm[1]; }
+        if (line.includes('Task complete')) { sawComplete = true; }
+      };
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        data.toString().split('\n').forEach((line: string) => {
+          if (line.trim()) {
+            processLine(line.trim());
+            emitter.emit('line', line.trim(), { type: 'stdout', name: 'stdout' });
+          }
+        });
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        data.toString().split('\n').forEach((line: string) => {
+          if (line.trim()) {
+            processLine(line.trim());
+            emitter.emit('line', line.trim(), { type: 'stderr', name: 'stderr' });
+          }
+        });
+      });
+      proc.on('exit', (code: any, signal: any) => emitter.emit('exit', code, signal));
+      proc.on('error', (err: any) => emitter.emit('error', err));
+
+      return Object.assign(emitter, {
+        pid: proc.pid,
+        exitCode: proc.exitCode,
+        killed: proc.killed,
+        bus: mockBus,
+        timestamps: { requested: 0 },
+        durations: {},
+        diagnostics: () => ({
+          pid: proc.pid, exitCode: proc.exitCode, killed: proc.killed,
+          timestamps: { requested: 0 }, durations: {},
+          handlerNames: ['stats', 'session-id', 'task-complete'],
+          busMetrics: { totalLines: 0, linesBySource: {}, handlerInvocations: 0, handlerErrors: 0 },
+          tailerMetrics: [],
+        }),
+        kill: (signal?: any) => proc.kill?.(signal),
+      }) as any;
+    },
   };
 }
 
@@ -130,47 +198,47 @@ suite('CopilotCliRunner DI', () => {
         existsSync: () => true,
         fallbackCwd: '/fallback',
       });
-      assert.ok(cmd.includes('-p "hello world"'));
-      assert.ok(cmd.includes('--stream off'));
-      assert.ok(cmd.includes('--allow-all-tools'));
+      assert.ok(cmd.commandString.includes('-p "hello world"'));
+      assert.ok(cmd.commandString.includes('--stream off'));
+      assert.ok(cmd.commandString.includes('--allow-all-tools'));
     });
 
     test('includes --config-dir when cwd is provided', () => {
       const cmd = buildCommand({ task: 'test', cwd: '/path/to/worktree' }, {
         existsSync: () => true,
       });
-      assert.ok(cmd.includes('--config-dir'));
-      assert.ok(cmd.includes('.orchestrator'));
-      assert.ok(cmd.includes('.copilot-cli'));
+      assert.ok(cmd.commandString.includes('--config-dir'));
+      assert.ok(cmd.commandString.includes('.orchestrator'));
+      assert.ok(cmd.commandString.includes('.copilot-cli'));
     });
 
     test('includes --model when provided', () => {
       const cmd = buildCommand({ task: 'test', model: 'gpt-5' }, {
         existsSync: () => true,
       });
-      assert.ok(cmd.includes('--model gpt-5'));
+      assert.ok(cmd.commandString.includes('--model gpt-5'));
     });
 
     test('includes --resume when sessionId provided', () => {
       const cmd = buildCommand({ task: 'test', sessionId: 'sess-123' }, {
         existsSync: () => true,
       });
-      assert.ok(cmd.includes('--resume sess-123'));
+      assert.ok(cmd.commandString.includes('--resume sess-123'));
     });
 
     test('includes --log-dir and debug level', () => {
       const cmd = buildCommand({ task: 'test', logDir: '/logs' }, {
         existsSync: () => true,
       });
-      assert.ok(cmd.includes('--log-dir "/logs"'));
-      assert.ok(cmd.includes('--log-level debug'));
+      assert.ok(cmd.commandString.includes('--log-dir') && cmd.commandString.includes('/logs'));
+      assert.ok(cmd.commandString.includes('--log-level debug'));
     });
 
     test('includes --share when sharePath provided', () => {
       const cmd = buildCommand({ task: 'test', sharePath: '/share.md' }, {
         existsSync: () => true,
       });
-      assert.ok(cmd.includes('--share "/share.md"'));
+      assert.ok(cmd.commandString.includes('--share') && cmd.commandString.includes('/share.md'));
     });
 
     test('uses fallbackCwd when no paths available', () => {
@@ -178,14 +246,14 @@ suite('CopilotCliRunner DI', () => {
         existsSync: () => false,
         fallbackCwd: '/my/fallback',
       });
-      assert.ok(cmd.includes('--add-dir "/my/fallback"'));
+      assert.ok(cmd.commandString.includes('--add-dir') && cmd.commandString.includes('/my/fallback'));
     });
 
     test('adds cwd as allowed path when it exists', () => {
       const cmd = buildCommand({ task: 'test', cwd: '/worktree' }, {
         existsSync: (p: string) => p.includes('worktree'),
       });
-      assert.ok(cmd.includes('--add-dir'));
+      assert.ok(cmd.commandString.includes('--add-dir'));
     });
 
     test('skips relative allowed folders', () => {
@@ -204,7 +272,7 @@ suite('CopilotCliRunner DI', () => {
         { task: 'test', allowedUrls: ['https://api.github.com'] },
         { existsSync: () => true, fallbackCwd: '/x' }
       );
-      assert.ok(cmd.includes('--allow-url "https://api.github.com"'));
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.github.com') !== -1);
     });
 
     test('filters out invalid URLs', () => {
@@ -212,8 +280,8 @@ suite('CopilotCliRunner DI', () => {
         { task: 'test', allowedUrls: ['https://valid.com', '$(evil)'] },
         { existsSync: () => true, fallbackCwd: '/x' }
       );
-      assert.ok(cmd.includes('--allow-url "https://valid.com"'));
-      assert.ok(!cmd.includes('evil'));
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://valid.com') !== -1);
+      assert.ok(!cmd.commandString.includes('evil'));
     });
 
     test('accepts custom urlSanitizer', () => {
@@ -221,7 +289,39 @@ suite('CopilotCliRunner DI', () => {
         { task: 'test', allowedUrls: ['anything'] },
         { existsSync: () => true, fallbackCwd: '/x', urlSanitizer: () => 'https://fixed.com' }
       );
-      assert.ok(cmd.includes('--allow-url "https://fixed.com"'));
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://fixed.com') !== -1);
+    });
+
+    test('includes --effort when provided', () => {
+      const cmd = buildCommand(
+        { task: 'test', effort: 'high' },
+        { existsSync: () => true, fallbackCwd: '/x' }
+      );
+      assert.ok(cmd.commandString.includes('--effort high'));
+    });
+
+    test('does not include --effort when not provided', () => {
+      const cmd = buildCommand(
+        { task: 'test' },
+        { existsSync: () => true, fallbackCwd: '/x' }
+      );
+      assert.ok(!cmd.commandString.includes('--effort'));
+    });
+
+    test('includes --effort with low value', () => {
+      const cmd = buildCommand(
+        { task: 'test', effort: 'low' },
+        { existsSync: () => true, fallbackCwd: '/x' }
+      );
+      assert.ok(cmd.commandString.includes('--effort low'));
+    });
+
+    test('includes --effort with medium value', () => {
+      const cmd = buildCommand(
+        { task: 'test', effort: 'medium' },
+        { existsSync: () => true, fallbackCwd: '/x' }
+      );
+      assert.ok(cmd.commandString.includes('--effort medium'));
     });
   });
 
@@ -252,7 +352,7 @@ suite('CopilotCliRunner DI', () => {
       const runner = new CopilotCliRunner(noopLogger(), undefined, env);
       const cmd = runner.buildCommand({ task: 'hi' });
       // Should use the env's cwd as fallback
-      assert.ok(cmd.includes('/env/cwd'));
+      assert.ok(cmd.commandString.includes('/env/cwd'));
     });
 
     test('sanitizeUrl delegates to pure function', () => {
@@ -279,7 +379,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess();
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
@@ -301,7 +401,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess();
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
@@ -322,7 +422,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess();
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
@@ -345,7 +445,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess();
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
       const lines: string[] = [];
 
@@ -370,7 +470,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess(9999);
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
       let capturedPid: number | undefined;
 
@@ -391,7 +491,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess();
       const spawner = createMockSpawner(proc);
       const env = createMockEnv();
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
@@ -412,7 +512,7 @@ suite('CopilotCliRunner DI', () => {
       const proc = createFakeProcess();
       const spawner = createMockSpawner(proc);
       const env = createMockEnv({ platform: 'win32' });
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({
@@ -443,7 +543,7 @@ suite('CopilotCliRunner DI', () => {
       const env = createMockEnv({
         env: { HOME: '/test', NODE_OPTIONS: '--no-warnings', PATH: '/usr/bin' },
       });
-      const runner = new CopilotCliRunner(noopLogger(), spawner, env);
+      const runner = new CopilotCliRunner(noopLogger(), spawner, env, undefined, createMockManagedFactory());
       runner.isAvailable = () => true; runner.ensureAvailable = async () => true;
 
       const resultPromise = runner.run({

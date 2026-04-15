@@ -55,6 +55,84 @@ window.addEventListener('message', function(ev) {
       }
       break;
       
+    case 'subscriptionData':
+      // Incremental plan list delta from PlanListProducer (pulse-based)
+      if (msg.tag === 'planList' && msg.content) {
+        // Delta format: { changed: PlanSummary[], removed: string[] }
+        var delta = msg.content;
+        if (delta.changed && Array.isArray(delta.changed)) {
+          for (var i = 0; i < delta.changed.length; i++) {
+            var plan = delta.changed[i];
+            // If the plan card doesn't exist yet, add it (new plan)
+            if (!planListContainer.hasCard(plan.id)) {
+              planListContainer.addPlan(plan);
+            } else {
+              bus.emit(PlansTopics.PLAN_STATE_CHANGE, plan);
+            }
+          }
+        } else if (Array.isArray(delta)) {
+          // Backward compat: readFull sends plain array
+          for (var j = 0; j < delta.length; j++) {
+            if (!planListContainer.hasCard(delta[j].id)) {
+              planListContainer.addPlan(delta[j]);
+            } else {
+              bus.emit(PlansTopics.PLAN_STATE_CHANGE, delta[j]);
+            }
+          }
+        }
+        if (delta.removed && Array.isArray(delta.removed)) {
+          for (var k = 0; k < delta.removed.length; k++) {
+            planListContainer.removePlan(delta.removed[k]);
+          }
+        }
+        // Update badge
+        var totalPlans = planListContainer.getCount ? planListContainer.getCount() : 0;
+        var badge = document.getElementById('tabBadgePlans');
+        if (badge && totalPlans) badge.textContent = totalPlans;
+      }
+      // Capacity delta from CapacityProducer (pulse-based)
+      if (msg.tag === 'capacity' && msg.content) {
+        bus.emit(PlansTopics.CAPACITY_UPDATE, {
+          globalCapacity: msg.content.globalCapacity,
+          globalStats: msg.content.globalStats
+        });
+      }
+      // PR list delta from PRListProducer (pulse-based)
+      if (msg.tag === 'prList' && msg.content) {
+        var prDelta = msg.content;
+        if (prDelta.changed && Array.isArray(prDelta.changed)) {
+          for (var pi = 0; pi < prDelta.changed.length; pi++) {
+            bus.emit('pr:state', prDelta.changed[pi]);
+          }
+        } else if (Array.isArray(prDelta)) {
+          // Backward compat: readFull sends plain array
+          bus.emit('prs:update', prDelta);
+        }
+        if (prDelta.removed && Array.isArray(prDelta.removed)) {
+          for (var pri = 0; pri < prDelta.removed.length; pri++) {
+            prListContainer.removePR(prDelta.removed[pri]);
+          }
+        }
+      }
+      // Release list delta from ReleaseListProducer (pulse-based)
+      if (msg.tag === 'releaseList' && msg.content) {
+        var relDelta = msg.content;
+        if (relDelta.changed && Array.isArray(relDelta.changed)) {
+          for (var ri = 0; ri < relDelta.changed.length; ri++) {
+            bus.emit('release:state', relDelta.changed[ri]);
+          }
+        } else if (Array.isArray(relDelta)) {
+          // Backward compat: readFull sends plain array
+          bus.emit('releases:update', relDelta);
+        }
+        if (relDelta.removed && Array.isArray(relDelta.removed)) {
+          for (var rri = 0; rri < relDelta.removed.length; rri++) {
+            releaseListContainer.removeRelease(relDelta.removed[rri]);
+          }
+        }
+      }
+      break;
+      
     case 'planDeleted':
       // Single plan removed
       if (msg.planId) {

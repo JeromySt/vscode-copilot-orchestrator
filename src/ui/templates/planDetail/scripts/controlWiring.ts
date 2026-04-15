@@ -168,6 +168,8 @@ export function renderControlWiring(data: PlanScriptsData): string {
         handleStatusUpdate(msg);
       } else if (msg.type === 'pulse') {
         bus.emit(Topics.PULSE);
+      } else if (msg.type === 'subscriptionData') {
+        handleSubscriptionData(msg);
       }
     });
 
@@ -200,14 +202,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
 
     // ── SVG health check (extracted from handleStatusUpdate) ──────────────
     function checkSvgUpdateHealth(changed) {
-      var changedCount = Object.keys(changed).length;
-      if (changedCount > 0) {
-        var totalFound = (mermaidNodeStyleCtrl._lastUpdated || 0) + (mermaidGroupStyleCtrl._lastUpdated || 0);
-        if (totalFound === 0) {
-          console.warn('SVG node update failed: updated 0 of ' + changedCount + ' nodes, requesting full refresh');
-          vscode.postMessage({ type: 'refresh' });
-        }
-      }
+      // no-op: retained for call-site compatibility
     }
 
     // ── Simplified handleStatusUpdate ─────────────────────────────────────
@@ -217,15 +212,106 @@ export function renderControlWiring(data: PlanScriptsData): string {
         for (var id in (msg.nodeStatuses || {})) {
           var existing = nodeData[id], incoming = msg.nodeStatuses[id];
           if (!existing || existing.version !== incoming.version) {
-            nodeData[id] = Object.assign(existing || {}, incoming);
-            changed[id] = incoming;
+            // Merge incoming into existing, preserving existing values for undefined incoming fields
+            if (existing) {
+              for (var k in incoming) {
+                if (incoming[k] !== undefined) { existing[k] = incoming[k]; }
+              }
+            } else {
+              nodeData[id] = incoming;
+            }
+            changed[id] = nodeData[id];
           }
         }
         bus.emit(Topics.STATUS_UPDATE, Object.assign({}, msg, { nodeStatuses: changed }));
         checkSvgUpdateHealth(changed);
       } catch (err) {
         console.error('handleStatusUpdate error:', err);
+      }
+    }
+
+    // ── Handle subscriptionData from WebViewSubscriptionManager ───────────
+    // Translates planState and nodeState subscription payloads into the
+    // existing STATUS_UPDATE event format so all existing controls work
+    // without modification.
+    var _subDataCount = 0;
+    var _refreshRequestCount = 0;
+    function handleSubscriptionData(msg) {
+      _subDataCount++;
+      var content = msg.content;
+      if (!content) { return; }
+      // Topology change: request full page refresh so Mermaid DAG is rebuilt
+      // with new nodes from context pressure reshape or plan modification.
+      // Only act on DELTA deliveries (msg.full === false), not initial readFull.
+      if (msg.tag === 'planTopology' && content.changed && !msg.full) {
+        _refreshRequestCount++;
+        console.warn('[PlanDetail-WV] planTopology changed → requesting refresh #' + _refreshRequestCount);
         vscode.postMessage({ type: 'refresh' });
+        return;
+      }
+      if (msg.tag === 'planState') {
+        // Plan was deleted — close this panel via the extension host
+        if (content.status === 'deleted') {
+          vscode.postMessage({ type: 'close' });
+          return;
+        }
+        // PlanStateContent → statusUpdate-compatible shape
+        var counts = content.counts || {};
+        var total = 0;
+        for (var k in counts) { total += counts[k] || 0; }
+        var completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
+        handleStatusUpdate({
+          planStatus: content.status,
+          counts: counts,
+          progress: content.progress,
+          total: total,
+          completed: completed,
+          startedAt: content.startedAt,
+          endedAt: content.endedAt,
+          planEndedAt: content.endedAt,
+        });
+      } else {
+        // NodeExecutionState → single-node nodeStatuses entry
+        var entry = {
+          status: content.status,
+          version: content.version || 0,
+          startedAt: content.startedAt,
+          endedAt: content.endedAt,
+        };
+        if (content.scheduledAt) { entry.scheduledAt = content.scheduledAt; }
+        if (content.stepStatuses) {
+          entry.stepStatuses = content.stepStatuses;
+          for (var phase in content.stepStatuses) {
+            if (content.stepStatuses[phase] === 'running') {
+              entry.currentPhase = phase;
+              break;
+            }
+          }
+        }
+        if (content.attemptHistory && content.attemptHistory.length > 0) {
+          entry.attempts = content.attemptHistory.map(function(a) {
+            return {
+              attemptNumber: a.attemptNumber,
+              status: a.status,
+              startedAt: a.startedAt,
+              endedAt: a.endedAt,
+              failedPhase: a.failedPhase,
+              triggerType: a.triggerType || 'initial',
+              stepStatuses: a.stepStatuses || {},
+              phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(function(kv) {
+                return {
+                  phase: kv[0],
+                  durationMs: (kv[1] || {}).durationMs || 0,
+                  status: (a.stepStatuses || {})[kv[0]] || 'succeeded',
+                };
+              }).filter(function(pd) { return pd.durationMs > 0; }) : [],
+              phaseTiming: a.phaseTiming || [],
+            };
+          });
+        }
+        var ns = {};
+        ns[msg.tag] = entry;
+        handleStatusUpdate({ nodeStatuses: ns });
       }
     }
 
@@ -253,6 +339,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
     var planStatusCtrl = new SubscribableControl(bus, 'plan-status');
     planStatusCtrl.update = function(msg) {
       var planStatus = msg.planStatus;
+      if (!planStatus) { return; }
       var statusBadge = document.getElementById('statusBadge');
       if (statusBadge) {
         statusBadge.className = 'status-badge ' + planStatus;
@@ -308,6 +395,13 @@ export function renderControlWiring(data: PlanScriptsData): string {
         var showProc = (planStatus === 'running' || planStatus === 'pending' || planStatus === 'resumed') || ((planStatus === 'paused' || planStatus === 'pausing') && hasRunningNodes);
         procSection.style.display = showProc ? '' : 'none';
       }
+      // Update plan duration element with current status and endedAt
+      var durEl = document.getElementById('planDuration');
+      if (durEl) {
+        durEl.dataset.status = planStatus;
+        if (msg.endedAt) { durEl.dataset.ended = String(msg.endedAt); }
+        updateDurationCounter();
+      }
       this.publishUpdate(msg);
     };
     planStatusCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { planStatusCtrl.update(msg); });
@@ -315,6 +409,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
     // (c) ProgressControl
     var progressCtrl = new SubscribableControl(bus, 'progress');
     progressCtrl.update = function(msg) {
+      if (msg.progress === undefined) { return; }
       var progressFill = document.querySelector('.progress-fill');
       var progressText = document.querySelector('.progress-text');
       if (progressFill) progressFill.style.width = msg.progress + '%';
@@ -326,6 +421,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
     var statsCtrl = new SubscribableControl(bus, 'stats');
     statsCtrl.update = function(msg) {
       var counts = msg.counts;
+      if (!counts) { return; }
       var total = msg.total;
       var statsContainer = document.querySelector('.stats');
       if (!statsContainer) return;
@@ -374,6 +470,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
     var legendCtrl = new SubscribableControl(bus, 'legend');
     legendCtrl.update = function(msg) {
       var counts = msg.counts;
+      if (!counts) { return; }
       var legendItems = document.querySelectorAll('.legend-item');
       legendItems.forEach(function(item) {
         var icon = item.querySelector('.legend-icon');
@@ -401,6 +498,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
         if (!nodeGroup) continue;
         updated++;
         var nodeEl = nodeGroup.querySelector('.node') || nodeGroup;
+        if (!nodeEl || !nodeEl.classList) continue;
         nodeEl.classList.remove('pending', 'ready', 'running', 'succeeded', 'failed', 'blocked', 'canceled', 'scheduled');
         nodeEl.classList.add(data.status);
         var rect = nodeEl.querySelector('rect');
@@ -414,32 +512,51 @@ export function renderControlWiring(data: PlanScriptsData): string {
         if (textSpan) {
           var newIcon = nodeIcons[data.status] || '○';
           var currentText = textSpan.textContent || '';
-          if (currentText.length > 0 && ['✓', '✗', '▶', '⊘', '○'].includes(currentText[0])) {
-            var updatedText = newIcon + currentText.substring(1);
-            // Strip duration only for non-terminal, non-running statuses
-            var showDuration = data.status === 'running' || data.status === 'scheduled' || data.status === 'succeeded' || data.status === 'failed';
-            if (!showDuration) {
-              var pipeIdx = updatedText.lastIndexOf(' | ');
-              if (pipeIdx > 0) {
-                updatedText = updatedText.substring(0, pipeIdx);
+          var iconChars = ['✓', '✗', '▶', '⊘', '○'];
+          var hasIcon = currentText.length > 0 && iconChars.indexOf(currentText[0]) !== -1;
+          // Also handle multi-char prefixes like "∧ ○" or "⑃ ○" (checkpointed/fan-in prefix)
+          var textAfterIcon = currentText;
+          if (hasIcon) {
+            textAfterIcon = currentText.substring(1);
+          } else {
+            // Check for 2-char prefix patterns like "∧ " or "⇉ " or "⑃ "
+            var prefixMatch = currentText.match(/^([∧⇉⑃⇒]\s*)/);
+            if (prefixMatch) {
+              var prefix = prefixMatch[1];
+              var afterPrefix = currentText.substring(prefix.length);
+              if (afterPrefix.length > 0 && iconChars.indexOf(afterPrefix[0]) !== -1) {
+                textAfterIcon = afterPrefix.substring(1);
+                newIcon = prefix + newIcon;
               }
             }
-            // For completed nodes, set final duration from startedAt/endedAt
-            if ((data.status === 'succeeded' || data.status === 'failed') && data.startedAt) {
-              var endTime = data.endedAt || Date.now();
-              var dur = endTime - data.startedAt;
-              var durStr = formatDurationLive(dur);
-              var pi = updatedText.lastIndexOf(' | ');
-              if (pi > 0) {
-                updatedText = updatedText.substring(0, pi) + ' | ' + durStr;
-              } else {
-                updatedText = updatedText + ' | ' + durStr;
-              }
-            }
-            var nodeElId = nodeEl.getAttribute('id') || '';
-            var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeElId];
-            textSpan.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
           }
+          var updatedText = hasIcon ? newIcon + textAfterIcon : currentText;
+          // Strip or set duration based on status and whether the node actually ran
+          var hasStarted = !!data.startedAt;
+          var isTerminalWithDuration = hasStarted && (data.status === 'succeeded' || data.status === 'failed');
+          var isActive = data.status === 'running' || data.status === 'scheduled';
+          if (!isTerminalWithDuration && !isActive) {
+            // Strip duration: pending, ready, blocked (never ran), canceled (never ran)
+            var pipeIdx = updatedText.lastIndexOf(' | ');
+            if (pipeIdx > 0) {
+              updatedText = updatedText.substring(0, pipeIdx);
+            }
+          }
+          // For terminal nodes that actually ran, set final duration
+          if (isTerminalWithDuration) {
+            var endTime = data.endedAt || Date.now();
+            var dur = endTime - data.startedAt;
+            var durStr = formatDurationLive(dur);
+            var pi = updatedText.lastIndexOf(' | ');
+            if (pi > 0) {
+              updatedText = updatedText.substring(0, pi) + ' | ' + durStr;
+            } else {
+              updatedText = updatedText + ' | ' + durStr;
+            }
+          }
+          var nodeElId = nodeEl.getAttribute('id') || '';
+          var maxLen = parseInt(nodeEl.getAttribute('data-max-text-len') || '') || nodeTextLengths[nodeElId];
+          textSpan.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
         }
       }
       this._lastUpdated = updated;
@@ -490,63 +607,107 @@ export function renderControlWiring(data: PlanScriptsData): string {
     mermaidEdgeStyleCtrl.subscribe(Topics.STATUS_UPDATE, function(msg) { mermaidEdgeStyleCtrl.update(msg); });
 
     // (i) MermaidGroupStyleControl
+    // Mermaid generates cluster <g> IDs as subGraph0, subGraph1 etc. — they
+    // do NOT contain the sanitized group UUID. So we match clusters to group
+    // data by finding the group name inside each cluster's label text.
     var mermaidGroupStyleCtrl = new SubscribableControl(bus, 'mermaid-group-style');
     mermaidGroupStyleCtrl._lastUpdated = 0;
     mermaidGroupStyleCtrl.update = function(msg) {
       var svgElement = document.querySelector('.mermaid svg');
       if (!svgElement || !msg.nodeStatuses) { this._lastUpdated = 0; return; }
       var ns = msg.nodeStatuses;
+
+      // Build name → data map from group entries in nodeStatuses
+      var groupsByName = {};
+      for (var sid in ns) {
+        var d = ns[sid];
+        if (d.type === 'group' && d.name) {
+          groupsByName[d.name] = d;
+        }
+      }
+      if (Object.keys(groupsByName).length === 0) { return; }
+
       var updated = 0;
-      for (var sanitizedId in ns) {
-        var data = ns[sanitizedId];
-        // Skip if already handled as a regular node
-        if (svgElement.querySelector('g[id^="flowchart-' + sanitizedId + '-"]')) continue;
-        var cluster = svgElement.querySelector('g.cluster[id*="' + sanitizedId + '"], g[id*="' + sanitizedId + '"].cluster');
-        if (!cluster) {
-          var allClusters = svgElement.querySelectorAll('g.cluster');
-          for (var ci = 0; ci < allClusters.length; ci++) {
-            var clusterId = allClusters[ci].getAttribute('id') || '';
-            if (clusterId.includes(sanitizedId)) { cluster = allClusters[ci]; break; }
+      var allClusters = svgElement.querySelectorAll('g');
+      for (var ci = 0; ci < allClusters.length; ci++) {
+        var cluster = allClusters[ci];
+        var clsAttr = cluster.getAttribute('class') || '';
+        if (clsAttr.indexOf('cluster') === -1) continue;
+
+        // Get all text content within the cluster label area
+        var labelEl = null;
+        var candidates = cluster.querySelectorAll('.cluster-label .nodeLabel, .cluster-label span, .cluster-label div, .cluster-label text, foreignObject span, foreignObject div');
+        for (var li = 0; li < candidates.length; li++) {
+          if (candidates[li].textContent && candidates[li].textContent.trim().length > 0) {
+            labelEl = candidates[li];
+            break;
           }
         }
-        if (!cluster) continue;
-        updated++;
-        var clusterRect = cluster.querySelector('rect');
-        if (clusterRect && groupColors[data.status]) {
-          clusterRect.style.fill = groupColors[data.status].fill;
-          clusterRect.style.stroke = groupColors[data.status].stroke;
+        if (!labelEl) continue;
+        var labelText = labelEl.textContent.trim();
+
+        // Match by finding a group name within the label text
+        var matchedData = null;
+        for (var gname in groupsByName) {
+          if (labelText.indexOf(gname) !== -1) {
+            matchedData = groupsByName[gname];
+            break;
+          }
         }
-        var labelText = cluster.querySelector('.cluster-label .nodeLabel, .cluster-label text, .nodeLabel, text');
-        if (labelText) {
-          var newIcon = nodeIcons[data.status] || '○';
-          var currentText = labelText.textContent || '';
-          if (currentText.length > 0) {
-            var firstChar = currentText[0];
-            if (['✓', '✗', '▶', '⊘', '○'].includes(firstChar)) {
-              var updatedText = newIcon + currentText.substring(1);
-              var showDuration = data.status === 'running' || data.status === 'scheduled' || data.status === 'succeeded' || data.status === 'failed';
-              if (!showDuration) {
-                var pipeIdx = updatedText.lastIndexOf(' | ');
-                if (pipeIdx > 0) {
-                  updatedText = updatedText.substring(0, pipeIdx);
-                }
+        if (!matchedData) continue;
+        updated++;
+
+        // Apply fill/stroke colors to the cluster rect
+        var clusterRect = cluster.querySelector('rect');
+        if (clusterRect && groupColors[matchedData.status]) {
+          clusterRect.style.fill = groupColors[matchedData.status].fill;
+          clusterRect.style.stroke = groupColors[matchedData.status].stroke;
+        }
+
+        // Update status icon in label text
+        var newIcon = nodeIcons[matchedData.status] || '\u25CB';
+        var currentText = labelEl.textContent || '';
+        if (currentText.length > 0) {
+          var iconChars = ['\u2713', '\u2717', '\u25B6', '\u2298', '\u25CB'];
+          var firstChar = currentText[0];
+          var updatedText = currentText;
+          if (iconChars.indexOf(firstChar) !== -1) {
+            updatedText = newIcon + currentText.substring(1);
+          } else {
+            // Check for multi-char prefix like "∧ ○" or "⑃ ○"
+            var prefixMatch = currentText.match(/^([\u2229\u21D2\u2443\u2283]\s*)/);
+            if (prefixMatch) {
+              var prefix = prefixMatch[1];
+              var afterPrefix = currentText.substring(prefix.length);
+              if (afterPrefix.length > 0 && iconChars.indexOf(afterPrefix[0]) !== -1) {
+                updatedText = prefix + newIcon + afterPrefix.substring(1);
               }
-              if ((data.status === 'succeeded' || data.status === 'failed') && data.startedAt) {
-                var endTime = data.endedAt || Date.now();
-                var dur = endTime - data.startedAt;
-                var durStr = formatDurationLive(dur);
-                var pi = updatedText.lastIndexOf(' | ');
-                if (pi > 0) {
-                  updatedText = updatedText.substring(0, pi) + ' | ' + durStr;
-                } else {
-                  updatedText = updatedText + ' | ' + durStr;
-                }
-              }
-              var clusterElId = cluster.getAttribute('id') || '';
-              var maxLen = parseInt(cluster.getAttribute('data-max-text-len') || '') || nodeTextLengths[clusterElId];
-              labelText.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
             }
           }
+          // Duration handling
+          var hasStarted = !!matchedData.startedAt;
+          var isTerminalWithDuration = hasStarted && (matchedData.status === 'succeeded' || matchedData.status === 'failed');
+          var isActive = matchedData.status === 'running' || matchedData.status === 'scheduled';
+          if (!isTerminalWithDuration && !isActive) {
+            var pipeIdx = updatedText.lastIndexOf(' | ');
+            if (pipeIdx > 0) {
+              updatedText = updatedText.substring(0, pipeIdx);
+            }
+          }
+          if (isTerminalWithDuration) {
+            var endTime = matchedData.endedAt || Date.now();
+            var dur = endTime - matchedData.startedAt;
+            var durStr = formatDurationLive(dur);
+            var pi = updatedText.lastIndexOf(' | ');
+            if (pi > 0) {
+              updatedText = updatedText.substring(0, pi) + ' | ' + durStr;
+            } else {
+              updatedText = updatedText + ' | ' + durStr;
+            }
+          }
+          var clusterElId = cluster.getAttribute('id') || '';
+          var maxLen = parseInt(cluster.getAttribute('data-max-text-len') || '') || nodeTextLengths[clusterElId];
+          labelEl.textContent = maxLen ? clampText(updatedText, maxLen) : updatedText;
         }
       }
       this._lastUpdated = updated;
@@ -617,11 +778,14 @@ export function renderControlWiring(data: PlanScriptsData): string {
               cg.setAttribute('data-max-text-len', String(len));
             }
           });
-          // Strip duration from all non-running nodes after re-render
+          // Strip sizing template duration from pending/ready nodes after re-render.
+          // Running nodes get duration re-added by the pulse timer.
+          // Terminal nodes (succeeded, failed, canceled, blocked) keep their server-rendered duration.
           for (var sid in nodeData) {
             var data = nodeData[sid];
-            var isRunning = data.status === 'running' || data.status === 'scheduled';
-            if (isRunning) continue; // Running nodes will get duration re-added by pulse timer
+            var keepDuration = data.startedAt && (data.status === 'running' || data.status === 'scheduled' ||
+              data.status === 'succeeded' || data.status === 'failed');
+            if (keepDuration) continue;
             
             if (data.type === 'group') {
               // Handle clusters
@@ -916,10 +1080,23 @@ export function renderControlWiring(data: PlanScriptsData): string {
           if (anyRunning) timelineData.planEndedAt = undefined;
         }
         if (msg.startedAt && !timelineData.planStartedAt) timelineData.planStartedAt = msg.startedAt;
-        // Re-render timeline if visible
+        // Differential timeline update: update individual node rows in-place.
+        // Only fall back to full re-render if a node doesn't have a rendered row yet
+        // (new node appeared from topology change, or first time a node gets a bar).
         var timelineSection = document.getElementById('timeline-section');
         if (timelineSection && timelineSection.style.display !== 'none') {
-          timelineChart.update(timelineData);
+          var needsFullPaint = false;
+          for (var key2 in msg.nodeStatuses) {
+            var nd2 = nodeData[key2];
+            if (nd2) {
+              var applied = timelineChart.updateNodeInPlace(nd2.nodeId, msg.nodeStatuses[key2]);
+              if (!applied) { needsFullPaint = true; }
+            }
+          }
+          // Full paint only when differential update couldn't handle it (new nodes)
+          if (needsFullPaint) {
+            timelineChart.update(timelineData);
+          }
         }
       }
     });
@@ -952,6 +1129,94 @@ export function renderControlWiring(data: PlanScriptsData): string {
         planConfigBody.style.display = isHidden ? 'block' : 'none';
         if (planConfigChevron) planConfigChevron.textContent = isHidden ? '▼' : '▶';
       });
+    }
+
+    // ── Scroll Position Persistence ────────────────────────────────────────
+    // Save scroll position so DOM changes don't teleport the user back to the top.
+    var _scrollSaveTimer = null;
+    var _lastUserScrollY = 0;
+    var _lastUserScrollX = 0;
+    var _scrollGuardActive = false;
+    var diagramScrollEl = document.getElementById('mermaid-diagram');
+
+    function saveScrollPosition() {
+      if (_scrollSaveTimer) return; // debounce
+      _scrollSaveTimer = setTimeout(function() {
+        _scrollSaveTimer = null;
+        var bodyX = document.documentElement.scrollLeft || document.body.scrollLeft;
+        var bodyY = document.documentElement.scrollTop || document.body.scrollTop;
+        _lastUserScrollX = bodyX;
+        _lastUserScrollY = bodyY;
+        var diagX = diagramScrollEl ? diagramScrollEl.scrollLeft : 0;
+        var diagY = diagramScrollEl ? diagramScrollEl.scrollTop : 0;
+        vscode.setState({ scrollX: bodyX, scrollY: bodyY, diagScrollX: diagX, diagScrollY: diagY });
+      }, 100);
+    }
+    window.addEventListener('scroll', function() {
+      // Only save user-initiated scroll (not programmatic restores)
+      if (!_scrollGuardActive) { saveScrollPosition(); }
+    }, true);
+    if (diagramScrollEl) diagramScrollEl.addEventListener('scroll', saveScrollPosition);
+
+    // Scroll guard: detect and revert unexpected scroll resets from DOM mutations.
+    // When DOM changes cause the browser to reset scroll to 0, this restores it.
+    var _scrollGuardTimer = null;
+    function enableScrollGuard() {
+      if (_scrollGuardTimer) return;
+      _scrollGuardActive = true;
+      _scrollGuardTimer = setTimeout(function() {
+        _scrollGuardTimer = null;
+        _scrollGuardActive = false;
+      }, 200);
+      requestAnimationFrame(function() {
+        var currentY = window.scrollY || document.documentElement.scrollTop;
+        // If scroll jumped to 0 but user was scrolled, restore
+        if (currentY === 0 && _lastUserScrollY > 50) {
+          window.scrollTo(_lastUserScrollX, _lastUserScrollY);
+        }
+        _scrollGuardActive = false;
+      });
+    }
+
+    // Hook into status updates that modify DOM — guard scroll around them
+    bus.on(Topics.STATUS_UPDATE, function() { enableScrollGuard(); });
+
+    // ── Initial group/node color application ─────────────────────────
+    // Mermaid renders asynchronously. After the SVG appears, replay all
+    // nodeData through the style controllers to apply correct colors.
+    // Retry up to 20 times (2 seconds) until clusters are found.
+    var _initialColorRetries = 0;
+    function _applyInitialColors() {
+      _initialColorRetries++;
+      var svg = document.querySelector('.mermaid svg');
+      if (!svg) {
+        if (_initialColorRetries < 20) setTimeout(_applyInitialColors, 100);
+        return;
+      }
+      var replay = { nodeStatuses: {} };
+      for (var s in nodeData) { replay.nodeStatuses[s] = nodeData[s]; }
+      mermaidNodeStyleCtrl.update(replay);
+      mermaidGroupStyleCtrl.update(replay);
+      mermaidEdgeStyleCtrl.update(replay);
+      // If group controller found 0 clusters, SVG might not be fully parsed yet
+      if (mermaidGroupStyleCtrl._lastUpdated === 0 && _initialColorRetries < 20) {
+        setTimeout(_applyInitialColors, 100);
+      }
+    }
+    setTimeout(_applyInitialColors, 150);
+
+    // Restore on load
+    var savedState = vscode.getState();
+    if (savedState) {
+      if (savedState.scrollY) {
+        _lastUserScrollY = savedState.scrollY;
+        _lastUserScrollX = savedState.scrollX || 0;
+        requestAnimationFrame(function() {
+          window.scrollTo(savedState.scrollX || 0, savedState.scrollY || 0);
+          if (diagramScrollEl && savedState.diagScrollX) diagramScrollEl.scrollLeft = savedState.diagScrollX;
+          if (diagramScrollEl && savedState.diagScrollY) diagramScrollEl.scrollTop = savedState.diagScrollY;
+        });
+      }
     }
   `;
 }

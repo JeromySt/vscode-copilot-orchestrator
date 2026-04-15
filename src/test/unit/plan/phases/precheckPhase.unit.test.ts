@@ -47,9 +47,9 @@ suite('PrecheckPhaseExecutor', () => {
     assert.strictEqual(result.success, true);
   });
 
-  test('returns success for shell spec with agent delegator on agent type', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true, sessionId: 'sess1', metrics: { durationMs: 100 } }) };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+  test('returns success for shell spec with Copilot runner on agent type', async () => {
+    const mockRunner: any = { run: sinon.stub().resolves({ success: true, sessionId: 'sess1', metrics: { durationMs: 100 } }) };
+    const executor = new PrecheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check things' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
@@ -64,19 +64,19 @@ suite('PrecheckPhaseExecutor', () => {
     assert.ok(result.error?.includes('Unknown work type'));
   });
 
-  test('agent fails without delegator', async () => {
+  test('agent fails without copilot runner', async () => {
     const executor = new PrecheckPhaseExecutor({ spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'do' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
-    assert.ok(result.error?.includes('agent delegator'));
+    assert.ok(result.error?.includes('Copilot runner'));
   });
 
   test('agent failure returns error and metrics', async () => {
-    const delegator = {
-      delegate: sinon.stub().resolves({ success: false, error: 'bad', exitCode: 1, metrics: { durationMs: 50 } }),
+    const mockRunner: any = {
+      run: sinon.stub().resolves({ success: false, error: 'bad', exitCode: 1, metrics: { durationMs: 50 } }),
     };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const executor = new PrecheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -85,8 +85,8 @@ suite('PrecheckPhaseExecutor', () => {
   });
 
   test('agent exception returns error', async () => {
-    const delegator = { delegate: sinon.stub().rejects(new Error('boom')) };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const mockRunner: any = { run: sinon.stub().rejects(new Error('boom')) };
+    const executor = new PrecheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'check' } });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, false);
@@ -104,12 +104,12 @@ suite('PrecheckPhaseExecutor', () => {
   });
 
   test('normalises @agent string to agent spec', async () => {
-    const delegator = { delegate: sinon.stub().resolves({ success: true }) };
-    const executor = new PrecheckPhaseExecutor({ agentDelegator: delegator, spawner: stubSpawner });
+    const mockRunner: any = { run: sinon.stub().resolves({ success: true }) };
+    const executor = new PrecheckPhaseExecutor({ copilotRunner: mockRunner, spawner: stubSpawner });
     const ctx = makeCtx({ workSpec: '@agent do the thing' });
     const result = await executor.execute(ctx);
     assert.strictEqual(result.success, true);
-    assert.ok(delegator.delegate.calledOnce);
+    assert.ok(mockRunner.run.calledOnce);
   });
 
   test('logs work type', async () => {

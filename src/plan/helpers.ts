@@ -70,6 +70,7 @@ export function computeStatusCounts(
     ready: 0,
     scheduled: 0,
     running: 0,
+    completed_split: 0,
     succeeded: 0,
     failed: 0,
     blocked: 0,

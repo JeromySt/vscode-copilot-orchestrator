@@ -31,6 +31,7 @@ export interface PlanRunnerEvents {
   'nodeCompleted': (planId: string, nodeId: string, success: boolean) => void;
   'nodeRetry': (planId: string, nodeId: string) => void;
   'nodeUpdated': (planId: string, nodeId: string) => void;
+  'planReshaped': (planId: string) => void;
 }
 
 /**

@@ -430,41 +430,6 @@ suite('cleanupOrphanedWorktrees', () => {
     assert.strictEqual(result.errors.length, 0);
   });
 
-  test.skip('handles filesystem error during directory scanning', async () => {
-    // Create a directory that will cause readdir to fail
-    const badWorktreesDir = path.join(tempDir, '.worktrees');
-    await fs.promises.mkdir(badWorktreesDir, { recursive: true });
-    
-    // Stub fs.promises.readdir to throw on the main scan
-    const originalReaddir = fs.promises.readdir;
-    let readDirCallCount = 0;
-    const readdirStub = async (dirPath: string, options?: any) => {
-      readDirCallCount++;
-      if (readDirCallCount === 1 && dirPath.includes('.worktrees')) {
-        throw new Error('Permission denied');
-      }
-      return originalReaddir(dirPath, options);
-    };
-    
-    (fs.promises as any).readdir = readdirStub;
-    
-    try {
-      const result = await cleanupOrphanedWorktrees({
-        repoPaths: [tempDir],
-        activePlans: new Map(),
-        git: {} as any,
-        logger: () => {}
-      });
-      
-      // Should record the error but continue
-      assert.strictEqual(result.scannedRepos, 0);
-      assert.strictEqual(result.errors.length, 1);
-      assert.ok(result.errors[0].includes('Permission denied'));
-    } finally {
-      (fs.promises as any).readdir = originalReaddir;
-    }
-  });
-
   test('handles error during empty directory cleanup', async () => {
     const orphanPath = path.join(worktreesDir, 'orphan-uuid');
     await fs.promises.mkdir(orphanPath);
@@ -489,46 +454,6 @@ suite('cleanupOrphanedWorktrees', () => {
       // Directory removal error should be caught and continue
     } finally {
       (fs.promises as any).rmdir = originalRmdir;
-    }
-  });
-
-  test.skip('handles partial cleanup when file removal fails but git removal succeeds', async () => {
-    const orphanPath = path.join(worktreesDir, 'orphan-uuid');
-    await fs.promises.mkdir(orphanPath);
-    await fs.promises.writeFile(path.join(orphanPath, 'file.txt'), 'content');
-    
-    // Stub fs.existsSync to return true (simulating directory still exists)
-    // and fs.promises.rm to fail
-    const originalExistsSync = fs.existsSync;
-    const originalRm = fs.promises.rm;
-    
-    (fs as any).existsSync = (path: string) => {
-      if (path === orphanPath) {return true;}
-      return originalExistsSync(path);
-    };
-    
-    (fs.promises as any).rm = async (path: string, options?: any) => {
-      if (path === orphanPath) {
-        throw new Error('File system busy');
-      }
-      return originalRm(path, options);
-    };
-    
-    try {
-      const result = await cleanupOrphanedWorktrees({
-        repoPaths: [tempDir],
-        activePlans: new Map(),
-        git: createMockGit(),
-        logger: () => {}
-      });
-      
-      assert.strictEqual(result.orphanedFound, 1);
-      assert.strictEqual(result.orphanedCleaned, 0); // Should fail cleanup
-      assert.strictEqual(result.errors.length, 1);
-      assert.ok(result.errors[0].includes('File system busy'));
-    } finally {
-      (fs as any).existsSync = originalExistsSync;
-      (fs.promises as any).rm = originalRm;
     }
   });
 

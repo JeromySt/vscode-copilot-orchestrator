@@ -9,6 +9,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes yet._
 
+## [0.16.0] - 2026-04-15
+
+### 🚀 Major Features
+
+#### Context Pressure Management
+- **Automatic detection** of AI agent context window exhaustion with cooperative checkpointing and job splitting. When a Copilot CLI agent's context window fills beyond configurable thresholds, the orchestrator detects rising token usage, signals the agent to checkpoint its work, and splits remaining work into fresh sub-jobs with clean context windows.
+- **Detection layer** — `ContextPressureMonitor` tracks token usage per agent delegation with threshold-based classification (normal → elevated → critical). Weighted EMA growth rate prediction estimates turns until context limit.
+- **Signal layer** — `CheckpointManager` writes sentinel files and reads checkpoint manifests. Agents trained via injected checkpoint protocol preamble to commit partial work and describe remaining tasks.
+- **Split layer** — `DefaultJobSplitter` converts checkpoint manifests into sub-job work specs. Fan-out/fan-in DAG reshaping creates parallel sub-jobs with a validation fan-in node.
+- **`completed_split` state** — New node lifecycle state for the transition window between checkpoint detection and DAG reshape completion.
+- **Postchecks-as-warning** — When checkpoint sentinel is present, postcheck failures become warnings to allow partial work to commit.
+- **Depth cap** — `maxSplitDepth` setting (default: 3) prevents infinite recursive splits.
+- **Feature flag** — `contextPressure.enabled` setting to disable the entire system.
+
+#### Process Output Bus Architecture
+- **Complete rewrite** of process output handling, replacing fragmented `CopilotStatsParser` + `CliLogEventParser` + manual `stdout.on('data')` wiring with a unified, pluggable, process-agnostic bus.
+- **`ProcessOutputBus`** — Central dispatch: splits raw output into lines, maintains per-source sliding windows, invokes registered `IOutputHandler` instances.
+- **`ManagedProcess`** — Wraps a `ChildProcessLike` with auto-wired stdout/stderr, log file tailers, high-resolution lifecycle timestamps, and computed durations.
+- **`LogFileTailer`** — Hybrid `fs.watch()` + fallback poll with <100ms typical latency. Supports single-file and directory-rotation modes.
+- **`OutputHandlerRegistry`** — Holds handler factories registered at composition time. Creates handler instances per-process based on process label filtering.
+- **Four pluggable output handlers**: `ContextPressureHandler` (token usage + model limits), `SessionIdHandler` (session extraction), `StatsHandler` (CLI summary statistics), `TaskCompleteHandler` (completion detection).
+
+#### UI Pub/Sub Migration
+- **Migrated all UI panels** from pulse-driven full HTML rebuilds to targeted pub/sub delta delivery via `WebViewSubscriptionManager` producers.
+- **Eight new producers**: `AiUsageProducer`, `ContextPressureProducer`, `DependencyStatusProducer`, `NodeStateProducer`, `PlanListProducer`, `PlanStateProducer`, `PlanTopologyProducer`, `ProcessStatsProducer`.
+- **Panel migrations**: Sidebar → `PlanListProducer`, plan detail panel → `WebViewSubscriptionManager`, node detail panel → subscription manager for all data delivery.
+
+#### Effort Hint / Reasoning Level
+- New `effort` field on `AgentSpec`: `'low' | 'medium' | 'high' | 'xhigh'` — maps to Copilot CLI `--effort` flag for controlling model reasoning depth.
+- Integrated across MCP schema, CLI runner, execution engine, and UI with color-coded effort badges per node.
+- Verified static map for model tier classification replaces heuristic-only approach.
+- Backward-compatible model discovery for CLI v1.x.
+
+#### Integration Test Plan Builder
+- **`run_copilot_integration_test` MCP tool** — Creates a deterministic integration test plan exercising ALL orchestrator behaviors with scripted (fake) process output.
+- **`ProcessScript` system** — Pre-recorded stdout/stderr/log-file lines for deterministic testing covering: shell execution, agent execution (full handler pipeline), process execution, context pressure checkpoint + DAG reshape, auto-heal, permanent failure + blocked propagation, postcheck failure + recovery, no-changes path, and fan-in merge.
+
+### ✨ Enhancements
+
+- **Context Pressure UI card** — Progress bar showing context window fill %, status label, growth rate, and split risk indicator (Imminent/High/Moderate/Low)
+- **Post-split checkpoint view** in attempt card — Shows tokens consumed/max, sub-job count, sub-job list with status badges and clickable navigation links
+- **Mermaid DAG sub-job rendering** — Checkpoint nodes shown with `⑃` prefix, fan-in nodes with `⇉` prefix, sub-jobs with numbering (1/3, 2/3), and virtual group subgraphs for context pressure clusters
+- **`planReshaped` event** — Wired to UI panels for live Mermaid re-render after topology changes (context pressure splits)
+- **Timeline chart improvements** — Pixel-based Gantt with phase-colored bars, auto-scroll to live edge, attempt-level phase breakdowns, plan pause/resume history visualization
+- **`bulk_update_copilot_plan_jobs` MCP tool** — Apply common AgentSpec attributes (model, modelTier, effort, maxTurns, env) to multiple jobs at once
+- **SV spec delegation** — `builder.ts` now delegates SV spec construction to `svNodeBuilder.ts`
+- **Brighter running indicators** + improved canceled/pending card styling in sidebar
+
+### 🐛 Bug Fixes
+
+- **Merge-RI worktree HEAD resolution** — Fixed critical bug where merge-RI must use the worktree HEAD as source (not just commit phase result), fixing fan-in no-op nodes and SV nodes
+- **Stats-hang kill timer** — Fixed to trigger on ANY stats line, not just 'Total usage est', preventing hung CLI when stats format changes
+- **Live process tree** — Restored process tree section in node detail panel
+- **FakeChildProcess exit events** — Emit proper exit events for integration test matching
+- **Model tier classification** — Replaced heuristic-only classification with verified static map for accurate premium/standard/fast determination
+- **Model discovery backward-compat** — Fixed for CLI v1.x which doesn't support `--effort` flag
+
+### ⚙️ New Configuration
+
+| Setting | Default | Description |
+|---|---|---|
+| `contextPressure.enabled` | `true` | Enable/disable automatic context pressure detection and job splitting |
+| `contextPressure.elevatedThreshold` | `50` | % of context window that triggers elevated warning |
+| `contextPressure.criticalThreshold` | `75` | % of context window that triggers checkpoint + split |
+| `contextPressure.maxSplitDepth` | `3` | Maximum recursion depth for sub-job splitting |
+| `contextPressure.maxSubJobs` | `8` | Maximum sub-jobs from a single checkpoint |
+
 ## [0.15.5] - 2026-04-06
 
 ### 🚀 Major Features

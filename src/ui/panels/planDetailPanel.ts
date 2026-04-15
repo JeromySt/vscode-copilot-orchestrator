@@ -22,7 +22,24 @@ import { PlanDetailController } from './planDetailController';
 import type { PlanDetailDelegate } from './planDetailController';
 import type { IDialogService } from '../../interfaces/IDialogService';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../../interfaces/IPulseEmitter';
+import { WebViewSubscriptionManager } from '../webViewSubscriptionManager';
+import { PlanStateProducer } from '../producers/planStateProducer';
+import { NodeStateProducer } from '../producers/nodeStateProducer';
+import { PlanTopologyProducer } from '../producers/planTopologyProducer';
 import { webviewScriptTag } from '../webviewUri';
+import { Logger } from '../../core/logger';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const panelLog = Logger.for('ui');
+
+function crashLog(msg: string): void {
+  try {
+    const logPath = path.join(process.cwd(), '.orchestrator', 'debug-events.log');
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] [PlanDetail] ${msg}\n`);
+  } catch { /* best-effort */ }
+}
 
 /**
  * Webview panel that shows a detailed view of a single Plan's execution.
@@ -61,8 +78,8 @@ export class planDetailPanel {
   private _isFirstRender: boolean = true;
   private readonly _controller: PlanDetailController;
   private _disposed = false;
-  private _cachedCapacity: { data: any; fetchedAt: number } | null = null;
-  private static readonly CAPACITY_CACHE_TTL_MS = 5000;
+  private readonly _subscriptionManager: WebViewSubscriptionManager;
+  private readonly _panelId: string;
   
   /**
    * @param panel - The VS Code webview panel instance.
@@ -82,6 +99,11 @@ export class planDetailPanel {
   ) {
     this._panel = panel;
     this._planId = planId;
+    this._panelId = `plan:${planId}`;
+    this._subscriptionManager = new WebViewSubscriptionManager();
+    this._subscriptionManager.registerProducer(new PlanStateProducer(_planRunner as any));
+    this._subscriptionManager.registerProducer(new NodeStateProducer(_planRunner as any));
+    this._subscriptionManager.registerProducer(new PlanTopologyProducer(_planRunner as any));
     
     // Build the delegate that bridges controller → VS Code APIs
     const delegate: PlanDetailDelegate = {
@@ -101,54 +123,54 @@ export class planDetailPanel {
           vscode.window.showTextDocument(fileUri, { preview: true }).then(undefined, () => { /* file may not exist */ });
         }
       },
+      closePanel: () => this._panel.dispose(),
     };
     this._controller = new PlanDetailController(planId, dialogService, delegate);
     
     // Initial render
     this._update();
     
-    // Subscribe to plan runner events for live state updates
-    const onNodeTransition = (event: any) => {
-      const eventPlanId = typeof event === 'string' ? event : event?.planId;
-      if (eventPlanId === this._planId) {
-        this._update();
-      }
-    };
-    const onPlanStarted = (plan: any) => {
-      if (plan?.id === this._planId || plan === this._planId) {
-        this._sendIncrementalUpdate();
-      }
-    };
-    const onPlanCompleted = (plan: any) => {
-      if (plan?.id === this._planId || plan === this._planId) {
-        this._update();
-      }
-    };
-    const onPlanUpdated = (planId: string) => {
-      if (planId === this._planId) {
-        this._update();
-      }
-    };
-    this._planRunner.on('nodeTransition', onNodeTransition);
-    this._planRunner.on('planStarted', onPlanStarted);
-    this._planRunner.on('planCompleted', onPlanCompleted);
-    this._planRunner.on('planUpdated', onPlanUpdated);
-    this._disposables.push({ dispose: () => {
-      this._planRunner.removeListener('nodeTransition', onNodeTransition);
-      this._planRunner.removeListener('planStarted', onPlanStarted);
-      this._planRunner.removeListener('planCompleted', onPlanCompleted);
-      this._planRunner.removeListener('planUpdated', onPlanUpdated);
-    }});
+    // ── Event wiring ────────────────────────────────────────────────────
+    // ALL live state updates — including plan deletion — flow through the
+    // WebViewSubscriptionManager via producers. PlanStateProducer delivers
+    // status: 'deleted' when a plan is removed, and the webview sends a
+    // 'close' message back to dispose this panel.
+    //
+    // No direct PlanRunner event listeners needed.
     
     // Subscribe to pulse — forward to webview for client-side duration ticking.
     // Duration counters (plan header + node labels) update purely client-side
     // using data-started timestamps. No server data needed on every tick.
+    // Also tick subscription manager so plan/node state deltas are pushed when changed.
     this._pulseSubscription = this._pulse.onPulse(() => {
       if (!this._disposed) {
         try { this._panel.webview.postMessage({ type: 'pulse' }); } catch { /* panel disposed */ }
+        this._subscriptionManager.tick().catch(() => { /* error logged internally */ });
       }
     });
     
+    // Immediate full refresh when plan is reshaped (context pressure split,
+    // manual edits, etc.) so the timeline and DAG pick up new nodes without
+    // waiting for the next topology-producer poll tick.
+    const onPlanReshaped = (reshapedPlanId: string) => {
+      if (reshapedPlanId === this._planId && !this._disposed) {
+        this._forceFullRefresh();
+      }
+    };
+    this._planRunner.on('planReshaped', onPlanReshaped);
+    this._disposables.push({ dispose: () => {
+      this._planRunner.removeListener('planReshaped', onPlanReshaped);
+    }});
+    
+    // Pause/resume subscriptions when panel visibility changes
+    this._panel.onDidChangeViewState(e => {
+      if (e.webviewPanel.visible) {
+        this._subscriptionManager.resumePanel(this._panelId);
+      } else {
+        this._subscriptionManager.pausePanel(this._panelId);
+      }
+    }, null, this._disposables);
+
     // Handle panel disposal
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     
@@ -241,6 +263,8 @@ export class planDetailPanel {
     this._disposed = true;
     planDetailPanel.panels.delete(this._planId);
     
+    this._subscriptionManager.disposePanel(this._panelId);
+
     if (this._pulseSubscription) {
       this._pulseSubscription.dispose();
     }
@@ -401,10 +425,34 @@ export class planDetailPanel {
 
   /**
    * Force a full HTML re-render, bypassing the state hash check.
-   * Used when the webview requests a refresh (e.g., after an error).
+   * Debounced to prevent infinite refresh loops from subscription re-creation.
    */
+  private _refreshDebounce?: ReturnType<typeof setTimeout>;
+  private _refreshCount = 0;
+  private _refreshBurstStart = 0;
+  private _refreshBurstCount = 0;
   private async _forceFullRefresh() {
     if (this._disposed) { return; }
+    // Debounce: suppress rapid consecutive refresh requests
+    if (this._refreshDebounce) { return; }
+    
+    // Burst detection: if >5 refreshes in 10 seconds, stop to prevent OOM crash
+    const now = Date.now();
+    if (now - this._refreshBurstStart > 10000) {
+      this._refreshBurstStart = now;
+      this._refreshBurstCount = 0;
+    }
+    this._refreshBurstCount++;
+    if (this._refreshBurstCount > 5) {
+      panelLog.error(`_forceFullRefresh BURST LIMIT (${this._refreshBurstCount} in 10s) — halting to prevent crash`);
+      return;
+    }
+    
+    this._refreshCount++;
+    crashLog(`_forceFullRefresh #${this._refreshCount} for plan ${this._planId.slice(0, 8)}`);
+    panelLog.warn(`_forceFullRefresh #${this._refreshCount} for plan ${this._planId.slice(0, 8)}`);
+    this._refreshDebounce = setTimeout(() => { this._refreshDebounce = undefined; }, 500);
+
     const plan = this._planRunner.get(this._planId);
     if (!plan) {
       this._panel.webview.html = this._getErrorHtml('Plan not found');
@@ -419,17 +467,23 @@ export class planDetailPanel {
     // Get global capacity stats
     const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
     
-    // Reset hashes to force next _update to also do full render
-    this._lastStateVersion = -1;
-    this._lastStructureHash = '';
-    this._isFirstRender = true;
+    // Update hashes to match current state so the next _update()
+    // sees no structure change and skips (letting subscriptions handle deltas).
+    this._lastStateVersion = plan.stateVersion || 0;
+    this._lastStructureHash = JSON.stringify({
+      nodes: Array.from(plan.jobs.entries()).map(([id, n]) => [id, n.name, (n as JobNode).dependencies]),
+      spec: plan.spec.name
+    });
+    this._isFirstRender = false;
     
     this._panel.webview.html = this._getHtml(plan, status, recursiveCounts.counts, effectiveEndedAt, recursiveCounts.totalNodes, globalCapacityStats);
+    this._setupSubscriptions();
   }
 
   /**
    * Re-render the panel HTML if the Plan state has changed since the last render.
    * Uses a JSON state hash to skip redundant re-renders.
+   * Incremental status and node-colour updates are handled by the subscription manager.
    */
   private async _update() {
     if (this._disposed) { return; }
@@ -446,54 +500,6 @@ export class planDetailPanel {
     const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
     const counts = recursiveCounts.counts;
     const totalNodes = recursiveCounts.totalNodes;
-    
-    // Get global capacity stats
-    const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
-    
-    // Build node status map for incremental updates (includes version, attempts, stepStatuses for timeline)
-    const nodeStatuses: Record<string, any> = {};
-    for (const [nodeId, state] of plan.nodeStates) {
-      const sanitizedId = this._sanitizeId(nodeId);
-      const entry: Record<string, any> = {
-        status: state.status,
-        version: state.version || 0,
-        startedAt: state.startedAt,
-        endedAt: state.endedAt
-      };
-      if (state.status === 'running' && state.stepStatuses) {
-        for (const [phase, phaseStatus] of Object.entries(state.stepStatuses)) {
-          if (phaseStatus === 'running') { entry.currentPhase = phase; break; }
-        }
-      }
-      // Include attempt history so timeline can render new attempt bars
-      if (state.attemptHistory && state.attemptHistory.length > 0) {
-        entry.attempts = state.attemptHistory.map((a: any) => ({
-          attemptNumber: a.attemptNumber, status: a.status,
-          startedAt: a.startedAt, endedAt: a.endedAt,
-          failedPhase: a.failedPhase, triggerType: a.triggerType || 'initial',
-          stepStatuses: a.stepStatuses || {},
-          phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
-            phase, durationMs: metrics?.durationMs || 0,
-            status: (a.stepStatuses as any)?.[phase] || 'succeeded',
-          })).filter((pd: any) => pd.durationMs > 0) : [],
-          phaseTiming: a.phaseTiming || [],
-        }));
-      }
-      if (state.stepStatuses) { entry.stepStatuses = state.stepStatuses; }
-      if (state.scheduledAt) { entry.scheduledAt = state.scheduledAt; }
-      nodeStatuses[sanitizedId] = entry;
-    }
-    
-    // Add group statuses (groups use same sanitized ID pattern as nodes)
-    for (const [groupId, state] of plan.groupStates) {
-      const sanitizedId = this._sanitizeId(groupId);
-      nodeStatuses[sanitizedId] = {
-        status: state.status,
-        version: state.version || 0,
-        startedAt: state.startedAt,
-        endedAt: state.endedAt
-      };
-    }
     
     // Structure hash: nodes and their dependencies (doesn't change during execution)
     const structureHash = JSON.stringify({
@@ -513,133 +519,81 @@ export class planDetailPanel {
     this._lastStateVersion = currentStateVersion;
     this._lastStructureHash = structureHash;
     
-    // If structure changed or first render, do full HTML render
+    // If structure changed or first render, do full HTML render then set up subscriptions
     if (structureChanged || this._isFirstRender) {
       this._isFirstRender = false;
       // Compute effective endedAt from node data for accurate duration
       const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
+      // Get global capacity stats for initial render
+      const globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
       this._panel.webview.html = this._getHtml(plan, status, counts, effectiveEndedAt, totalNodes, globalCapacityStats);
+      this._setupSubscriptions();
       return;
     }
-    
-    // Otherwise, send incremental status update (preserves zoom/scroll)
-    const total = totalNodes ?? plan.jobs.size;
-    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
-    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
-    
-    this._panel.webview.postMessage({
-      type: 'statusUpdate',
-      planStatus: status,
-      stateVersion: currentStateVersion,
-      nodeStatuses,
-      counts,
-      progress,
-      total,
-      completed,
-      startedAt: plan.startedAt,
-      endedAt: effectiveEndedAt,
-      planEndedAt: effectiveEndedAt,
-      planMetrics: this._serializeMetrics(plan),
-      globalCapacity: globalCapacityStats ? {
-        activeInstances: globalCapacityStats.activeInstances,
-        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
-        globalMaxParallel: globalCapacityStats.globalMaxParallel
-      } : null
-    });
+
+    // Non-structural change: subscription manager delivers status/node deltas on the next tick.
   }
   
   /**
-   * Send an incremental status update to the webview (used by pulse).
-   * Unlike _update(), this always sends the status message even if the
-   * stateVersion hasn't changed, because duration counters need fresh
-   * startedAt/endedAt data on every pulse tick.
+   * Set up (or reset) WebView subscriptions after a full HTML rebuild.
+   *
+   * Creates one planState subscription for overall plan status and one
+   * nodeState subscription per node (keyed by planId:nodeId, tagged with the
+   * sanitized Mermaid node ID). The subscription manager delivers
+   * `subscriptionData` messages to the webview on each pulse tick.
    */
-  private async _sendIncrementalUpdate() {
-    if (this._disposed) { return; }
+  private _setupSubscriptions(): void {
     const plan = this._planRunner.get(this._planId);
-    if (!plan) {return;}
-    
-    const sm = this._planRunner.getStateMachine(this._planId);
-    const status = (plan.spec as any)?.status === 'scaffolding' ? 'scaffolding' : (sm?.computePlanStatus() || 'pending');
-    const recursiveCounts = this._planRunner.getRecursiveStatusCounts(this._planId);
-    const counts = recursiveCounts.counts;
-    const totalNodes = recursiveCounts.totalNodes;
-    const total = totalNodes ?? plan.jobs.size;
-    const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
-    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const effectiveEndedAt = this._planRunner.getEffectiveEndedAt(this._planId) || plan.endedAt;
-    
-    // Get global capacity stats with caching to avoid async overhead on every pulse tick
-    let globalCapacityStats: any = null;
-    const now = Date.now();
-    if (this._cachedCapacity && (now - this._cachedCapacity.fetchedAt) < planDetailPanel.CAPACITY_CACHE_TTL_MS) {
-      globalCapacityStats = this._cachedCapacity.data;
-    } else {
-      globalCapacityStats = await this._planRunner.getGlobalCapacityStats().catch(() => null);
-      this._cachedCapacity = { data: globalCapacityStats, fetchedAt: now };
+    if (!plan) { return; }
+
+    const nodeCount = plan.nodeStates.size;
+    const groupCount = plan.groupStates.size;
+    crashLog(`_setupSubscriptions: ${nodeCount} nodes, ${groupCount} groups, planId=${this._planId.slice(0, 8)}`);
+    panelLog.warn(`_setupSubscriptions: ${nodeCount} nodes, ${groupCount} groups, planId=${this._planId.slice(0, 8)}`);
+
+    // Clear any subscriptions from the previous render
+    this._subscriptionManager.disposePanel(this._panelId);
+
+    // Subscribe to overall plan state (status, counts, progress, timestamps)
+    this._subscriptionManager.subscribe(
+      this._panelId,
+      this._panel.webview,
+      'planState',
+      this._planId,
+      'planState',
+    );
+
+    // Subscribe to each node's execution state for targeted DAG colour updates
+    for (const nodeId of plan.nodeStates.keys()) {
+      this._subscriptionManager.subscribe(
+        this._panelId,
+        this._panel.webview,
+        'nodeState',
+        `${this._planId}:${nodeId}`,
+        this._sanitizeId(nodeId),
+      );
     }
-    
-    // Build node statuses (with attempt data for timeline)
-    const nodeStatuses: Record<string, any> = {};
-    for (const [nodeId, state] of plan.nodeStates) {
-      const entry: Record<string, any> = {
-        status: state.status, version: state.version || 0,
-        startedAt: state.startedAt, endedAt: state.endedAt,
-      };
-      if (state.status === 'running' && state.stepStatuses) {
-        for (const [phase, phaseStatus] of Object.entries(state.stepStatuses)) {
-          if (phaseStatus === 'running') { entry.currentPhase = phase; break; }
-        }
-      }
-      // Include attempt history for timeline rendering (stepStatuses + phaseTiming)
-      if (state.attemptHistory && state.attemptHistory.length > 0) {
-        entry.attempts = state.attemptHistory.map((a: any) => ({
-          attemptNumber: a.attemptNumber,
-          status: a.status,
-          startedAt: a.startedAt,
-          endedAt: a.endedAt,
-          failedPhase: a.failedPhase,
-          triggerType: a.triggerType || 'initial',
-          stepStatuses: a.stepStatuses || {},
-          phaseDurations: a.phaseMetrics ? Object.entries(a.phaseMetrics).map(([phase, metrics]: [string, any]) => ({
-            phase,
-            durationMs: metrics?.durationMs || 0,
-            status: (a.stepStatuses as any)?.[phase] || 'succeeded',
-          })).filter((pd: any) => pd.durationMs > 0) : [],
-          phaseTiming: a.phaseTiming || [],
-        }));
-      }
-      // Include current stepStatuses for running nodes (live phase display)
-      if (state.stepStatuses) {
-        entry.stepStatuses = state.stepStatuses;
-      }
-      if (state.scheduledAt) {
-        entry.scheduledAt = state.scheduledAt;
-      }
-      nodeStatuses[this._sanitizeId(nodeId)] = entry;
+
+    // Also subscribe to group states so group container colours update
+    for (const groupId of plan.groupStates.keys()) {
+      this._subscriptionManager.subscribe(
+        this._panelId,
+        this._panel.webview,
+        'nodeState',
+        `${this._planId}:${groupId}`,
+        this._sanitizeId(groupId),
+      );
     }
-    for (const [groupId, state] of plan.groupStates) {
-      nodeStatuses[this._sanitizeId(groupId)] = {
-        status: state.status, version: state.version || 0,
-        startedAt: state.startedAt, endedAt: state.endedAt,
-      };
-    }
-    
-    this._panel.webview.postMessage({
-      type: 'statusUpdate',
-      planStatus: status,
-      nodeStatuses,
-      counts, progress, total, completed,
-      startedAt: plan.startedAt,
-      endedAt: effectiveEndedAt,
-      planEndedAt: effectiveEndedAt,
-      globalCapacity: globalCapacityStats ? {
-        activeInstances: globalCapacityStats.activeInstances,
-        totalGlobalJobs: globalCapacityStats.totalGlobalJobs,
-        globalMaxParallel: globalCapacityStats.globalMaxParallel
-      } : null
-    });
+
+    // Subscribe to topology changes — triggers full Mermaid DAG rebuild
+    // when nodes are added/removed (e.g., context pressure fan-out reshape).
+    this._subscriptionManager.subscribe(
+      this._panelId,
+      this._panel.webview,
+      'planTopology',
+      this._planId,
+      'planTopology',
+    );
   }
 
   /**
@@ -679,6 +633,11 @@ export class planDetailPanel {
     const completed = (counts.succeeded || 0) + (counts.failed || 0) + (counts.blocked || 0) + (counts.canceled || 0);
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     
+    // Repair missing group maps if groupStates exist but groupPathToId is empty.
+    // This can happen when plans were persisted before the groups/groupPathToId
+    // sync fix, leaving groupStates orphaned from their path mappings.
+    this._repairGroupMapsIfNeeded(plan);
+
     // Build Mermaid diagram
     const { diagram: mermaidDef, nodeTooltips, edgeData } = buildMermaidDiagram(plan);
     
@@ -705,12 +664,26 @@ export class planDetailPanel {
     // Add group data for duration tracking
     for (const [groupId, state] of plan.groupStates) {
       const sanitizedId = this._sanitizeId(groupId);
-      const group = plan.groups.get(groupId);
+      // Resolve name from groups map, groupPathToId reverse lookup, or job nodes fallback
+      let name = plan.groups.get(groupId)?.name;
+      if (!name) {
+        for (const [path, id] of plan.groupPathToId) {
+          if (id === groupId) { name = path.split('/').pop(); break; }
+        }
+      }
+      if (!name) {
+        for (const [, node] of plan.jobs) {
+          if ((node as JobNode).groupId === groupId && (node as JobNode).group) {
+            name = ((node as JobNode).group as string).split('/').pop();
+            break;
+          }
+        }
+      }
       nodeData[sanitizedId] = {
         nodeId: groupId,
         planId: plan.id,
         type: 'group',
-        name: group?.name || groupId,
+        name: name || groupId,
         startedAt: state?.startedAt,
         endedAt: state?.endedAt,
         status: state?.status || 'pending',
@@ -1049,6 +1022,105 @@ export class planDetailPanel {
    * Convert a node ID (UUID) to a Mermaid-safe identifier.
    * Simply prefixes with 'n' and strips hyphens from UUID.
    * 
+  /**
+   * Rebuild groups and groupPathToId maps when they are empty but groupStates
+   * has entries. This repairs plans whose metadata was persisted before the
+   * saveStateSync fix that added groups/groupPathToId persistence.
+   *
+   * Matches group paths (from job nodes) to groupState UUIDs using the same
+   * creation order that buildGroupsFromJobs uses during finalization.
+   */
+  private _repairGroupMapsIfNeeded(plan: PlanInstance): void {
+    if (plan.groupPathToId.size > 0 || plan.groupStates.size === 0) { return; }
+
+    // Collect unique leaf group paths from job nodes (preserves insertion order)
+    const leafPaths = new Set<string>();
+    for (const [, node] of plan.jobs) {
+      const group = (node as JobNode).group;
+      if (group) { leafPaths.add(group); }
+    }
+    if (leafPaths.size === 0) { return; }
+
+    // Expand to full hierarchy (parents first), replicating buildGroupsFromJobs order
+    const creationOrder: string[] = [];
+    const seen = new Set<string>();
+    for (const leafPath of leafPaths) {
+      const parts = leafPath.split('/');
+      let current = '';
+      for (const part of parts) {
+        current = current ? `${current}/${part}` : part;
+        if (!seen.has(current)) {
+          seen.add(current);
+          creationOrder.push(current);
+        }
+      }
+    }
+
+    const groupUuids = [...plan.groupStates.keys()];
+    if (creationOrder.length !== groupUuids.length) { return; }
+
+    // Match paths to UUIDs positionally (same order as original creation)
+    for (let i = 0; i < creationOrder.length; i++) {
+      const path = creationOrder[i];
+      const uuid = groupUuids[i];
+      plan.groupPathToId.set(path, uuid);
+
+      const pathName = path.split('/').pop() || path;
+      const parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : undefined;
+      const parentGroupId = parentPath ? plan.groupPathToId.get(parentPath) : undefined;
+
+      plan.groups.set(uuid, {
+        id: uuid,
+        name: pathName,
+        path,
+        parentGroupId,
+        childGroupIds: [],
+        nodeIds: [],
+        allNodeIds: [],
+        totalNodes: 0,
+      });
+    }
+
+    // Link parent → child relationships
+    for (const [, group] of plan.groups) {
+      if (group.parentGroupId) {
+        const parent = plan.groups.get(group.parentGroupId);
+        if (parent && !parent.childGroupIds.includes(group.id)) {
+          parent.childGroupIds.push(group.id);
+        }
+      }
+    }
+
+    // Set node memberships and assign groupId on job nodes
+    for (const [nodeId, node] of plan.jobs) {
+      const jn = node as JobNode;
+      if (jn.group) {
+        const gid = plan.groupPathToId.get(jn.group);
+        if (gid) {
+          jn.groupId = gid;
+          const grp = plan.groups.get(gid);
+          if (grp) {
+            grp.nodeIds.push(nodeId);
+            grp.allNodeIds.push(nodeId);
+            grp.totalNodes++;
+            let pid = grp.parentGroupId;
+            while (pid) {
+              const parent = plan.groups.get(pid);
+              if (parent) {
+                parent.allNodeIds.push(nodeId);
+                parent.totalNodes++;
+                pid = parent.parentGroupId;
+              } else { break; }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Sanitise a UUID for use as a Mermaid node/subgraph ID.
+   *
    * @param id - The raw node ID (UUID like "abc12345-6789-...").
    * @returns Mermaid-safe ID like "nabc123456789..."
    */

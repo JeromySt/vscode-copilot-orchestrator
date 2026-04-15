@@ -725,9 +725,9 @@ graph LR
     end
 
     subgraph "Agent"
-        DELEG[AgentDelegator]
         COPRUN[CopilotCliRunner]
         DISC[ModelDiscovery]
+        POB[ProcessOutputBus]
     end
 
     subgraph "Infrastructure"
@@ -776,15 +776,18 @@ src/
 ├── extension.ts              # Extension activation and lifecycle
 ├── composition.ts            # Production DI composition root
 ├── agent/                    # Copilot CLI delegation
-│   ├── agentDelegator.ts     #   Agent orchestration and prompt building
-│   ├── copilotCliRunner.ts   #   CLI invocation wrapper
-│   ├── copilotStatsParser.ts #   Usage metrics extraction
+│   ├── copilotCliRunner.ts   #   CLI invocation wrapper (uses IManagedProcessFactory)
+│   ├── handlers/             #   Output bus handlers
+│   │   ├── contextPressureHandler.ts  # Token usage + model limits + compaction
+│   │   ├── sessionIdHandler.ts        # Session ID extraction
+│   │   ├── statsHandler.ts            # CLI summary statistics
+│   │   └── taskCompleteHandler.ts     # Completion marker detection
 │   ├── modelDiscovery.ts     #   Dynamic model enumeration
 │   └── cliCheck*.ts          #   CLI availability detection
 ├── commands/                 # VS Code command registrations
 ├── core/                     # Core infrastructure
 │   ├── container.ts          #   Symbol-based DI container
-│   ├── tokens.ts             #   23 service registration tokens
+│   ├── tokens.ts             #   41 service registration tokens
 │   ├── logger.ts             #   Structured logging (Logger.for())
 │   ├── globalCapacity.ts     #   Cross-instance job coordination
 │   ├── powerManager.ts       #   Sleep prevention during execution
@@ -799,7 +802,7 @@ src/
 │       ├── executor.ts       #     Async git command execution
 │       ├── merge.ts          #     In-memory merge-tree operations
 │       └── worktrees.ts      #     Worktree CRUD with per-repo mutex
-├── interfaces/               # 18 DI interface files (one per interface)
+├── interfaces/               # DI interface files (one per interface)
 ├── mcp/                      # Model Context Protocol integration
 │   ├── handler.ts            #   Tool dispatch router
 │   ├── handlers/             #   Business logic per tool
@@ -814,35 +817,57 @@ src/
 │   ├── runner.ts             #   PlanRunner — top-level orchestrator
 │   ├── planLifecycle.ts      #   Start, pause, resume, cancel
 │   ├── executionPump.ts      #   Main scheduling loop
-│   ├── executionEngine.ts    #   Per-node 7-phase execution
+│   ├── executionEngine.ts    #   Per-node 7-phase execution + context pressure reshape
 │   ├── executor.ts           #   DefaultJobExecutor (work routing)
+│   ├── reshaper.ts           #   DAG reshaping for context pressure fan-out/fan-in
 │   ├── stateMachine.ts       #   DAG state transitions & propagation
 │   ├── scheduler.ts          #   Capacity-aware node selection
 │   ├── builder.ts            #   PlanSpec → PlanInstance DAG builder
 │   ├── svNodeBuilder.ts      #   Snapshot Validation node spec builder
 │   ├── analysis/             #   Job analysis utilities
-│   │   └── complexityScorer.ts  # Complexity scoring + decomposition warnings
+│   │   ├── complexityScorer.ts       # Complexity scoring + decomposition warnings
+│   │   ├── contextPressureMonitor.ts # Token tracking + threshold classification
+│   │   ├── checkpointManager.ts      # Sentinel + manifest file I/O
+│   │   ├── jobSplitter.ts            # Manifest → sub-job work specs
+│   │   └── pressureMonitorRegistry.ts # Global monitor ↔ UI producer registry
 │   ├── phases/               #   Individual phase implementations
 │   │   ├── mergeFiPhase.ts   #     Forward Integration merge
 │   │   ├── setupPhase.ts     #     Worktree environment prep
 │   │   ├── precheckPhase.ts  #     Pre-execution validation
 │   │   ├── workPhase.ts      #     Agent/shell/process execution
-│   │   ├── commitPhase.ts    #     Stage + commit changes
-│   │   ├── postcheckPhase.ts #     Post-execution validation
+│   │   ├── commitPhase.ts    #     Stage + commit changes (+ checkpoint handling)
+│   │   ├── postcheckPhase.ts #     Post-execution validation (+ checkpoint-as-warning)
 │   │   └── mergeRiPhase.ts   #     Reverse Integration (in-memory)
+│   ├── testing/              #   Integration test infrastructure
+│   │   ├── integrationTestPlanBuilder.ts  # Deterministic test plan builder
+│   │   └── processScripts.ts             # Pre-recorded output scripts
 │   ├── repository/           #   Plan persistence layer
 │   └── store/                #   Filesystem storage backend
-├── process/                  # OS process monitoring (CPU/memory)
+├── process/                  # Process output + monitoring
+│   ├── processOutputBus.ts   #   Line dispatch + sliding windows
+│   ├── managedProcess.ts     #   ChildProcess wrapper with bus + tailers
+│   ├── managedProcessFactory.ts  # Factory with pre-registered handlers
+│   ├── logFileTailer.ts      #   Hybrid fs.watch + fallback poll
+│   └── outputHandlerRegistry.ts  # Handler factory registration
 ├── types/                    # Shared configuration types
 ├── ui/                       # VS Code UI components
-│   ├── plansViewProvider.ts  #   Sidebar webview
+│   ├── plansViewProvider.ts  #   Sidebar webview (uses PlanListProducer)
 │   ├── statusBar.ts          #   Status bar item
 │   ├── panels/               #   Webview panels + controllers
+│   ├── producers/            #   Pub/sub data producers
+│   │   ├── aiUsageProducer.ts
+│   │   ├── contextPressureProducer.ts
+│   │   ├── dependencyStatusProducer.ts
+│   │   ├── nodeStateProducer.ts
+│   │   ├── planListProducer.ts
+│   │   ├── planStateProducer.ts
+│   │   ├── planTopologyProducer.ts
+│   │   └── processStatsProducer.ts
 │   ├── templates/            #   HTML/CSS/JS template generators
 │   └── webview/              #   Browser-bundled control framework
 │       ├── eventBus.ts       #     Pub/sub event bus
 │       ├── subscribableControl.ts  # Base control class
-│       ├── controls/         #     15 reusable webview controls
+│       ├── controls/         #     Reusable webview controls (+ contextPressureCard, timelineChart)
 │       └── entries/          #     esbuild browser entry points
 └── vscode/                   # VS Code API adapters
     └── adapters.ts           #   Production implementations
@@ -869,7 +894,11 @@ stateDiagram-v2
 
     running --> succeeded : All phases passed
     running --> failed : Phase error
+    running --> completed_split : Context pressure checkpoint
     running --> canceled : Plan canceled
+
+    completed_split --> succeeded : Sub-jobs created (DAG reshaped)
+    completed_split --> failed : Split error
 
     failed --> pending : retryNode()
     blocked --> pending : Upstream retried and succeeded
@@ -882,6 +911,7 @@ stateDiagram-v2
 - **On success** → Check all dependents; if all their dependencies succeeded, transition to `ready`
 - **On failure** → BFS propagation of `blocked` to all downstream nodes
 - **On retry** → `resetNodeToPending()` resets the node and unblocks descendants
+- **On completed_split** → DAG reshaper creates fan-out sub-jobs and a fan-in validation node; original node transitions to `succeeded`
 
 ---
 
@@ -1054,17 +1084,18 @@ graph LR
     ROUTE --> PLAN
 ```
 
-**26 MCP tools** across three APIs:
+**31 MCP tools** across four APIs:
 
 | API | Tools | Examples |
 |-----|-------|----------|
-| **Plan-based** | 15 | `create_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`, `get_copilot_plan_status`, `retry_copilot_plan`, `reshape_copilot_plan` |
-| **Job-centric** | 6 | `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `update_copilot_plan_job` |
+| **Plan-based** | 17 | `create_copilot_plan`, `scaffold_copilot_plan`, `add_copilot_plan_job`, `finalize_copilot_plan`, `get_copilot_plan_status`, `retry_copilot_plan`, `reshape_copilot_plan`, `run_copilot_integration_test`, `bulk_update_copilot_plan_jobs` |
+| **Job-centric** | 6 | `get_copilot_job`, `list_copilot_jobs`, `retry_copilot_job`, `force_fail_copilot_job`, `update_copilot_plan_job`, `get_copilot_job_logs` |
 | **Release Management** | 5 | `create_copilot_release`, `start_copilot_release`, `get_copilot_release_status`, `cancel_copilot_release`, `list_copilot_releases` |
+| **PR Lifecycle** | 3 | `list_available_prs`, `adopt_pr`, `start_pr_monitoring` |
 
 ---
 
-## DI Token Registry (36 tokens)
+## DI Token Registry (41 tokens)
 
 | Token | Interface | Concrete Class | Lifetime |
 |-------|-----------|---------------|----------|
@@ -1090,7 +1121,11 @@ graph LR
 | `IPlanRepositoryStore` | `IPlanRepositoryStore` | `FileSystemPlanStore` | Singleton |
 | `IPlanRepository` | `IPlanRepository` | `DefaultPlanRepository` | Singleton |
 | `IPlanArchiver` | `IPlanArchiver` | `PlanArchiver` | Singleton |
-| `IAgentDelegator` | _(internal)_ | `AgentDelegator` | Singleton |
+| `IOutputHandlerRegistry` | `IOutputHandlerRegistry` | `OutputHandlerRegistry` | Singleton |
+| `IManagedProcessFactory` | `IManagedProcessFactory` | `ManagedProcessFactory` | Singleton |
+| `IContextPressureMonitor` | `IContextPressureMonitor` | `ContextPressureMonitor` | Singleton |
+| `ICheckpointManager` | `ICheckpointManager` | `DefaultCheckpointManager` | Singleton |
+| `IJobSplitter` | `IJobSplitter` | `DefaultJobSplitter` | Singleton |
 | `INodeRunner` | `INodeRunner` | _(composed)_ | Singleton |
 | `IReleaseManager` | `IReleaseManager` | `DefaultReleaseManager` | Singleton |
 | `IReleasePRMonitor` | `IReleasePRMonitor` | `DefaultReleasePRMonitor` | Singleton |
@@ -1102,6 +1137,87 @@ graph LR
 | `IReleaseConfigManager` | `IReleaseConfigManager` | `DefaultReleaseConfigManager` | Singleton |
 
 ---
+
+## Process Output Bus
+
+The Process Output Bus (v0.16.0) replaces fragmented output parsers with a unified, pluggable, process-agnostic architecture. See [PROCESS_OUTPUT_BUS_DESIGN.md](PROCESS_OUTPUT_BUS_DESIGN.md) for the full design.
+
+```mermaid
+graph TB
+    subgraph "Process Layer"
+        PROC[ManagedProcess]
+        BUS[ProcessOutputBus]
+        TAIL[LogFileTailer]
+    end
+
+    subgraph "Handler Layer"
+        REG[OutputHandlerRegistry]
+        CPH[ContextPressureHandler]
+        SH[SessionIdHandler]
+        STH[StatsHandler]
+        TCH[TaskCompleteHandler]
+    end
+
+    subgraph "Consumer Layer"
+        CPM[ContextPressureMonitor]
+        UI[UI Producers]
+        ENG[ExecutionEngine]
+    end
+
+    PROC --> BUS
+    PROC --> TAIL
+    TAIL -->|lines| BUS
+    BUS --> REG
+    REG --> CPH
+    REG --> SH
+    REG --> STH
+    REG --> TCH
+    CPH --> CPM
+    CPM --> UI
+    CPM --> ENG
+```
+
+| Component | Responsibility |
+|-----------|----------------|
+| `ManagedProcess` | Wraps `ChildProcessLike` with auto-wired stdout/stderr, log tailers, lifecycle timestamps |
+| `ProcessOutputBus` | Splits raw output into lines, dispatches to handlers via sliding windows |
+| `LogFileTailer` | Hybrid `fs.watch()` + fallback poll for log files (<100ms latency) |
+| `OutputHandlerRegistry` | Holds handler factories; creates per-process handler instances based on label filtering |
+| `ContextPressureHandler` | Extracts token usage, model limits, compaction events from debug logs |
+| `SessionIdHandler` | Extracts Copilot session ID from stdout |
+| `StatsHandler` | Extracts CLI summary statistics (requests, API time, changes) |
+| `TaskCompleteHandler` | Detects completion marker (Windows CLI exit workaround) |
+
+---
+
+## Context Pressure Management
+
+Context Pressure Management (v0.16.0) detects agent context window exhaustion and splits work into sub-jobs. See [CONTEXT_PRESSURE_DESIGN.md](CONTEXT_PRESSURE_DESIGN.md) for the full design.
+
+```mermaid
+sequenceDiagram
+    participant CLI as Copilot CLI
+    participant Handler as ContextPressureHandler
+    participant Monitor as ContextPressureMonitor
+    participant Engine as ExecutionEngine
+    participant Splitter as JobSplitter
+    participant DAG as Plan DAG
+
+    CLI->>Handler: debug-log JSON (token counts)
+    Handler->>Monitor: recordTurnUsage(tokens)
+    Monitor->>Monitor: classify pressure level
+
+    alt Critical threshold exceeded
+        Monitor->>Engine: onLevelChange(critical)
+        Engine->>Engine: write checkpoint sentinel
+        Note over CLI: Agent reads sentinel, commits work, writes manifest
+        CLI->>Engine: exit (checkpoint)
+        Engine->>Splitter: buildChunks(manifest)
+        Splitter-->>Engine: sub-job specs
+        Engine->>DAG: reshape (fan-out + fan-in)
+        Note over DAG: Original node → completed_split → succeeded
+    end
+```
 
 ## Security Model
 

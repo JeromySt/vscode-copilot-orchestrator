@@ -9,6 +9,7 @@
 
 import type { IPhaseExecutor, PhaseContext, PhaseResult } from '../../interfaces/IPhaseExecutor';
 import type { IProcessSpawner } from '../../interfaces/IProcessSpawner';
+import type { ICopilotRunner } from '../../interfaces/ICopilotRunner';
 import { normalizeWorkSpec } from '../types';
 import type { ProcessSpec, ShellSpec, AgentSpec } from '../types';
 import { runProcess, runShell, runAgent } from './workPhase';
@@ -17,14 +18,14 @@ import { runProcess, runShell, runAgent } from './workPhase';
  * Executes the postchecks phase of a job node.
  */
 export class PostcheckPhaseExecutor implements IPhaseExecutor {
-  private agentDelegator?: any;
+  private copilotRunner?: ICopilotRunner;
   private spawner: IProcessSpawner;
 
   constructor(deps: {
-    agentDelegator?: any;
+    copilotRunner?: ICopilotRunner;
     spawner: IProcessSpawner;
   }) {
-    this.agentDelegator = deps.agentDelegator;
+    this.copilotRunner = deps.copilotRunner;
     this.spawner = deps.spawner;
   }
 
@@ -46,7 +47,7 @@ export class PostcheckPhaseExecutor implements IPhaseExecutor {
         return runAgent(
           normalized as AgentSpec,
           context,
-          this.agentDelegator,
+          this.copilotRunner,
         );
       default:
         return { success: false, error: `Unknown work type: ${(normalized as any).type}` };

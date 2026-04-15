@@ -56,25 +56,9 @@ export class ReleaseManagementController {
     private readonly _releaseManager: IReleaseManager,
     private readonly _planRunner?: { get(id: string): any },
   ) {
-    // Subscribe to release state changes
-    this._releaseManager.on('releaseStatusChanged', (release) => {
-      if (release.id === this._releaseId) {
-        this._onStateChanged(release.status);
-      }
-    });
-
-    // Subscribe to release progress updates (includes task changes)
-    // Only full-refresh for non-monitoring states — monitoring uses incremental messages.
-    this._releaseManager.on('releaseProgress', (releaseId) => {
-      if (releaseId === this._releaseId) {
-        const release = this._releaseManager.getRelease(this._releaseId);
-        const status = release?.status;
-        if (status === 'monitoring' || status === 'addressing' || status === 'pr-active') {
-          return;
-        }
-        this._delegate.forceFullRefresh();
-      }
-    });
+    // No direct event listeners — release state changes are delivered
+    // via ReleaseStateProducer through the WebViewSubscriptionManager.
+    // The webview client handles status transitions from subscription deltas.
   }
 
   /**

@@ -127,7 +127,7 @@ function statusBadgeStyles(): string {
       text-transform: uppercase;
     }
     .status-badge.running { background: rgba(0, 122, 204, 0.2); color: #3794ff; }
-    .status-badge.succeeded { background: rgba(78, 201, 176, 0.2); color: #4ec9b0; }
+    .status-badge.succeeded { background: rgba(115, 201, 145, 0.25); color: #73c991; }
     .status-badge.failed { background: rgba(244, 135, 113, 0.2); color: #f48771; }
     .status-badge.partial { background: rgba(255, 204, 0, 0.2); color: #cca700; }
     .status-badge.pending { background: rgba(133, 133, 133, 0.2); color: #858585; }

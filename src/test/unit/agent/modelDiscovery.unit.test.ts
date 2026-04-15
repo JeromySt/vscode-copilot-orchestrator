@@ -16,23 +16,76 @@ import { EventEmitter } from 'events';
 import {
   classifyModel,
   parseModelChoices,
+  parseModelChoicesFromConfig,
   resetModelCache,
   discoverAvailableModels,
   getCachedModels,
   refreshModelCache,
   isValidModel,
   suggestModel,
+  parseEffortSupport,
+  hasEffortSupport,
+  getEffortChoices,
 } from '../../../agent/modelDiscovery';
 import type { ModelDiscoveryDeps } from '../../../agent/modelDiscovery';
 import type { IProcessSpawner, ChildProcessLike } from '../../../interfaces/IProcessSpawner';
 
-const FAKE_HELP = `Usage: copilot [options]
+/** Legacy --help output format (pre-1.0 CLI) with model choices inline */
+const FAKE_HELP_LEGACY = `Usage: copilot [options]
   --model <model>  The model to use (choices: "gpt-4o-mini", "claude-sonnet-4", "claude-opus-4")
 `;
 
-function createMockSpawner(output: string = FAKE_HELP): IProcessSpawner {
+/** v1.x --help output format: --model has no choices, --effort is present */
+const FAKE_HELP_V1 = `Usage: copilot [options] [command]
+
+GitHub Copilot CLI - An AI-powered coding assistant.
+
+Options:
+  --effort, --reasoning-effort <level>  Set the reasoning effort level (choices:
+                                        "low", "medium", "high", "xhigh")
+  --model <model>                       Set the AI model to use
+  -v, --version                         show version information
+
+GitHub Copilot CLI 1.0.19.
+`;
+
+/** v1.x config output with model list */
+const FAKE_CONFIG_V1 = `Configuration Settings:
+
+  \`banner\`: frequency of showing animated banner; defaults to "once".
+    - "always" displays it every time
+    - "never" disables it
+    - "once" displays it the first time
+
+  \`model\`: AI model to use for Copilot CLI; can be changed with /model command or --model flag option.
+    - "claude-sonnet-4.6"
+    - "claude-haiku-4.5"
+    - "claude-opus-4.6"
+    - "gpt-5.4"
+    - "gpt-5-mini"
+    - "gpt-4.1"
+
+  \`mouse\`: whether to enable mouse support; defaults to \`true\`.
+`;
+
+/** Backward-compatible alias for existing tests */
+const FAKE_HELP = FAKE_HELP_LEGACY;
+
+/**
+ * Create a mock spawner that responds to different commands.
+ * @param output - Default output for any command (backward compat), or a map of args → output.
+ */
+function createMockSpawner(output: string | Record<string, string> = FAKE_HELP): IProcessSpawner {
   return {
-    spawn(): ChildProcessLike {
+    spawn(_cmd: string, args?: string[]): ChildProcessLike {
+      let responseText: string;
+      if (typeof output === 'string') {
+        responseText = output;
+      } else {
+        // Match by first arg (--help, help)
+        const key = args?.join(' ') ?? '--help';
+        responseText = output[key] ?? output['--help'] ?? '';
+      }
       const proc = new EventEmitter() as EventEmitter & ChildProcessLike;
       const stdout = new EventEmitter();
       const stderr = new EventEmitter();
@@ -45,7 +98,7 @@ function createMockSpawner(output: string = FAKE_HELP): IProcessSpawner {
         kill() { return true; },
       });
       setImmediate(() => {
-        stdout.emit('data', Buffer.from(output));
+        stdout.emit('data', Buffer.from(responseText));
         (proc as any).exitCode = 0;
         proc.emit('close', 0);
       });
@@ -217,5 +270,337 @@ suite('Model Discovery - Async Functions', () => {
       const result = await getCachedModels(deps);
       assert.ok(result);
     });
+  });
+});
+
+suite('Effort Support Detection', () => {
+
+  suite('parseEffortSupport', () => {
+    test('returns supported=false when --effort not in help output', () => {
+      const result = parseEffortSupport(FAKE_HELP);
+      assert.strictEqual(result.supported, false);
+    });
+
+    test('returns supported=true with choices when --effort has choices', () => {
+      const help = `Usage: copilot [options]
+  --model <model>  The model to use (choices: "gpt-4o-mini")
+  --effort <effort>  Reasoning effort level (choices: "low", "medium", "high")
+`;
+      const result = parseEffortSupport(help);
+      assert.strictEqual(result.supported, true);
+      assert.deepStrictEqual(result.choices, ['low', 'medium', 'high']);
+    });
+
+    test('returns supported=true with default choices when --effort exists without choices', () => {
+      const help = `Usage: copilot [options]
+  --effort <effort>  Reasoning effort level
+`;
+      const result = parseEffortSupport(help);
+      assert.strictEqual(result.supported, true);
+      assert.deepStrictEqual(result.choices, ['low', 'medium', 'high', 'xhigh']);
+    });
+
+    test('handles --effort with different choice values', () => {
+      const help = `  --effort <effort>  (choices: "min", "default", "max")`;
+      const result = parseEffortSupport(help);
+      assert.strictEqual(result.supported, true);
+      assert.deepStrictEqual(result.choices, ['min', 'default', 'max']);
+    });
+  });
+
+  suite('hasEffortSupport', () => {
+    setup(() => {
+      resetModelCache();
+    });
+
+    test('returns false when CLI does not support --effort', async function () {
+      this.timeout(15000);
+      const deps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner(FAKE_HELP),
+        clock: Date.now,
+      };
+      const result = await hasEffortSupport(deps);
+      assert.strictEqual(result, false);
+    });
+
+    test('returns true when CLI supports --effort', async function () {
+      this.timeout(15000);
+      const helpWithEffort = `Usage: copilot [options]
+  --model <model>  The model to use (choices: "gpt-4o-mini", "claude-sonnet-4")
+  --effort <effort>  Reasoning effort (choices: "low", "medium", "high")
+`;
+      const deps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner(helpWithEffort),
+        clock: Date.now,
+      };
+      const result = await hasEffortSupport(deps);
+      assert.strictEqual(result, true);
+    });
+  });
+
+  suite('getEffortChoices', () => {
+    setup(() => {
+      resetModelCache();
+    });
+
+    test('returns undefined when effort not supported', async function () {
+      this.timeout(15000);
+      const deps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner(FAKE_HELP),
+        clock: Date.now,
+      };
+      const result = await getEffortChoices(deps);
+      assert.strictEqual(result, undefined);
+    });
+
+    test('returns choices when effort is supported', async function () {
+      this.timeout(15000);
+      const helpWithEffort = `Usage: copilot [options]
+  --model <model>  The model to use (choices: "gpt-4o-mini")
+  --effort <effort>  (choices: "low", "medium", "high")
+`;
+      const deps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner(helpWithEffort),
+        clock: Date.now,
+      };
+      const result = await getEffortChoices(deps);
+      assert.deepStrictEqual(result, ['low', 'medium', 'high']);
+    });
+  });
+
+  suite('discoverAvailableModels includes capabilities', () => {
+    setup(() => {
+      resetModelCache();
+    });
+
+    test('capabilities.effort is false when --effort not in help', async function () {
+      this.timeout(15000);
+      const deps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner(FAKE_HELP),
+        clock: Date.now,
+      };
+      const result = await discoverAvailableModels(deps);
+      assert.strictEqual(result.capabilities?.effort, false);
+    });
+
+    test('capabilities.effort is true when --effort is in help', async function () {
+      this.timeout(15000);
+      const helpWithEffort = `Usage: copilot [options]
+  --model <model>  The model to use (choices: "gpt-4o-mini", "claude-sonnet-4")
+  --effort <effort>  Reasoning effort (choices: "low", "medium", "high")
+`;
+      const deps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner(helpWithEffort),
+        clock: Date.now,
+      };
+      const result = await discoverAvailableModels(deps);
+      assert.strictEqual(result.capabilities?.effort, true);
+      assert.deepStrictEqual(result.capabilities?.effortChoices, ['low', 'medium', 'high']);
+    });
+  });
+});
+
+// ============================================================================
+// Config-based model parsing (v1.x+ CLI)
+// ============================================================================
+
+suite('parseModelChoicesFromConfig', () => {
+  test('extracts models from config output', () => {
+    const result = parseModelChoicesFromConfig(FAKE_CONFIG_V1);
+    assert.deepStrictEqual(result, [
+      'claude-sonnet-4.6',
+      'claude-haiku-4.5',
+      'claude-opus-4.6',
+      'gpt-5.4',
+      'gpt-5-mini',
+      'gpt-4.1',
+    ]);
+  });
+
+  test('returns empty array when no model section', () => {
+    const result = parseModelChoicesFromConfig('Some other config output with no model key');
+    assert.deepStrictEqual(result, []);
+  });
+
+  test('returns empty array for empty input', () => {
+    assert.deepStrictEqual(parseModelChoicesFromConfig(''), []);
+  });
+
+  test('stops at next config key', () => {
+    const config = `  \`model\`: The model to use.
+    - "model-a"
+    - "model-b"
+
+  \`theme\`: The theme.
+    - "dark"
+    - "light"
+`;
+    const result = parseModelChoicesFromConfig(config);
+    assert.deepStrictEqual(result, ['model-a', 'model-b']);
+  });
+
+  test('handles model section with no choices listed', () => {
+    const config = `  \`model\`: The model to use.
+
+  \`theme\`: something.
+`;
+    const result = parseModelChoicesFromConfig(config);
+    assert.deepStrictEqual(result, []);
+  });
+});
+
+// ============================================================================
+// v1.x CLI fallback: --help has no models → falls back to config
+// ============================================================================
+
+suite('Discovery with v1.x CLI (config fallback)', () => {
+  setup(() => {
+    resetModelCache();
+  });
+
+  test('discovers models from help config when --help has no model choices', async function () {
+    this.timeout(15000);
+    const deps: ModelDiscoveryDeps = {
+      spawner: createMockSpawner({
+        '--help': FAKE_HELP_V1,
+        'help config': FAKE_CONFIG_V1,
+      }),
+      clock: Date.now,
+    };
+    const result = await discoverAvailableModels(deps);
+    assert.ok(result.models.length > 0, 'Should discover models from config');
+    assert.ok(result.rawChoices.includes('claude-sonnet-4.6'));
+    assert.ok(result.rawChoices.includes('gpt-5.4'));
+    assert.ok(result.rawChoices.includes('gpt-4.1'));
+  });
+
+  test('still detects capabilities from --help even when models come from config', async function () {
+    this.timeout(15000);
+    const deps: ModelDiscoveryDeps = {
+      spawner: createMockSpawner({
+        '--help': FAKE_HELP_V1,
+        'help config': FAKE_CONFIG_V1,
+      }),
+      clock: Date.now,
+    };
+    const result = await discoverAvailableModels(deps);
+    assert.strictEqual(result.capabilities?.effort, true);
+    assert.deepStrictEqual(result.capabilities?.effortChoices, ['low', 'medium', 'high', 'xhigh']);
+  });
+
+  test('extracts CLI version from v1.x help output', async function () {
+    this.timeout(15000);
+    const deps: ModelDiscoveryDeps = {
+      spawner: createMockSpawner({
+        '--help': FAKE_HELP_V1,
+        'help config': FAKE_CONFIG_V1,
+      }),
+      clock: Date.now,
+    };
+    const result = await discoverAvailableModels(deps);
+    assert.strictEqual(result.cliVersion, '1.0.19');
+  });
+
+  test('returns capabilities even when both sources fail to find models', async function () {
+    this.timeout(15000);
+    const helpNoModels = `Usage: copilot [options]
+  --effort <effort>  (choices: "low", "medium", "high")
+  --model <model>  Set the model
+`;
+    const configNoModels = `Configuration Settings:
+  \`theme\`: dark
+`;
+    const deps: ModelDiscoveryDeps = {
+      spawner: createMockSpawner({
+        '--help': helpNoModels,
+        'help config': configNoModels,
+      }),
+      clock: Date.now,
+    };
+    const result = await discoverAvailableModels(deps);
+    assert.strictEqual(result.models.length, 0);
+    // Capabilities should still be detected from --help
+    assert.strictEqual(result.capabilities?.effort, true);
+  });
+
+  test('legacy CLI format still works (backward compat)', async function () {
+    this.timeout(15000);
+    const deps: ModelDiscoveryDeps = {
+      spawner: createMockSpawner(FAKE_HELP_LEGACY),
+      clock: Date.now,
+    };
+    const result = await discoverAvailableModels(deps);
+    assert.ok(result.models.length === 3);
+    assert.ok(result.rawChoices.includes('gpt-4o-mini'));
+    assert.ok(result.rawChoices.includes('claude-sonnet-4'));
+    assert.ok(result.rawChoices.includes('claude-opus-4'));
+  });
+});
+
+// ============================================================================
+// classifyModel updates
+// ============================================================================
+
+suite('classifyModel - new model names', () => {
+  test('classifies gpt-5.3-codex as openai/codex/standard', () => {
+    const result = classifyModel('gpt-5.3-codex');
+    assert.strictEqual(result.vendor, 'openai');
+    assert.strictEqual(result.family, 'codex');
+    assert.strictEqual(result.tier, 'standard');
+  });
+
+  test('classifies claude-opus-4.6-fast as anthropic/claude/premium', () => {
+    const result = classifyModel('claude-opus-4.6-fast');
+    assert.strictEqual(result.vendor, 'anthropic');
+    assert.strictEqual(result.family, 'claude');
+    assert.strictEqual(result.tier, 'premium');
+  });
+
+  test('classifies gpt-5-mini as openai/gpt/fast', () => {
+    const result = classifyModel('gpt-5-mini');
+    assert.strictEqual(result.vendor, 'openai');
+    assert.strictEqual(result.family, 'gpt');
+    assert.strictEqual(result.tier, 'fast');
+  });
+
+  test('classifies gpt-5.4-mini as openai/gpt/fast', () => {
+    const result = classifyModel('gpt-5.4-mini');
+    assert.strictEqual(result.vendor, 'openai');
+    assert.strictEqual(result.family, 'gpt');
+    assert.strictEqual(result.tier, 'fast');
+  });
+
+  test('classifies claude-sonnet-4.6 as anthropic/claude/standard', () => {
+    const result = classifyModel('claude-sonnet-4.6');
+    assert.strictEqual(result.vendor, 'anthropic');
+    assert.strictEqual(result.family, 'claude');
+    assert.strictEqual(result.tier, 'standard');
+  });
+
+  // Static tier map tests (verified via VS Code Copilot model picker cost multiplier)
+  test('gpt-5.4 is standard (1x cost per VS Code picker)', () => {
+    const result = classifyModel('gpt-5.4');
+    assert.strictEqual(result.tier, 'standard');
+  });
+
+  test('claude-opus-4.6 is premium (3x cost per VS Code picker)', () => {
+    const result = classifyModel('claude-opus-4.6');
+    assert.strictEqual(result.tier, 'premium');
+  });
+
+  test('claude-sonnet-4.6 is standard despite High reasoning label (1x cost)', () => {
+    const result = classifyModel('claude-sonnet-4.6');
+    assert.strictEqual(result.tier, 'standard');
+  });
+
+  test('unknown model falls back to keyword heuristic', () => {
+    // Unknown model with "opus" keyword → premium via fallback
+    const result = classifyModel('claude-opus-99');
+    assert.strictEqual(result.tier, 'premium');
+  });
+
+  test('completely unknown model defaults to standard', () => {
+    const result = classifyModel('some-unknown-model-v3');
+    assert.strictEqual(result.tier, 'standard');
   });
 });

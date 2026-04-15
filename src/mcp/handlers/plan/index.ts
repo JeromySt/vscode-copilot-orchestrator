@@ -29,6 +29,7 @@ export * from './retryJobHandler';
 
 // Job update handlers
 export * from './updateJobHandler';
+export * from './bulkUpdateJobsHandler';
 
 // Plan update handlers
 export * from './updatePlanHandler';
@@ -45,3 +46,6 @@ export * from './scaffoldReleaseTasksHandler';
 
 // PR lifecycle handlers
 export * from './prLifecycleHandlers';
+
+// Integration test handler
+export * from './runIntegrationTestHandler';

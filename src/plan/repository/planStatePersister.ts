@@ -8,7 +8,7 @@
  */
 
 import type { StoredPlanMetadata, StoredJobMetadata, IPlanRepositoryStore } from '../../interfaces/IPlanRepositoryStore';
-import type { PlanInstance, NodeExecutionState, GroupExecutionState } from '../types/plan';
+import type { PlanInstance, NodeExecutionState, GroupExecutionState, GroupInstance } from '../types/plan';
 
 /**
  * Data structure for serialized plan state.
@@ -20,6 +20,8 @@ export interface PlanStateData {
   leaves: string[];
   nodeStates: Record<string, NodeExecutionState>;
   groupStates?: Record<string, GroupExecutionState>;
+  groups?: Record<string, GroupInstance>;
+  groupPathToId?: Record<string, string>;
   startedAt?: Date | number;
   endedAt?: Date | number;
   baseCommitAtStart?: string;
@@ -106,6 +108,8 @@ export async function serializePlanState(
     leaves: plan.leaves,
     nodeStates,
     groupStates,
+    groups: serializeGroups(plan),
+    groupPathToId: serializeGroupPathToId(plan),
     startedAt: plan.startedAt,
     endedAt: plan.endedAt,
     baseCommitAtStart: plan.baseCommitAtStart,
@@ -202,6 +206,8 @@ export function serializePlanStateSync(
     leaves: plan.leaves,
     nodeStates,
     groupStates,
+    groups: serializeGroups(plan),
+    groupPathToId: serializeGroupPathToId(plan),
     startedAt: plan.startedAt,
     endedAt: plan.endedAt,
     baseCommitAtStart: plan.baseCommitAtStart,
@@ -214,6 +220,22 @@ export function serializePlanStateSync(
     workSummary: plan.workSummary,
     stateVersion: plan.stateVersion,
   };
+}
+
+/** Serialize groups Map to a plain Record for persistence. */
+function serializeGroups(plan: PlanInstance): Record<string, GroupInstance> | undefined {
+  if (!plan.groups || plan.groups.size === 0) { return undefined; }
+  const result: Record<string, GroupInstance> = {};
+  for (const [id, group] of plan.groups) { result[id] = { ...group }; }
+  return result;
+}
+
+/** Serialize groupPathToId Map to a plain Record for persistence. */
+function serializeGroupPathToId(plan: PlanInstance): Record<string, string> | undefined {
+  if (!plan.groupPathToId || plan.groupPathToId.size === 0) { return undefined; }
+  const result: Record<string, string> = {};
+  for (const [path, id] of plan.groupPathToId) { result[path] = id; }
+  return result;
 }
 
 /**

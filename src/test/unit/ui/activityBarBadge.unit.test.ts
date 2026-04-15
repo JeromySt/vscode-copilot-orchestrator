@@ -14,6 +14,7 @@ import { PulseEmitter } from '../../../core/pulse';
 class MockPlanRunner {
   private listeners: { [event: string]: Function[] } = {};
   private mockPlans: Array<{ id: string; status: string }> = [];
+  private _version = 1;
 
   on(event: string, listener: Function) {
     if (!this.listeners[event]) {this.listeners[event] = [];}
@@ -25,11 +26,20 @@ class MockPlanRunner {
   }
 
   getAll() {
-    return this.mockPlans;
+    return this.mockPlans.map(p => ({
+      ...p,
+      spec: { name: `Plan ${p.id}` },
+      jobs: new Map(),
+      stateVersion: this._version,
+      createdAt: Date.now(),
+    }));
   }
 
   getByStatus(status: string) {
-    return this.mockPlans.filter(plan => plan.status === status);
+    return this.getAll().filter(plan => {
+      const sm = this.getStateMachine(plan.id);
+      return sm?.computePlanStatus() === status;
+    });
   }
 
   getStateMachine(planId: string) {
@@ -39,8 +49,23 @@ class MockPlanRunner {
     } : undefined;
   }
 
+  getStatus(planId: string) {
+    const plan = this.mockPlans.find(p => p.id === planId);
+    if (!plan) { return undefined; }
+    return {
+      status: plan.status,
+      counts: { pending: 0, ready: 0, scheduled: 0, running: 0, succeeded: 0, failed: 0, blocked: 0, canceled: 0 },
+      progress: plan.status === 'succeeded' ? 100 : 50,
+    };
+  }
+
+  getEffectiveStartedAt(_planId: string) { return undefined; }
+  getEffectiveEndedAt(_planId: string) { return undefined; }
+  removeListener() {}
+
   setMockPlans(plans: Array<{ id: string; status: string }>) {
     this.mockPlans = plans;
+    this._version++; // Increment version so PlanListProducer detects the change
   }
 }
 
@@ -136,123 +161,79 @@ suite('Activity Bar Badge', () => {
     });
   });
 
-  suite('Badge updates on events', () => {
-    test('should update when node starts', () => {
+  suite('Badge updates via pulse tick', () => {
+    test('should update when plan state changes on next tick', () => {
       const cleanup = setup();
       
       mockPlanRunner.setMockPlans([]);
-      manager.createTreeView({
-        subscriptions: { push: () => {} }
-      } as any);
+      manager.createTreeView({ subscriptions: { push: () => {} } } as any);
 
-      // Create spy on updateBadge method by inspecting call count
-      let badgeUpdateCount = 0;
-      const _originalBadgeSetter = Object.getOwnPropertyDescriptor(mockTreeView, 'badge')?.set;
-      Object.defineProperty(mockTreeView, 'badge', {
-        set: function(value) {
-          badgeUpdateCount++;
-          this._badge = value;
-        },
-        get: function() {
-          return this._badge;
-        },
-        configurable: true
-      });
+      // No plans running — badge should be undefined
+      assert.strictEqual(mockTreeView.badge, undefined);
 
-      const initialUpdateCount = badgeUpdateCount;
-      
-      // Emit planUpdated event (covers node-started, node-completed, node-crashed scenarios)
-      mockPlanRunner.emit('planUpdated', { type: 'node-started', planId: '1' });
-      
-      assert.ok(badgeUpdateCount > initialUpdateCount, 'Badge should be updated when node starts');
+      // Add a running plan and trigger pulse tick
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'running' }]);
+      (manager as any)._onPulseTick();
+
+      // Badge should now show 1
+      assert.strictEqual(mockTreeView.badge?.value, 1);
       
       cleanup();
     });
 
-    test('should update when node completes', () => {
+    test('should clear badge when plan completes on next tick', () => {
       const cleanup = setup();
       
-      mockPlanRunner.setMockPlans([]);
-      manager.createTreeView({
-        subscriptions: { push: () => {} }
-      } as any);
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'running' }]);
+      manager.createTreeView({ subscriptions: { push: () => {} } } as any);
 
-      let badgeUpdateCount = 0;
-      Object.defineProperty(mockTreeView, 'badge', {
-        set: function(value) {
-          badgeUpdateCount++;
-          this._badge = value;
-        },
-        get: function() {
-          return this._badge;
-        },
-        configurable: true
-      });
+      assert.strictEqual(mockTreeView.badge?.value, 1);
 
-      const initialUpdateCount = badgeUpdateCount;
-      
-      mockPlanRunner.emit('planCompleted', { type: 'node-completed', planId: '1' });
-      
-      assert.ok(badgeUpdateCount > initialUpdateCount, 'Badge should be updated when node completes');
+      // Plan completes → trigger pulse tick
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'succeeded' }]);
+      (manager as any)._onPulseTick();
+
+      assert.strictEqual(mockTreeView.badge, undefined);
       
       cleanup();
     });
 
-    test('should update when plan is deleted', () => {
+    test('should update when plan deleted on next tick', () => {
       const cleanup = setup();
       
+      mockPlanRunner.setMockPlans([{ id: '1', status: 'running' }]);
+      manager.createTreeView({ subscriptions: { push: () => {} } } as any);
+
+      assert.strictEqual(mockTreeView.badge?.value, 1);
+
+      // Plan removed → trigger pulse tick
       mockPlanRunner.setMockPlans([]);
-      manager.createTreeView({
-        subscriptions: { push: () => {} }
-      } as any);
+      (manager as any)._onPulseTick();
 
-      let badgeUpdateCount = 0;
-      Object.defineProperty(mockTreeView, 'badge', {
-        set: function(value) {
-          badgeUpdateCount++;
-          this._badge = value;
-        },
-        get: function() {
-          return this._badge;
-        },
-        configurable: true
-      });
-
-      const initialUpdateCount = badgeUpdateCount;
-      
-      mockPlanRunner.emit('planDeleted', { planId: '1' });
-      
-      assert.ok(badgeUpdateCount > initialUpdateCount, 'Badge should be updated when plan is deleted');
+      assert.strictEqual(mockTreeView.badge, undefined);
       
       cleanup();
     });
 
-    test('should update when node crashes', () => {
+    test('should handle multiple running plans', () => {
       const cleanup = setup();
       
-      mockPlanRunner.setMockPlans([]);
-      manager.createTreeView({
-        subscriptions: { push: () => {} }
-      } as any);
+      mockPlanRunner.setMockPlans([
+        { id: '1', status: 'running' },
+        { id: '2', status: 'running' },
+      ]);
+      manager.createTreeView({ subscriptions: { push: () => {} } } as any);
 
-      let badgeUpdateCount = 0;
-      Object.defineProperty(mockTreeView, 'badge', {
-        set: function(value) {
-          badgeUpdateCount++;
-          this._badge = value;
-        },
-        get: function() {
-          return this._badge;
-        },
-        configurable: true
-      });
+      assert.strictEqual(mockTreeView.badge?.value, 2);
 
-      const initialUpdateCount = badgeUpdateCount;
-      
-      // Use nodeTransition event which is listened to by the manager
-      mockPlanRunner.emit('nodeTransition', { type: 'node-crashed', planId: '1' });
-      
-      assert.ok(badgeUpdateCount > initialUpdateCount, 'Badge should be updated when node crashes');
+      // One finishes
+      mockPlanRunner.setMockPlans([
+        { id: '1', status: 'running' },
+        { id: '2', status: 'succeeded' },
+      ]);
+      (manager as any)._onPulseTick();
+
+      assert.strictEqual(mockTreeView.badge?.value, 1);
       
       cleanup();
     });
@@ -263,10 +244,9 @@ suite('Activity Bar Badge', () => {
       const cleanup = setup();
       
       mockPlanRunner.setMockPlans([
-        { id: '1', status: 'running' }  // Recovered running plan
+        { id: '1', status: 'running' }
       ]);
 
-      // Create tree view which will set initial badge
       manager.createTreeView({
         subscriptions: { push: () => {} }
       } as any);

@@ -61,6 +61,8 @@ export interface WorkSpec {
     message?: string;
     resumeFromPhase?: string;
   };
+  /** Reasoning effort level hint for the AI model */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 /**
@@ -161,7 +163,8 @@ const workSpecObjectSchema = {
         }
       },
       additionalProperties: false
-    }
+    },
+    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'], description: 'Reasoning effort level hint for the AI model. Controls depth of reasoning: low (fast/shallow), medium (balanced), high (thorough/deep), xhigh (maximum reasoning — most expensive, highest quality). Requires CLI support for --effort flag.' }
   },
   required: ['type'],
   additionalProperties: false
@@ -700,6 +703,38 @@ export const updateCopilotPlanNodeSchema = {
 } as const;
 
 /**
+ * Schema for bulk_update_copilot_plan_jobs input
+ */
+export const bulkUpdateCopilotPlanJobsSchema = {
+  type: 'object',
+  properties: {
+    planId: { type: 'string', minLength: 1, maxLength: 100 },
+    jobIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1, maxLength: 100 },
+      maxItems: 200
+    },
+    updates: {
+      type: 'object',
+      properties: {
+        model: { type: 'string', minLength: 1, maxLength: 100 },
+        modelTier: { type: 'string', enum: ['fast', 'standard', 'premium'] },
+        effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
+        maxTurns: { type: 'number', minimum: 1, maximum: 500 },
+        resumeSession: { type: 'boolean' },
+        env: {
+          type: 'object',
+          additionalProperties: { type: 'string' }
+        }
+      },
+      additionalProperties: false
+    }
+  },
+  required: ['planId', 'updates'],
+  additionalProperties: false
+} as const;
+
+/**
  * Schema for pause_copilot_plan input
  */
 export const pausePlanSchema = {
@@ -1194,6 +1229,22 @@ export const recoverPlanSchema = {
 } as const;
 
 /**
+ * Schema for run_copilot_integration_test input
+ */
+export const runIntegrationTestSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    baseBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    targetBranch: { type: 'string', minLength: 1, maxLength: 200 },
+    maxParallel: { type: 'number', minimum: 1, maximum: 8 },
+    startPaused: { type: 'boolean' },
+  },
+  required: [],
+  additionalProperties: false
+} as const;
+
+/**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
@@ -1218,6 +1269,7 @@ export const schemas: Record<string, object> = {
   force_fail_copilot_job: forceFailNodeSchema,
   get_copilot_job_failure_context: getNodeFailureContextSchema,
   update_copilot_plan_job: updateCopilotPlanNodeSchema,
+  bulk_update_copilot_plan_jobs: bulkUpdateCopilotPlanJobsSchema,
 
   // Plan archive and recovery tools
   archive_copilot_plan: archivePlanSchema,
@@ -1251,4 +1303,7 @@ export const schemas: Record<string, object> = {
   demote_pr: demotePRSchema,
   abandon_pr: abandonPRSchema,
   remove_pr: removePRSchema,
+
+  // Integration test tools
+  run_copilot_integration_test: runIntegrationTestSchema,
 };

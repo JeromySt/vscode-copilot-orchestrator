@@ -76,6 +76,7 @@ export function renderPlanHeader(data: PlanHeaderData): string {
       <span class="duration-icon">⏱</span>
       <span class="duration-value ${status}" id="planDuration" data-started="${startedAt || 0}" data-ended="${effectiveEndedAt || 0}" data-status="${status}">${durationText}</span>
     </div>
+    <span id="lastRefresh" style="position:absolute;right:8px;top:4px;font-size:10px;color:#666;opacity:0.6;" title="Last full render">${new Date().toLocaleTimeString()}</span>
   </div>
   `;
 

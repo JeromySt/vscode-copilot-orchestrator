@@ -25,7 +25,7 @@ import {
   GroupInstance,
   GroupExecutionState,
 } from './types';
-import { buildDefaultVerificationSpec } from './svNodeBuilder';
+import { buildDefaultVerificationSpec, buildSvJobSpec } from './svNodeBuilder';
 
 /**
  * Validation error thrown when a {@link PlanSpec} is invalid.
@@ -343,109 +343,18 @@ export function buildPlan(
   const svProducerId = '__snapshot-validation__';
   const svTargetBranch = spec.targetBranch || spec.baseBranch || 'main';
   
-  // Prechecks: three-case logic for targetBranch health + snapshot rebase.
-  // Runs in the snapshot worktree (HEAD = snapshot branch, shares refs with main repo).
-  // The original base commit (targetBranch HEAD when snapshot was created) is written
-  // to .orchestrator/snapshot-base by the runner at snapshot creation time.
-  //
-  // Case 1: targetBranch HEAD == snapshot base commit → success (no changes)
-  // Case 2: targetBranch HEAD != snapshot base && target is clean → rebase snapshot
-  //         onto new target HEAD, resolve any conflicts, complete success
-  // Case 3: targetBranch HEAD != snapshot base && target is dirty → fail with
-  //         user message explaining what to fix before retry
-  const svPrechecks: import('./types/specs').AgentSpec = {
-    type: 'agent',
-    modelTier: 'fast',
-    instructions: [
-      `# Snapshot Prechecks — Rebase if Target Advanced`,
-      ``,
-      `You are running in the snapshot worktree. Your job is to verify the target branch \`${svTargetBranch}\` is healthy and rebase the snapshot if the target has advanced.`,
-      ``,
-      `## Step 1: Read Commits`,
-      ``,
-      `- **SNAPSHOT_BASE** = read the file \`.orchestrator/snapshot-base\` in the current directory`,
-      `- **TARGET_HEAD** = run: \`git rev-parse "refs/heads/${svTargetBranch}"\``,
-      ``,
-      `## Step 2: Compare`,
-      ``,
-      `### Case A — TARGET_HEAD equals SNAPSHOT_BASE`,
-      ``,
-      `The target branch has not changed since the snapshot was created.`,
-      `Print "✅ Target branch '${svTargetBranch}' unchanged since snapshot creation. No rebase needed."`,
-      `Exit successfully with no further action.`,
-      ``,
-      `### Case B — TARGET_HEAD does NOT equal SNAPSHOT_BASE`,
-      ``,
-      `The target branch has advanced. Rebase the snapshot onto the new target HEAD:`,
-      ``,
-      `\`\`\``,
-      `git rebase --rebase-merges --onto $TARGET_HEAD $SNAPSHOT_BASE HEAD`,
-      `\`\`\``,
-      ``,
-      `**If the rebase succeeds cleanly:**`,
-      ``,
-      `1. Update \`.orchestrator/snapshot-base\` to contain \`$TARGET_HEAD\` (the new base)`,
-      `2. Print "✅ Snapshot rebased onto updated '${svTargetBranch}' ($TARGET_HEAD)."`,
-      `3. Exit successfully`,
-      ``,
-      `**If the rebase has conflicts:**`,
-      ``,
-      `1. Resolve each conflict by examining both sides and producing a correct merge`,
-      `2. For each conflicted file, choose the resolution that preserves both sets of changes`,
-      `3. After resolving, run: \`git add <file> && git rebase --continue\``,
-      `4. Repeat until rebase completes`,
-      `5. Update \`.orchestrator/snapshot-base\` to contain \`$TARGET_HEAD\` (the new base)`,
-      `6. Print "✅ Snapshot rebased with conflict resolution onto '${svTargetBranch}'."`,
-      `7. Exit successfully`,
-      ``,
-      `> **IMPORTANT:** Do not modify any files except to resolve rebase conflicts and update \`.orchestrator/snapshot-base\`. Do not create commits beyond what git rebase produces.`,
-    ].join('\n'),
-    onFailure: {
-      noAutoHeal: true,
-      message: `Target branch '${svTargetBranch}' has uncommitted changes or is in a dirty state. Please clean up the target branch before retrying.`,
-      resumeFromPhase: 'prechecks',
-    },
-  };
-
-  // Postchecks: re-verify targetBranch hasn't moved since prechecks before merge-ri.
-  // Reads .orchestrator/snapshot-base (updated by prechecks) and compares to current
-  // targetBranch HEAD. If target advanced during work, fail and resume from prechecks
-  // so the snapshot gets rebased again. Uses node.js for cross-platform compatibility
-  // (bash not guaranteed on Windows, PowerShell can't handle bash syntax).
-  //
-  // NOTE: This runs in the SNAPSHOT worktree, so `git diff --quiet <target-ref>`
-  // would compare the snapshot's files against the target branch — which will
-  // ALWAYS differ because the snapshot has the merged plan work. We only need
-  // to compare commit SHAs, not working tree content.
-  const postcheckScript = [
-    `const fs = require('fs');`,
-    `const { execSync } = require('child_process');`,
-    `try {`,
-    `  const base = fs.readFileSync('.orchestrator/snapshot-base', 'utf8').trim();`,
-    `  const head = execSync('git rev-parse "refs/heads/${svTargetBranch}"', { encoding: 'utf8' }).trim();`,
-    `  if (head === base) {`,
-    `    console.log('✅ Target branch ${svTargetBranch} unchanged since prechecks. Safe to merge.');`,
-    `    process.exit(0);`,
-    `  }`,
-    `  console.error('❌ Target branch ${svTargetBranch} advanced during validation (' + base.slice(0,8) + ' -> ' + head.slice(0,8) + '). Needs rebase.');`,
-    `  process.exit(1);`,
-    `} catch (e) {`,
-    `  console.error('❌ Post-check failed: ' + e.message);`,
-    `  process.exit(1);`,
-    `}`,
-  ].join('\n');
-
-  const svPostchecks: import('./types/specs').ProcessSpec = {
-    type: 'process',
-    executable: process.execPath,
-    args: ['-e', postcheckScript],
-    env: { ELECTRON_RUN_AS_NODE: '1' },
-    onFailure: {
-      noAutoHeal: true,
-      message: `Target branch '${svTargetBranch}' changed during validation. The plan will automatically retry from prechecks to rebase the snapshot.`,
-      resumeFromPhase: 'prechecks',
-    },
-  };
+  // Build the SV node spec using the canonical builder (svNodeBuilder.ts).
+  // The default verification spec is built first and passed in so that
+  // buildDefaultVerificationSpec() is called only once.
+  const defaultVerifySpec = buildDefaultVerificationSpec(
+    svTargetBranch,
+    planId,
+    options.repoPath || '',
+    [...nodes.values()]
+      .filter((n): n is JobNode => n.type === 'job' && n.producerId !== '__snapshot-validation__')
+      .map(n => ({ name: n.name, task: n.task })),
+  );
+  const svJobSpec = buildSvJobSpec(svTargetBranch, undefined, spec.verifyRiSpec, defaultVerifySpec);
   
   // Only wrap the SV node in a group if the plan already uses groups.
   // For simple ungrouped plans, the bare node is sufficient.
@@ -489,19 +398,12 @@ export function buildPlan(
   const svNode: JobNode = {
     id: svNodeId,
     producerId: svProducerId,
-    name: 'Snapshot Validation',
+    name: svJobSpec.name,
     type: 'job',
-    task: `Validate snapshot and merge to '${svTargetBranch}'`,
-    prechecks: svPrechecks,
-    work: spec.verifyRiSpec || buildDefaultVerificationSpec(
-      svTargetBranch,
-      planId,
-      options.repoPath || '',
-      [...nodes.values()]
-        .filter((n): n is JobNode => n.type === 'job' && n.producerId !== '__snapshot-validation__')
-        .map(n => ({ name: n.name, task: n.task })),
-    ),
-    postchecks: svPostchecks,
+    task: svJobSpec.task,
+    prechecks: svJobSpec.prechecks,
+    work: svJobSpec.work,
+    postchecks: svJobSpec.postchecks,
     group: svGroupPath,
     groupId: svGroupId,
     dependencies: [...leaves],

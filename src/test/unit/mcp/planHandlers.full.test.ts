@@ -490,38 +490,6 @@ suite('Plan Handlers', () => {
 
   // ===== createPlanHandler =====
   suite('handleCreatePlan', () => {
-    test.skip('should create a plan successfully', async () => {
-      const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const plan = makeMockPlan({
-        isPaused: false,
-        jobs: new Map([['n1', {}]]),
-        producerIdTojobId: new Map([['build', 'n1']]),
-      });
-      const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
-      const result = await handleCreatePlan({
-        name: 'Test Plan',
-        jobs: [{ producerId: 'build', task: 'Build it', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.ok(result.planId);
-    });
-
-    test.skip('should create paused plan', async () => {
-      const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const plan = makeMockPlan({
-        isPaused: true,
-        jobs: new Map([['n1', {}]]),
-        producerIdTojobId: new Map([['build', 'n1']]),
-      });
-      const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
-      const result = await handleCreatePlan({
-        name: 'Test Plan',
-        startPaused: true,
-        jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.paused, true);
-    });
 
     test('should return error for duplicate producer_ids', async () => {
       const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
@@ -558,78 +526,6 @@ suite('Plan Handlers', () => {
       }, makeCtx());
       assert.strictEqual(result.success, false);
       assert.ok(result.error.includes('cannot depend on itself'));
-    });
-
-    test.skip('should handle groups with jobs', async () => {
-      const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const plan = makeMockPlan({
-        jobs: new Map([['n1', {}], ['n2', {}]]),
-        producerIdTojobId: new Map([['grp/build', 'n1'], ['grp/test', 'n2']]),
-      });
-      const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
-      const result = await handleCreatePlan({
-        name: 'Grouped Plan',
-        jobs: [],
-        groups: [{
-          name: 'grp',
-          jobs: [
-            { producerId: 'build', task: 'Build', dependencies: [] },
-            { producerId: 'test', task: 'Test', dependencies: ['build'] },
-          ],
-        }],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-    });
-
-    test.skip('should handle nested groups', async () => {
-      const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const plan = makeMockPlan({
-        jobs: new Map([['n1', {}]]),
-        producerIdTojobId: new Map([['phase1/sub/build', 'n1']]),
-      });
-      const ctx = makeCtx({ enqueue: sinon.stub().returns(plan) });
-      const result = await handleCreatePlan({
-        name: 'Nested Plan',
-        jobs: [],
-        groups: [{
-          name: 'phase1',
-          groups: [{
-            name: 'sub',
-            jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
-          }],
-        }],
-      }, ctx);
-      assert.strictEqual(result.success, true);
-    });
-
-    test.skip('should handle enqueue throwing error', async () => {
-      const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const ctx = makeCtx({ enqueue: sinon.stub().throws(new Error('Enqueue failed')) });
-      const result = await handleCreatePlan({
-        name: 'Test',
-        jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
-      }, ctx);
-      assert.strictEqual(result.success, false);
-      assert.ok(result.error.includes('Enqueue failed'));
-    });
-
-    test.skip('should validate group dependency across groups', async () => {
-      const { handleCreatePlan } = require('../../../mcp/handlers/plan/createPlanHandler');
-      const result = await handleCreatePlan({
-        name: 'Cross Group',
-        jobs: [],
-        groups: [{
-          name: 'grp1',
-          jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
-        }, {
-          name: 'grp2',
-          jobs: [{ producerId: 'test', task: 'Test', dependencies: ['grp1/build'] }],
-        }],
-      }, makeCtx({ enqueue: sinon.stub().returns(makeMockPlan({
-        jobs: new Map([['n1', {}], ['n2', {}]]),
-        producerIdTojobId: new Map([['grp1/build', 'n1'], ['grp2/test', 'n2']]),
-      })) }));
-      assert.strictEqual(result.success, true);
     });
   });
 
@@ -895,20 +791,6 @@ suite('Plan Handlers', () => {
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
-
-    test.skip('should return error when agent model invalid', async () => {
-      const { handleRetryPlan } = require('../../../mcp/handlers/plan/retryPlanHandler');
-      sinon.stub(modelDiscovery, 'getCachedModels').resolves({
-        models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
-        rawChoices: ['gpt-5'],
-        discoveredAt: Date.now(),
-      });
-      const result = await handleRetryPlan({
-        planId: 'plan-1',
-        newWork: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
   });
 
   // ===== Validation failure tests for retryJobHandler =====
@@ -927,20 +809,6 @@ suite('Plan Handlers', () => {
       const result = await handleRetryPlanJob({
         planId: 'plan-1', jobId: 'n1',
         work: { type: 'agent', allowedUrls: ['ftp://evil.com'] },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
-
-    test.skip('should return error when agent model invalid', async () => {
-      const { handleRetryPlanJob } = require('../../../mcp/handlers/plan/retryJobHandler');
-      sinon.stub(modelDiscovery, 'getCachedModels').resolves({
-        models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
-        rawChoices: ['gpt-5'],
-        discoveredAt: Date.now(),
-      });
-      const result = await handleRetryPlanJob({
-        planId: 'plan-1', jobId: 'n1',
-        newWork: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
@@ -965,22 +833,5 @@ suite('Plan Handlers', () => {
       }, makeCtx());
       assert.strictEqual(result.success, false);
     });
-
-    test.skip('should return error when agent model invalid', async () => {
-      const { handleUpdatePlanJob } = require('../../../mcp/handlers/plan/updateJobHandler');
-      sinon.stub(modelDiscovery, 'getCachedModels').resolves({
-        models: [{ id: 'gpt-5', vendor: 'openai' as const, family: 'gpt-5', tier: 'standard' as const }],
-        rawChoices: ['gpt-5'],
-        discoveredAt: Date.now(),
-      });
-      const result = await handleUpdatePlanJob({
-        planId: 'plan-1', jobId: 'n1',
-        work: { type: 'agent', agentModel: 'nonexistent-model-xyz' },
-      }, makeCtx());
-      assert.strictEqual(result.success, false);
-    });
   });
-
 });
-
-

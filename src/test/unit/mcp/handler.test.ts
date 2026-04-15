@@ -113,7 +113,7 @@ suite('McpHandler', () => {
       assert.strictEqual(res.id, 1);
       assert.ok(res.result);
       assert.strictEqual(res.result.protocolVersion, '2024-11-05');
-      assert.deepStrictEqual(res.result.capabilities, { tools: {} });
+      assert.deepStrictEqual(res.result.capabilities, { tools: { listChanged: true } });
       assert.strictEqual(res.result.serverInfo.name, 'copilot-orchestrator');
       assert.ok(res.result.serverInfo.version);
     });
@@ -171,28 +171,6 @@ suite('McpHandler', () => {
   // tools/call - routing
   // =========================================================================
   suite('tools/call', () => {
-    test.skip('routes create_copilot_plan and returns content array', async () => {
-      const mockPlan = makeMockPlan();
-      const mockRunner = makeMockPlanRunner({
-        enqueue: () => mockPlan,
-      });
-      const h = new McpHandler(mockRunner, '/workspace', {} as any, {} as any, undefined);
-
-      const res = await h.handleRequest(makeRequest('tools/call', {
-        name: 'create_copilot_plan',
-        arguments: { 
-          name: 'Test Plan', 
-          jobs: [{ producerId: 'build', task: 'Build', dependencies: [] }],
-        },
-      }));
-
-      assert.ok(res.result);
-      assert.ok(Array.isArray(res.result.content));
-      assert.strictEqual(res.result.content[0].type, 'text');
-      const parsed = JSON.parse(res.result.content[0].text);
-      assert.strictEqual(parsed.success, true);
-      assert.strictEqual(parsed.planId, 'plan-1');
-    });
 
     test('routes list_copilot_plans', async () => {
       const mockRunner = makeMockPlanRunner({ getAll: () => [] });

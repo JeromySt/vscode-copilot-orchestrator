@@ -257,23 +257,6 @@ suite('StdioTransport', () => {
   // =========================================================================
   // close() ends the transport
   // =========================================================================
-  test.skip('close() destroys input and resolves start()', async () => {
-    // Skip: timing-sensitive test that can timeout in some environments
-    const input = new PassThrough();
-    const output = new PassThrough();
-    const transport = new StdioTransport(input, output);
-
-    transport.onRequest(async () => ({
-      jsonrpc: '2.0' as const,
-      id: 1,
-      result: 'unreachable',
-    }));
-
-    const done = transport.start();
-    transport.close();
-    // start() should resolve after input is destroyed
-    await done;
-  });
 
   // =========================================================================
   // No handler registered

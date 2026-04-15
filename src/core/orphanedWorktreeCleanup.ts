@@ -118,8 +118,19 @@ export async function cleanupOrphanedWorktrees(
             // Try git worktree remove first (in case it's partially registered)
             await git.worktrees.removeSafe(repoPath, worktreePath, { force: true });
             
-            // If directory still exists, remove it directly
+            // If directory still exists, unlink symlinks first then remove
             if (fs.existsSync(worktreePath)) {
+              // Unlink symlinks/junctions before recursive rm to avoid deleting targets
+              try {
+                const entries = await fs.promises.readdir(worktreePath, { withFileTypes: true });
+                for (const entry of entries) {
+                  try {
+                    const entryPath = require('path').join(worktreePath, entry.name);
+                    const stats = await fs.promises.lstat(entryPath);
+                    if (stats.isSymbolicLink()) { await fs.promises.unlink(entryPath); }
+                  } catch { /* best-effort */ }
+                }
+              } catch { /* directory may not be readable */ }
               await fs.promises.rm(worktreePath, { recursive: true, force: true });
             }
             

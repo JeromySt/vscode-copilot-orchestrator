@@ -48,8 +48,13 @@ export class EventBus {
     const set = this.handlers.get(topic);
     if (!set) { return; }
     // Iterate over a snapshot so removals during iteration are safe.
+    // Each handler is isolated — one failure must not prevent others from running.
     for (const fn of [...set]) {
-      fn(data);
+      try {
+        fn(data);
+      } catch (err) {
+        console.error(`[EventBus] Handler error on topic '${topic}':`, err);
+      }
     }
   }
 
