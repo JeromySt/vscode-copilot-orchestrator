@@ -316,7 +316,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://example.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://example.com'));
       assert.ok(cmd.commandString.includes('*.github.com'));
       assert.ok(!cmd.commandString.includes('bad-url'));
       assert.ok((mockLogger.info as sinon.SinonStub).calledWithMatch(/2 of 3 passed validation/));
@@ -431,7 +431,7 @@ suite('copilotCliRunner', () => {
       assert.ok(cmd.commandString.includes('-p "complex task"'));
       assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
       assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testFolder1))}`));
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.example.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://api.example.com'));
       assert.ok(cmd.commandString.includes(`--config-dir ${q(testConfig)}`));
       assert.ok(cmd.commandString.includes('--model gpt-5'));
       assert.ok(cmd.commandString.includes(`--log-dir ${q(testLogDir)}`));

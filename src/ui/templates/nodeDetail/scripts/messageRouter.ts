@@ -15,6 +15,7 @@ export function renderMessageRouter(): string {
     // Route postMessage → EventBus
     window.addEventListener('message', function(event) {
       var msg = event.data;
+      if (!msg || typeof msg.type !== 'string') { return; }
       switch (msg.type) {
         case 'logContent':
           bus.emit(Topics.LOG_UPDATE, msg);

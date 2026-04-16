@@ -161,8 +161,8 @@ suite('CopilotCliRunner', () => {
         allowedUrls: ['https://api.github.com', 'https://registry.npmjs.org']
       });
       
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.github.com') !== -1, 'Command should include first allowed URL');
-      assert.ok(cmd.commandString.indexOf('https://registry.npmjs.org') !== -1, 'Command should include second allowed URL');
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://api.github.com'), 'Command should include first allowed URL');
+      assert.ok(cmd.commandString.includes('https://registry.npmjs.org'), 'Command should include second allowed URL');
       assert.ok(!cmd.commandString.includes('--allow-all-urls'), 'Command should not include --allow-all-urls');
     });
     

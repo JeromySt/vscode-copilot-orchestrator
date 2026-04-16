@@ -50,7 +50,6 @@ suite('finalizePlanHelper', () => {
       targetBranch: 'feat/test',
       definition: { getWorkSpec: async () => undefined },
     };
-    const deleteSpy = sandbox.stub().returns(true);
     const registerSpy = sandbox.stub();
     const resumeSpy = sandbox.stub().resolves(true);
     const getSpy = sandbox.stub();
