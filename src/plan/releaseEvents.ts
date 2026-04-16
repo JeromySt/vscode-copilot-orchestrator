@@ -62,7 +62,7 @@ export interface ReleaseEvents {
   'release:actionTaken': (releaseId: string, action: PRActionTaken & { timestamp?: number }) => void;
 
   /** Emitted when findings are being processed by the AI fixer */
-  'release:findingsProcessing': (releaseId: string, findingIds: string[], status: 'started' | 'completed' | 'failed') => void;
+  'release:findingsProcessing': (releaseId: string, findingIds: string[], status: 'queued' | 'processing' | 'started' | 'completed' | 'failed') => void;
 
   /** Emitted when findings have been resolved */
   'release:findingsResolved': (releaseId: string, findingIds: string[], hasCommit: boolean) => void;
@@ -188,7 +188,7 @@ export class ReleaseEventEmitter extends EventEmitter {
   /**
    * Emit a release:findingsProcessing event.
    */
-  emitFindingsProcessing(releaseId: string, findingIds: string[], status: 'started' | 'completed' | 'failed'): void {
+  emitFindingsProcessing(releaseId: string, findingIds: string[], status: 'queued' | 'processing' | 'started' | 'completed' | 'failed'): void {
     this.emit('release:findingsProcessing', releaseId, findingIds, status);
   }
 
