@@ -630,6 +630,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, task.status as any);
     
     // Emit started log line
     const startedMessage = `Task started: ${task.title}\n`;
@@ -719,6 +720,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, task.status as 'completed' | 'failed');
   }
 
   async completePreparationTask(releaseId: string, taskId: string): Promise<void> {
@@ -755,6 +757,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, 'completed');
   }
 
   async skipPreparationTask(releaseId: string, taskId: string): Promise<void> {
@@ -791,6 +794,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, 'skipped');
   }
 
   async updateFindingStatus(
