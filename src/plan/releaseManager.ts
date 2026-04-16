@@ -902,6 +902,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       }
     }
 
+    this.events.emitReleasePlansAdded(releaseId, planIds);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
@@ -991,6 +992,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     await this._transitionStatus(release, 'creating-pr', 'Adopting existing PR');
     await this._transitionStatus(release, 'pr-active', 'Adopted existing PR');
 
+    this.events.emitReleasePrAdopted(releaseId, prNumber);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
