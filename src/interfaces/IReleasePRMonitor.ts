@@ -70,4 +70,10 @@ export interface IReleasePRMonitor {
    * @returns Array of monitoring cycles in chronological order
    */
   getMonitorCycles(releaseId: string): PRMonitorCycle[];
+
+  /** Register handler for cycle completion */
+  on(event: 'cycleComplete', handler: (releaseId: string, cycle: PRMonitorCycle, pollIntervalTicks?: number) => void): void;
+
+  /** Register handler for monitoring stopped */
+  on(event: 'monitoringStopped', handler: (releaseId: string, cycleCount: number) => void): void;
 }

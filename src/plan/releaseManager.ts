@@ -39,7 +39,7 @@ import { Logger } from '../core/logger';
 import { ReleaseEventEmitter } from './releaseEvents';
 import { ReleaseStateMachine } from './releaseStateMachine';
 import { parseReviewFindings } from './reviewFindingParser';
-import type { ReviewFindingStatus } from './types/release';
+import type { ReviewFindingStatus, PRMonitorCycle } from './types/release';
 
 const log = Logger.for('plan');
 const gitLog = (msg: string) => log.info(msg);
@@ -92,8 +92,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     });
 
     // Listen for PR monitor cycle completions and forward to release events + panel refresh
-    if (typeof (this.prMonitor as any).on === 'function') {
-      (this.prMonitor as any).on('cycleComplete', (releaseId: string, cycle: any, pollIntervalTicks?: number) => {
+    this.prMonitor.on('cycleComplete', (releaseId: string, cycle: PRMonitorCycle, pollIntervalTicks?: number) => {
         // Update monitoring stats on the release for panel rendering
         const rel = this.releases.get(releaseId);
         if (rel) {
@@ -233,10 +232,9 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       });
 
       // Forward monitoring stopped events
-      (this.prMonitor as any).on('monitoringStopped', (releaseId: string, totalCycles: number) => {
+      this.prMonitor.on('monitoringStopped', (releaseId: string, totalCycles: number) => {
         this.emit('monitoringStopped', releaseId, totalCycles);
       });
-    }
 
     // Persist action log entries on the release so they survive webview re-renders.
     // The webview seeds ActionLogControl from releaseData.actionLog on initial render.
