@@ -108,4 +108,140 @@ suite('ReleaseEventEmitter', () => {
       assert.strictEqual(spy2.firstCall.args[2], 'Test output\n', 'both listeners should receive same args');
     });
   });
+
+  suite('emitReleaseActionTaken', () => {
+    test('should emit the correct event with args', () => {
+      const spy = sinon.spy();
+      emitter.on('release:actionTaken', spy);
+
+      const action = { type: 'fix-code' as const, description: 'Fixed lint errors', success: true, timestamp: 12345 };
+      emitter.emitReleaseActionTaken('rel-1', action);
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.deepStrictEqual(spy.firstCall.args[1], action);
+    });
+
+    test('should include planId when provided', () => {
+      const spy = sinon.spy();
+      emitter.on('release:actionTaken', spy);
+
+      const action = { type: 'fix-code' as const, description: 'Fix', success: true, planId: 'plan-42', timestamp: 0 };
+      emitter.emitReleaseActionTaken('rel-1', action);
+
+      assert.strictEqual(spy.firstCall.args[1].planId, 'plan-42');
+    });
+  });
+
+  suite('emitFindingsProcessing', () => {
+    test('should emit with queued status', () => {
+      const spy = sinon.spy();
+      emitter.on('release:findingsProcessing', spy);
+
+      emitter.emitFindingsProcessing('rel-1', ['finding-1', 'finding-2'], 'queued');
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.deepStrictEqual(spy.firstCall.args[1], ['finding-1', 'finding-2']);
+      assert.strictEqual(spy.firstCall.args[2], 'queued');
+    });
+
+    test('should emit with processing status', () => {
+      const spy = sinon.spy();
+      emitter.on('release:findingsProcessing', spy);
+
+      emitter.emitFindingsProcessing('rel-1', ['finding-1'], 'processing');
+
+      assert.strictEqual(spy.firstCall.args[2], 'processing');
+    });
+
+    test('should emit with completed status', () => {
+      const spy = sinon.spy();
+      emitter.on('release:findingsProcessing', spy);
+
+      emitter.emitFindingsProcessing('rel-1', ['finding-1'], 'completed');
+
+      assert.strictEqual(spy.firstCall.args[2], 'completed');
+    });
+
+    test('should emit with failed status', () => {
+      const spy = sinon.spy();
+      emitter.on('release:findingsProcessing', spy);
+
+      emitter.emitFindingsProcessing('rel-1', ['finding-1'], 'failed');
+
+      assert.strictEqual(spy.firstCall.args[2], 'failed');
+    });
+  });
+
+  suite('emitFindingsResolved', () => {
+    test('should emit with correct args when commit present', () => {
+      const spy = sinon.spy();
+      emitter.on('release:findingsResolved', spy);
+
+      emitter.emitFindingsResolved('rel-1', ['finding-1', 'finding-2'], true);
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.deepStrictEqual(spy.firstCall.args[1], ['finding-1', 'finding-2']);
+      assert.strictEqual(spy.firstCall.args[2], true);
+    });
+
+    test('should emit with hasCommit=false when no commit', () => {
+      const spy = sinon.spy();
+      emitter.on('release:findingsResolved', spy);
+
+      emitter.emitFindingsResolved('rel-2', ['finding-3'], false);
+
+      assert.strictEqual(spy.firstCall.args[0], 'rel-2');
+      assert.strictEqual(spy.firstCall.args[2], false);
+    });
+  });
+
+  suite('emitMonitoringStopped', () => {
+    test('should emit with correct releaseId and cycleCount', () => {
+      const spy = sinon.spy();
+      emitter.on('release:monitoringStopped', spy);
+
+      emitter.emitMonitoringStopped('rel-1', 5);
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.strictEqual(spy.firstCall.args[1], 5);
+    });
+
+    test('should emit with zero cycles', () => {
+      const spy = sinon.spy();
+      emitter.on('release:monitoringStopped', spy);
+
+      emitter.emitMonitoringStopped('rel-2', 0);
+
+      assert.strictEqual(spy.firstCall.args[1], 0);
+    });
+  });
+
+  suite('emitPollIntervalChanged', () => {
+    test('should emit with correct releaseId and interval', () => {
+      const spy = sinon.spy();
+      emitter.on('release:pollIntervalChanged', spy);
+
+      emitter.emitPollIntervalChanged('rel-1', 30);
+
+      assert.strictEqual(spy.callCount, 1, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-1');
+      assert.strictEqual(spy.firstCall.args[1], 30);
+    });
+
+    test('should emit updated interval on backoff', () => {
+      const spy = sinon.spy();
+      emitter.on('release:pollIntervalChanged', spy);
+
+      emitter.emitPollIntervalChanged('rel-1', 60);
+      emitter.emitPollIntervalChanged('rel-1', 120);
+
+      assert.strictEqual(spy.callCount, 2);
+      assert.strictEqual(spy.firstCall.args[1], 60);
+      assert.strictEqual(spy.secondCall.args[1], 120);
+    });
+  });
 });
