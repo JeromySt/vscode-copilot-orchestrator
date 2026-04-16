@@ -108,6 +108,12 @@ export class DefaultReleasePRMonitor extends EventEmitter implements IReleasePRM
     super();
   }
 
+  on(event: 'cycleComplete', handler: (releaseId: string, cycle: PRMonitorCycle, pollIntervalTicks?: number) => void): this;
+  on(event: 'monitoringStopped', handler: (releaseId: string, cycleCount: number) => void): this;
+  on(event: string | symbol, handler: (...args: any[]) => void): this {
+    return super.on(event, handler);
+  }
+
   /**
    * Starts monitoring a release PR.
    *

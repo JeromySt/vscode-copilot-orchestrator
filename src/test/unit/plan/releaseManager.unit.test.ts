@@ -86,6 +86,8 @@ function createMockPRMonitor(): any {
     stopMonitoring: sinon.stub(),
     isMonitoring: sinon.stub().returns(false),
     getMonitorCycles: sinon.stub().returns([]),
+    on: sinon.stub(),
+    resetPolling: sinon.stub(),
   };
 }
 
@@ -726,6 +728,299 @@ suite('ReleaseManager', () => {
       assert.strictEqual(call1.args[0], release1.id);
       assert.strictEqual(call2.args[0], release2.id);
       assert.notStrictEqual(call1.args[0], call2.args[0]);
+    });
+  });
+
+  suite('taskStatusChanged events', () => {
+    setup(() => {
+      const fsModule = require('fs');
+      sandbox.stub(fsModule.promises, 'mkdir').resolves();
+      sandbox.stub(fsModule.promises, 'appendFile').resolves();
+      sandbox.stub(fsModule.promises, 'readFile').resolves('');
+    });
+
+    function makeTaskRelease(): any {
+      return {
+        id: 'rel-task-1',
+        name: 'Task Test Release',
+        flowType: 'from-plans',
+        status: 'preparing',
+        planIds: [],
+        releaseBranch: 'release/v1.0',
+        targetBranch: 'main',
+        repoPath: '/repo',
+        createdAt: Date.now(),
+        stateHistory: [],
+        prepTasks: [{ id: 'task-1', title: 'Test Task', status: 'pending', required: false, autoSupported: true }],
+      };
+    }
+
+    function createTaskManager(): DefaultReleaseManager {
+      return new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        createMockReleaseStore(),
+      );
+    }
+
+    test('executePreparationTask emits taskStatusChanged with running when starting', async () => {
+      const mgr = createTaskManager();
+      const release = makeTaskRelease();
+      (mgr as any).releases.set('rel-task-1', release);
+
+      const statuses: string[] = [];
+      (mgr as any).events.on('release:taskStatusChanged', (_: string, __: string, s: string) => {
+        statuses.push(s);
+      });
+
+      await mgr.executePreparationTask('rel-task-1', 'task-1');
+
+      assert.strictEqual(statuses[0], 'running', 'first emission should be running');
+    });
+
+    test('executePreparationTask emits taskStatusChanged with completed on success', async () => {
+      const mgr = createTaskManager();
+      const release = makeTaskRelease();
+      (mgr as any).releases.set('rel-task-1', release);
+
+      const statuses: string[] = [];
+      (mgr as any).events.on('release:taskStatusChanged', (_: string, __: string, s: string) => {
+        statuses.push(s);
+      });
+
+      await mgr.executePreparationTask('rel-task-1', 'task-1');
+
+      assert.ok(statuses.includes('completed'), 'should have emitted completed status');
+    });
+
+    test('executePreparationTask emits taskStatusChanged with failed on failure', async () => {
+      const failCopilot: any = {
+        run: sandbox.stub().resolves({
+          success: false,
+          error: 'Task failed',
+          sessionId: 'test',
+          metrics: { requestCount: 1, inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 },
+        }),
+        isAvailable: sandbox.stub().returns(true),
+      };
+      const mgr = new DefaultReleaseManager(
+        createMockPlanRunner(),
+        createMockGitOps(),
+        failCopilot,
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        createMockReleaseStore(),
+      );
+      const release = makeTaskRelease();
+      (mgr as any).releases.set('rel-task-1', release);
+
+      const statuses: string[] = [];
+      (mgr as any).events.on('release:taskStatusChanged', (_: string, __: string, s: string) => {
+        statuses.push(s);
+      });
+
+      await mgr.executePreparationTask('rel-task-1', 'task-1');
+
+      assert.ok(statuses.includes('failed'), 'should have emitted failed status');
+    });
+
+    test('completePreparationTask emits taskStatusChanged with completed', async () => {
+      const mgr = createTaskManager();
+      const release = makeTaskRelease();
+      release.prepTasks[0].logFilePath = '/logs/task-1.log';
+      (mgr as any).releases.set('rel-task-1', release);
+
+      const spy = sinon.spy();
+      (mgr as any).events.on('release:taskStatusChanged', spy);
+
+      await mgr.completePreparationTask('rel-task-1', 'task-1');
+
+      assert.ok(spy.calledOnce, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-task-1');
+      assert.strictEqual(spy.firstCall.args[1], 'task-1');
+      assert.strictEqual(spy.firstCall.args[2], 'completed');
+    });
+
+    test('skipPreparationTask emits taskStatusChanged with skipped', async () => {
+      const mgr = createTaskManager();
+      const release = makeTaskRelease();
+      release.prepTasks[0].logFilePath = '/logs/task-1.log';
+      (mgr as any).releases.set('rel-task-1', release);
+
+      const spy = sinon.spy();
+      (mgr as any).events.on('release:taskStatusChanged', spy);
+
+      await mgr.skipPreparationTask('rel-task-1', 'task-1');
+
+      assert.ok(spy.calledOnce, 'event should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], 'rel-task-1');
+      assert.strictEqual(spy.firstCall.args[1], 'task-1');
+      assert.strictEqual(spy.firstCall.args[2], 'skipped');
+    });
+  });
+
+  suite('plansAdded events', () => {
+    test('addPlansToRelease emits plansAdded with correct releaseId and planIds', async () => {
+      const mockPlan1 = {
+        id: 'plan-1',
+        spec: { name: 'P1', repoPath: '/repo', baseBranch: 'main' },
+        status: 'succeeded',
+      };
+      const mockPlan2 = {
+        id: 'plan-2',
+        spec: { name: 'P2', repoPath: '/repo', baseBranch: 'main' },
+        status: 'succeeded',
+      };
+      const planRunner = createMockPlanRunner({
+        get: sinon.stub().callsFake((id: string) => {
+          if (id === 'plan-1') return mockPlan1;
+          if (id === 'plan-2') return mockPlan2;
+          return undefined;
+        }),
+      });
+      const mgr = new DefaultReleaseManager(
+        planRunner,
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        createMockReleaseStore(),
+      );
+
+      const release = await mgr.createRelease({
+        name: 'Test Release',
+        planIds: ['plan-1'],
+        releaseBranch: 'release/v1.0',
+      });
+
+      const spy = sinon.spy();
+      (mgr as any).events.on('release:plansAdded', spy);
+
+      await mgr.addPlansToRelease(release.id, ['plan-2']);
+
+      assert.ok(spy.calledOnce, 'plansAdded should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], release.id);
+      assert.deepStrictEqual(spy.firstCall.args[1], ['plan-2']);
+    });
+  });
+
+  suite('prAdopted events', () => {
+    test('adoptPR emits prAdopted with correct releaseId and prNumber', async () => {
+      const mockPlan = {
+        id: 'plan-1',
+        spec: { name: 'Test Plan', repoPath: '/repo', baseBranch: 'main' },
+        status: 'succeeded',
+      };
+      const planRunner = createMockPlanRunner({ get: sinon.stub().returns(mockPlan) });
+      const mgr = new DefaultReleaseManager(
+        planRunner,
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        createMockReleaseStore(),
+      );
+
+      const release = await mgr.createRelease({
+        name: 'Test Release',
+        planIds: ['plan-1'],
+        releaseBranch: 'release/v1.0',
+      });
+
+      const spy = sinon.spy();
+      (mgr as any).events.on('release:prAdopted', spy);
+
+      await mgr.adoptPR(release.id, 42);
+
+      assert.ok(spy.calledOnce, 'prAdopted should be emitted once');
+      assert.strictEqual(spy.firstCall.args[0], release.id);
+      assert.strictEqual(spy.firstCall.args[1], 42);
+    });
+  });
+
+  suite('unified event routing', () => {
+    test('addressFindings emits through this.events typed emitter', async () => {
+      const mockPlan = {
+        id: 'plan-1',
+        spec: { name: 'Test Plan', repoPath: '/repo', baseBranch: 'main' },
+        status: 'succeeded',
+      };
+      const planRunner = createMockPlanRunner({
+        get: sinon.stub().returns(mockPlan),
+        enqueue: sinon.stub().returns({ id: 'fix-plan-id', spec: { name: 'Fix Plan' } }),
+      });
+      const mgr = new DefaultReleaseManager(
+        planRunner,
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        createMockPRMonitor(),
+        createMockPRServiceFactory(),
+        createMockReleaseStore(),
+      );
+
+      const release = await mgr.createRelease({
+        name: 'Test Release',
+        planIds: ['plan-1'],
+        releaseBranch: 'release/v1.0',
+      });
+      release.prNumber = 42;
+
+      const spy = sinon.spy();
+      mgr.on('findingsProcessing', spy);
+
+      await mgr.addressFindings(release.id, [
+        { id: 'comment-1', type: 'comment', body: 'Fix this', path: 'foo.ts', line: 1, author: 'reviewer' },
+      ]);
+
+      assert.ok(spy.called, 'findingsProcessing should be forwarded from typed emitter to outer EventEmitter');
+    });
+
+    test('prMonitor cycleComplete forwarding uses typed emitters', async () => {
+      const { EventEmitter } = require('events');
+      const prMonitorEE = new EventEmitter() as any;
+      prMonitorEE.startMonitoring = sinon.stub().resolves();
+      prMonitorEE.stopMonitoring = sinon.stub();
+      prMonitorEE.isMonitoring = sinon.stub().returns(false);
+      prMonitorEE.getMonitorCycles = sinon.stub().returns([]);
+      prMonitorEE.resetPolling = sinon.stub();
+
+      const mockPlan = {
+        id: 'plan-1',
+        spec: { name: 'Test Plan', repoPath: '/repo', baseBranch: 'main' },
+        status: 'succeeded',
+      };
+      const planRunner = createMockPlanRunner({ get: sinon.stub().returns(mockPlan) });
+      const mgr = new DefaultReleaseManager(
+        planRunner,
+        createMockGitOps(),
+        createMockCopilot(),
+        createMockIsolatedRepos(),
+        prMonitorEE,
+        createMockPRServiceFactory(),
+        createMockReleaseStore(),
+      );
+
+      const release = await mgr.createRelease({
+        name: 'Test Release',
+        planIds: ['plan-1'],
+        releaseBranch: 'release/v1.0',
+      });
+
+      const spy = sinon.spy();
+      mgr.on('releasePRCycle', spy);
+
+      prMonitorEE.emit('cycleComplete', release.id, { checks: [], comments: [], securityAlerts: [] });
+
+      assert.ok(spy.calledOnce, 'releasePRCycle should be forwarded from prMonitor via typed emitters');
+      assert.strictEqual(spy.firstCall.args[0], release.id);
     });
   });
 });

@@ -504,7 +504,7 @@
     "package": "npm run audit:check && npm run check-types && node esbuild.js --production",
     "pretest": "npm run compile:tsc",
     "test": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
-    "test:unit": "npm run compile:tsc && mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
+    "test:unit": "npm run compile:tsc && node scripts/test-unit-buffered.js",
     "test:coverage": "npm run compile:tsc && c8 --reporter=text --reporter=lcov --check-coverage --lines 94 --all --include=out/**/*.js --exclude=out/test/** --exclude=out/ui/** --exclude=out/extension.js --exclude=out/vscode/adapters.js --exclude=out/core/planInitialization.js --exclude=out/plan/testing/** mocha --ui tdd --exit \"out/test/unit/**/*.test.js\" --require src/test/unit/register-vscode-mock.js --timeout 60000",
     "lint": "eslint src --ext ts || echo 'Linting complete'",
     "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

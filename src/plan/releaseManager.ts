@@ -39,7 +39,7 @@ import { Logger } from '../core/logger';
 import { ReleaseEventEmitter } from './releaseEvents';
 import { ReleaseStateMachine } from './releaseStateMachine';
 import { parseReviewFindings } from './reviewFindingParser';
-import type { ReviewFindingStatus } from './types/release';
+import type { ReviewFindingStatus, PRMonitorCycle } from './types/release';
 
 const log = Logger.for('plan');
 const gitLog = (msg: string) => log.info(msg);
@@ -83,6 +83,16 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       this.emit('releasePRCycle', releaseId, cycle);
     });
     this.events.on('release:completed', (release) => this.emit('releaseCompleted', release));
+    this.events.on('release:actionTaken', (releaseId, action) => this.emit('releaseActionTaken', releaseId, action));
+    this.events.on('release:findingsProcessing', (releaseId, findingIds, status) => this.emit('findingsProcessing', releaseId, findingIds, status));
+    this.events.on('release:findingsResolved', (releaseId, findingIds, hasCommit) => this.emit('findingsResolved', releaseId, findingIds, hasCommit));
+    this.events.on('release:monitoringStopped', (releaseId, cycleCount) => this.emit('monitoringStopped', releaseId, cycleCount));
+    this.events.on('release:pollIntervalChanged', (releaseId, newIntervalTicks) => this.emit('pollIntervalChanged', releaseId, newIntervalTicks));
+    this.events.on('release:taskOutput', (releaseId, taskId, line) => this.emit('releaseTaskOutput', releaseId, taskId, line));
+    this.events.on('release:taskStatusChanged', (releaseId, taskId, status) => this.emit('taskStatusChanged', releaseId, taskId, status));
+    this.events.on('release:plansAdded', (releaseId, planIds) => this.emit('plansAdded', releaseId, planIds));
+    this.events.on('release:prAdopted', (releaseId, prNumber) => this.emit('prAdopted', releaseId, prNumber));
+    this.events.on('release:deleted', (releaseId) => this.emit('releaseDeleted', releaseId));
 
     // Listen for fix plan completions to run post-fix PR actions (push, reply, resolve)
     this.planRunner.on('planCompleted', (plan: any, status: string) => {
@@ -92,8 +102,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     });
 
     // Listen for PR monitor cycle completions and forward to release events + panel refresh
-    if (typeof (this.prMonitor as any).on === 'function') {
-      (this.prMonitor as any).on('cycleComplete', (releaseId: string, cycle: any, pollIntervalTicks?: number) => {
+    this.prMonitor.on('cycleComplete', (releaseId: string, cycle: PRMonitorCycle, pollIntervalTicks?: number) => {
         // Update monitoring stats on the release for panel rendering
         const rel = this.releases.get(releaseId);
         if (rel) {
@@ -214,7 +223,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
               log.info('Auto-fix: addressing new findings', {
                 releaseId, count: newFindings.length,
               });
-              this.emit('findingsProcessing', releaseId, newFindings.map((f: any) => f.id), 'queued');
+              this.events.emitFindingsProcessing(releaseId, newFindings.map((f: any) => f.id), 'queued');
               // Finding IDs are tracked inside addressFindings() after the plan
               // is successfully created. This prevents permanently blocking
               // findings when addressFindings() throws before creating a plan.
@@ -227,16 +236,15 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
         this.events.emitReleasePrCycle(releaseId, cycle);
         // Forward poll interval so the UI can show backoff status
         if (pollIntervalTicks) {
-          this.emit('pollIntervalChanged', releaseId, Math.round(pollIntervalTicks));
+          this.events.emitPollIntervalChanged(releaseId, Math.round(pollIntervalTicks));
         }
         this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
       });
 
       // Forward monitoring stopped events
-      (this.prMonitor as any).on('monitoringStopped', (releaseId: string, totalCycles: number) => {
+      this.prMonitor.on('monitoringStopped', (releaseId: string, totalCycles: number) => {
         this.emit('monitoringStopped', releaseId, totalCycles);
       });
-    }
 
     // Persist action log entries on the release so they survive webview re-renders.
     // The webview seeds ActionLogControl from releaseData.actionLog on initial render.
@@ -630,6 +638,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, task.status as any);
     
     // Emit started log line
     const startedMessage = `Task started: ${task.title}\n`;
@@ -719,6 +728,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, task.status as 'completed' | 'failed');
   }
 
   async completePreparationTask(releaseId: string, taskId: string): Promise<void> {
@@ -755,6 +765,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, 'completed');
   }
 
   async skipPreparationTask(releaseId: string, taskId: string): Promise<void> {
@@ -791,6 +802,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     await this.store.saveRelease(release);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
+    this.events.emitReleaseTaskStatusChanged(releaseId, taskId, 'skipped');
   }
 
   async updateFindingStatus(
@@ -898,6 +910,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       }
     }
 
+    this.events.emitReleasePlansAdded(releaseId, planIds);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
@@ -987,6 +1000,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     await this._transitionStatus(release, 'creating-pr', 'Adopting existing PR');
     await this._transitionStatus(release, 'pr-active', 'Adopted existing PR');
 
+    this.events.emitReleasePrAdopted(releaseId, prNumber);
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
   }
 
@@ -1098,11 +1112,12 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     log.info('Release PR merged', { releaseId, prNumber: release.prNumber, commitSha: result.commitSha });
 
+    const previousStatus = release.status;
     release.status = 'succeeded';
     this.store.saveRelease(release).catch(() => {});
     this.events.emitReleaseProgress(releaseId, this.getReleaseProgress(releaseId)!);
-    this.emit('releaseStatusChanged', release);
-    this.emit('releaseCompleted', release);
+    this.events.emitReleaseStatusChanged(releaseId, previousStatus, 'succeeded');
+    this.events.emitReleaseCompleted(release);
   }
 
   /**
@@ -1154,7 +1169,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     });
 
     const findingIds = findings.map((f: any) => f.id);
-    this.emit('findingsProcessing', releaseId, findingIds, 'queued');
+    this.events.emitFindingsProcessing(releaseId, findingIds, 'queued');
 
     const cwd = release.isolatedRepoPath || release.repoPath;
 
@@ -1311,14 +1326,14 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     this.store.saveRelease(release).catch(() => {});
 
     // Signal to UI with plan ID so activity log can link to plan detail
-    this.emit('releaseActionTaken', releaseId, {
+    this.events.emitReleaseActionTaken(releaseId, {
       type: 'fix-code',
       description: `Created fix plan: ${planName} (${jobs.length} jobs)`,
       success: true,
       planId: plan.id,
       timestamp: Date.now(),
     });
-    this.emit('findingsProcessing', releaseId, findingIds, 'processing');
+    this.events.emitFindingsProcessing(releaseId, findingIds, 'processing');
   }
 
   /**
@@ -1348,8 +1363,8 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     if (status !== 'succeeded') {
       log.warn('Fix plan did not succeed', { releaseId, planId: plan.id, status });
       const findingIds = findings.map((f: any) => f.id);
-      this.emit('findingsProcessing', releaseId, findingIds, 'failed');
-      this.emit('releaseActionTaken', releaseId, {
+      this.events.emitFindingsProcessing(releaseId, findingIds, 'failed');
+      this.events.emitReleaseActionTaken(releaseId, {
         type: 'fix-code',
         description: `Fix plan failed: ${plan.spec?.name || plan.id}`,
         success: false,
@@ -1392,7 +1407,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
       log.info('Fix plan changes pushed', { releaseId, commitHash, branch: release.releaseBranch });
 
-      this.emit('releaseActionTaken', releaseId, {
+      this.events.emitReleaseActionTaken(releaseId, {
         type: 'fix-code',
         description: `Pushed fixes for ${findings.length} finding(s)`,
         success: true,
@@ -1450,7 +1465,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
             // NOTE: Intentionally NOT resolving threads or minimizing comments here.
             // Resolution happens only after CI passes on the next monitoring cycle.
 
-            this.emit('releaseActionTaken', releaseId, {
+            this.events.emitReleaseActionTaken(releaseId, {
               type: 'respond-comment',
               description: `Replied to ${comment.author || 'reviewer'}'s comment`,
               success: true,
@@ -1472,7 +1487,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
 
     // ── 4. Emit resolved for UI (findings panel marks them as done) ──
     const resolvedIds = findings.map((f: any) => f.id);
-    this.emit('findingsResolved', releaseId, resolvedIds, !!commitHash);
+    this.events.emitFindingsResolved(releaseId, resolvedIds, !!commitHash);
 
     // Remove finding IDs from autoFixedFindingIds so the next monitoring
     // cycle can re-evaluate them. If the fix actually worked, the check
@@ -1902,7 +1917,7 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
       // (the sidebar may have already done its initial refresh before loading completed)
       if (releases.length > 0) {
         for (const release of releases) {
-          this.emit('releaseCreated', release);
+          this.events.emitReleaseCreated(release);
         }
       }
       
