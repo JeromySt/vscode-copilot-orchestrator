@@ -89,6 +89,10 @@ export class DefaultReleaseManager extends EventEmitter implements IReleaseManag
     this.events.on('release:monitoringStopped', (releaseId, cycleCount) => this.emit('monitoringStopped', releaseId, cycleCount));
     this.events.on('release:pollIntervalChanged', (releaseId, newIntervalTicks) => this.emit('pollIntervalChanged', releaseId, newIntervalTicks));
     this.events.on('release:taskOutput', (releaseId, taskId, line) => this.emit('releaseTaskOutput', releaseId, taskId, line));
+    this.events.on('release:taskStatusChanged', (releaseId, taskId, status) => this.emit('taskStatusChanged', releaseId, taskId, status));
+    this.events.on('release:plansAdded', (releaseId, planIds) => this.emit('plansAdded', releaseId, planIds));
+    this.events.on('release:prAdopted', (releaseId, prNumber) => this.emit('prAdopted', releaseId, prNumber));
+    this.events.on('release:deleted', (releaseId) => this.emit('releaseDeleted', releaseId));
 
     // Listen for fix plan completions to run post-fix PR actions (push, reply, resolve)
     this.planRunner.on('planCompleted', (plan: any, status: string) => {
