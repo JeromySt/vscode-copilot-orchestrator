@@ -1416,9 +1416,6 @@ export class NodeDetailPanel {
       ? this._buildWorkSummaryHtml(state.workSummary, state.aggregatedWorkSummary, isLeaf)
       : '';
     
-    // Get log file path for this node (use current attempt number)
-    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
-
     // Attempt history is rendered entirely by the CSR AttemptCard control.
     // Initial data is pushed via _sendAttemptUpdate() after HTML rebuild.
 
