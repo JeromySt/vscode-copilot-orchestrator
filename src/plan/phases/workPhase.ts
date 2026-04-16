@@ -23,7 +23,13 @@ export function adaptCommandForPowerShell(command: string, errorAction: string =
   // errors (e.g. stderr from native commands). Default 'Continue' prevents
   // NativeCommandError from causing unexpected failures. Callers can override
   // to 'Stop' when stderr truly indicates failure.
-  return `$ErrorActionPreference = '${errorAction}'; ${adapted}; exit $LASTEXITCODE`;
+  //
+  // Use -1 guard: in PowerShell 5.x, when a pipeline is terminated early by
+  // Select-Object -First N, the upstream native command is killed and $LASTEXITCODE
+  // becomes -1. This is not a real failure — treat it as success (0). Real
+  // failures use codes like 1. PowerShell 7 (pwsh) handles this correctly by
+  // letting the process exit via EPIPE with its actual code.
+  return `$ErrorActionPreference = '${errorAction}'; ${adapted}; if ($LASTEXITCODE -eq -1) { exit 0 } else { exit $LASTEXITCODE }`;
 }
 
 // Shared helper: spawn a process/shell and track it in the PhaseContext

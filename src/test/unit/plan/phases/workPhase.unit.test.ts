@@ -159,11 +159,24 @@ suite('WorkPhaseExecutor', () => {
 
 suite('adaptCommandForPowerShell', () => {
   test('converts && to error-propagation chain', () => {
-    assert.strictEqual(adaptCommandForPowerShell('a && b'), "$ErrorActionPreference = 'Continue'; a; if (!$?) { exit 1 }; b; exit $LASTEXITCODE");
+    assert.strictEqual(adaptCommandForPowerShell('a && b'), "$ErrorActionPreference = 'Continue'; a; if (!$?) { exit 1 }; b; if ($LASTEXITCODE -eq -1) { exit 0 } else { exit $LASTEXITCODE }");
   });
 
   test('rewrites ls -la', () => {
-    assert.strictEqual(adaptCommandForPowerShell('ls -la'), "$ErrorActionPreference = 'Continue'; Get-ChildItem; exit $LASTEXITCODE");
+    assert.strictEqual(adaptCommandForPowerShell('ls -la'), "$ErrorActionPreference = 'Continue'; Get-ChildItem; if ($LASTEXITCODE -eq -1) { exit 0 } else { exit $LASTEXITCODE }");
+  });
+
+  test('treats -1 exit code as success to handle pipeline termination by Select-Object -First', () => {
+    // In PowerShell 5.x, Select-Object -First N kills upstream native commands with
+    // exit code -1. This guard prevents false postchecks failures when tests pass.
+    const adapted = adaptCommandForPowerShell("npm run test 2>&1 | Select-Object -First 5");
+    assert.ok(adapted.includes("if ($LASTEXITCODE -eq -1) { exit 0 }"), 'must guard against -1 kill code');
+    assert.ok(!adapted.includes("; exit $LASTEXITCODE"), 'must not use bare exit $LASTEXITCODE');
+  });
+
+  test('uses custom errorAction', () => {
+    const result = adaptCommandForPowerShell('do-work', 'Stop');
+    assert.ok(result.startsWith("$ErrorActionPreference = 'Stop';"), 'should use Stop');
   });
 });
 
