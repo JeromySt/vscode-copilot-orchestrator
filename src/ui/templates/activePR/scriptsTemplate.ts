@@ -84,6 +84,7 @@ export function renderActivePRScripts(scriptUri: string, nonce: string): string 
   // Handle messages from extension
   window.addEventListener('message', event => {
     const message = event.data;
+    if (!message || typeof message.type !== 'string') { return; }
     switch (message.type) {
       case 'pulse':
         updateTimer();

@@ -1188,6 +1188,9 @@ class ActionLogControl {
 function setupMessageListener(): void {
   window.addEventListener('message', event => {
     const message = event.data;
+    if (!message || typeof message.type !== 'string') {
+      return; // Reject malformed messages
+    }
     switch (message.type) {
       case 'subscriptionData':
         // Route producer deltas to existing handlers.
