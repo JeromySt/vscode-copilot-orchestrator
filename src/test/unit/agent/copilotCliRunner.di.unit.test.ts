@@ -272,7 +272,7 @@ suite('CopilotCliRunner DI', () => {
         { task: 'test', allowedUrls: ['https://api.github.com'] },
         { existsSync: () => true, fallbackCwd: '/x' }
       );
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.github.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://api.github.com'));
     });
 
     test('filters out invalid URLs', () => {
@@ -280,7 +280,7 @@ suite('CopilotCliRunner DI', () => {
         { task: 'test', allowedUrls: ['https://valid.com', '$(evil)'] },
         { existsSync: () => true, fallbackCwd: '/x' }
       );
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://valid.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://valid.com'));
       assert.ok(!cmd.commandString.includes('evil'));
     });
 
@@ -289,7 +289,7 @@ suite('CopilotCliRunner DI', () => {
         { task: 'test', allowedUrls: ['anything'] },
         { existsSync: () => true, fallbackCwd: '/x', urlSanitizer: () => 'https://fixed.com' }
       );
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://fixed.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://fixed.com'));
     });
 
     test('includes --effort when provided', () => {
