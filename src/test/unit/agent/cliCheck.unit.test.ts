@@ -12,7 +12,6 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as cp from 'child_process';
 import { EventEmitter } from 'events';
-import type { IGitOperations } from '../../../interfaces/IGitOperations';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +35,6 @@ function canStubSpawn(): boolean {
 /** Flag indicating if spawn can be stubbed in this environment */
 const spawnStubbable = canStubSpawn();
 
-const mockGitOps = {} as any as IGitOperations;
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -631,7 +631,7 @@ suite('completed_split + reshape integration', () => {
 
       const versionAfterAdd = plan.stateVersion;
 
-      const fanIn = reshaperAddNodeAfter(plan, 'parent-id', {
+      reshaperAddNodeAfter(plan, 'parent-id', {
         producerId: 'parent-fan-in',
         name: 'Fan-in',
         task: 'validate',

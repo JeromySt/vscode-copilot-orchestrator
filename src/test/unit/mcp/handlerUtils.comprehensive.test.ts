@@ -23,7 +23,6 @@ import {
   lookupNode, 
   isError,
   resolveBaseBranch,
-  resolveTargetBranch,
   PlanHandlerContext 
 } from '../../../mcp/handlers/utils';
 

@@ -184,7 +184,6 @@ suite('Checkpoint Protocol', () => {
   suite('Sentinel write decision', () => {
     test('critical + work phase → writeSentinel called once', () => {
       const writeSentinel = sandbox.stub().resolves();
-      const logger = { log: sandbox.stub() };
       const monitor = {
         getState: sandbox.stub().returns({
           level: 'critical',
@@ -287,8 +286,7 @@ suite('Checkpoint Protocol', () => {
   suite('Postchecks warning mode', () => {
     test('sentinel present + postchecks fail → postchecksWarning true (job succeeds)', () => {
       // Simulating the executor logic for postchecks with sentinel
-      const sentinelPath = path.join('/tmp/wt', '.orchestrator', 'CHECKPOINT_REQUIRED');
-      const hasSentinel = true; // fs.existsSync(sentinelPath) returns true
+      const hasSentinel = true; // fs.existsSync would return true
       let postchecksWarning = false;
       const postcheckResult = { success: false, error: 'tsc failed' };
 
