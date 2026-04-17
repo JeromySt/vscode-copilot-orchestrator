@@ -26,16 +26,44 @@ const POST_PS1_SCRIPT = 'orchestrator-post-tool.ps1';
 const POST_SH_SCRIPT = 'orchestrator-post-tool.sh';
 
 /**
+ * Resolve a fixed hook-file name inside the worktree's `.github/hooks` dir
+ * and verify that the result stays within that directory. Prevents path
+ * traversal and satisfies CodeQL's `js/insecure-temporary-file` rule by
+ * proving containment of every write target. Returns `undefined` if the
+ * resolved path escapes `hooksDir` (which is impossible for the fixed
+ * filename constants but cheap to verify).
+ */
+function safeHookPath(hooksDir: string, name: string): string | undefined {
+    const resolvedBase = path.resolve(hooksDir);
+    const resolved = path.resolve(resolvedBase, name);
+    if (resolved !== path.join(resolvedBase, name) ||
+        !(resolved === resolvedBase || resolved.startsWith(resolvedBase + path.sep))) {
+        return undefined;
+    }
+    return resolved;
+}
+
+/**
  * Write the preToolUse gate scripts + hooks.json into the worktree.
  * Idempotent: overwrites existing files.
  *
  * Returns the absolute paths of files written (for optional cleanup).
+ *
+ * Security: `cwd` is the orchestrator-owned worktree path supplied by the
+ * caller (never user input). All write targets are constructed from fixed
+ * filename constants and validated to lie within `<cwd>/.github/hooks` via
+ * `safeHookPath()` — this satisfies CodeQL's `js/insecure-temporary-file`
+ * rule even when callers pass tmpdir-derived paths in unit tests.
  */
 export function installOrchestratorHooks(
     cwd: string,
     logger?: CopilotCliLogger,
 ): { configPath: string; scriptPaths: string[] } {
-    const hooksDir = path.join(cwd, HOOKS_DIR_REL);
+    if (!cwd || !path.isAbsolute(cwd)) {
+        logger?.warn(`[hooks] Refusing to install: cwd must be an absolute path (${cwd})`);
+        return { configPath: '', scriptPaths: [] };
+    }
+    const hooksDir = path.resolve(path.join(cwd, HOOKS_DIR_REL));
     try {
         fs.mkdirSync(hooksDir, { recursive: true });
     } catch (e) {
@@ -43,13 +71,21 @@ export function installOrchestratorHooks(
         return { configPath: '', scriptPaths: [] };
     }
 
-    const ps1Path = path.join(hooksDir, PS1_SCRIPT);
-    const shPath = path.join(hooksDir, SH_SCRIPT);
-    const postPs1Path = path.join(hooksDir, POST_PS1_SCRIPT);
-    const postShPath = path.join(hooksDir, POST_SH_SCRIPT);
-    const configPath = path.join(hooksDir, HOOKS_CONFIG_FILE);
+    const ps1Path = safeHookPath(hooksDir, PS1_SCRIPT);
+    const shPath = safeHookPath(hooksDir, SH_SCRIPT);
+    const postPs1Path = safeHookPath(hooksDir, POST_PS1_SCRIPT);
+    const postShPath = safeHookPath(hooksDir, POST_SH_SCRIPT);
+    const configPath = safeHookPath(hooksDir, HOOKS_CONFIG_FILE);
+    if (!ps1Path || !shPath || !postPs1Path || !postShPath || !configPath) {
+        logger?.warn(`[hooks] Refusing to install: hooks dir resolution escaped base (${hooksDir})`);
+        return { configPath: '', scriptPaths: [] };
+    }
 
     try {
+        // CodeQL: js/insecure-temporary-file — false positive. Each path is constructed
+        // from a fixed filename constant and validated by safeHookPath() above to lie
+        // within hooksDir = <cwd>/.github/hooks where cwd is an orchestrator-owned
+        // worktree path (never user input).
         fs.writeFileSync(ps1Path, PRESSURE_GATE_PS1, { encoding: 'utf8' });
         fs.writeFileSync(shPath, PRESSURE_GATE_SH, { encoding: 'utf8' });
         fs.writeFileSync(postPs1Path, POST_TOOL_PS1, { encoding: 'utf8' });
@@ -96,9 +132,11 @@ export function installOrchestratorHooks(
  * Best-effort; swallows all errors.
  */
 export function uninstallOrchestratorHooks(cwd: string, logger?: CopilotCliLogger): void {
-    const hooksDir = path.join(cwd, HOOKS_DIR_REL);
+    if (!cwd || !path.isAbsolute(cwd)) { return; }
+    const hooksDir = path.resolve(path.join(cwd, HOOKS_DIR_REL));
     for (const name of [HOOKS_CONFIG_FILE, PS1_SCRIPT, SH_SCRIPT, POST_PS1_SCRIPT, POST_SH_SCRIPT]) {
-        const p = path.join(hooksDir, name);
+        const p = safeHookPath(hooksDir, name);
+        if (!p) { continue; }
         try {
             if (fs.existsSync(p)) { fs.unlinkSync(p); }
         } catch (e) {
