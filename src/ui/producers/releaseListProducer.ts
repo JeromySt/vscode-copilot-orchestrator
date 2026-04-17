@@ -9,6 +9,7 @@
 
 import type { EventProducer } from '../webViewSubscriptionManager';
 import type { IReleaseManager } from '../../interfaces/IReleaseManager';
+import type { EventEmitter } from 'events';
 
 /** Cursor: serialized map of releaseId→status. */
 export type ReleaseListCursor = string;
@@ -36,7 +37,19 @@ export interface ReleaseSummary {
 export class ReleaseListProducer implements EventProducer<ReleaseListCursor> {
   readonly type = 'releaseList';
 
-  constructor(private readonly _manager: IReleaseManager) {}
+  private _dirty = false;
+  private _listeners: Array<{ event: string; fn: (...args: any[]) => void }> = [];
+
+  constructor(private readonly _manager: IReleaseManager) {
+    const mgr = _manager as unknown as EventEmitter;
+    if (typeof mgr.on === 'function') {
+      const markDirty = () => { this._dirty = true; };
+      for (const event of ['releaseCreated', 'releaseStatusChanged', 'releaseDeleted']) {
+        mgr.on(event, markDirty);
+        this._listeners.push({ event, fn: markDirty });
+      }
+    }
+  }
 
   private _getSummaries(): ReleaseSummary[] {
     return this._manager.getAllReleases().map(release => {
@@ -80,7 +93,9 @@ export class ReleaseListProducer implements EventProducer<ReleaseListCursor> {
   readDelta(_key: string, cursor: ReleaseListCursor): { content: { changed: ReleaseSummary[]; removed: string[] }; cursor: ReleaseListCursor } | null {
     const summaries = this._getSummaries();
     const newCursor = this._buildCursor(summaries);
-    if (newCursor === cursor) { return null; }
+
+    if (newCursor === cursor && !this._dirty) { return null; }
+    this._dirty = false;
 
     let prevMap: Record<string, string> = {};
     try { prevMap = JSON.parse(cursor); } catch { return { content: { changed: summaries, removed: [] }, cursor: newCursor }; }
@@ -90,5 +105,16 @@ export class ReleaseListProducer implements EventProducer<ReleaseListCursor> {
     const removed = Object.keys(prevMap).filter(id => !currentIds.has(id));
 
     return { content: { changed, removed }, cursor: newCursor };
+  }
+
+  /** Clean up event listeners. */
+  dispose(): void {
+    const mgr = this._manager as unknown as EventEmitter;
+    if (typeof mgr.removeListener === 'function') {
+      for (const { event, fn } of this._listeners) {
+        mgr.removeListener(event, fn);
+      }
+    }
+    this._listeners = [];
   }
 }

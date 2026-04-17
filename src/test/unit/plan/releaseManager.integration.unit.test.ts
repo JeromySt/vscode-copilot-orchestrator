@@ -101,6 +101,8 @@ function createMockPRMonitor(): any {
     stopMonitoring: sinon.stub(),
     isMonitoring: sinon.stub().returns(false),
     getMonitorCycles: sinon.stub().returns([]),
+    on: sinon.stub(),
+    resetPolling: sinon.stub(),
   };
 }
 
