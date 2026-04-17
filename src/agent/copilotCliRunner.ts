@@ -234,8 +234,15 @@ export class CopilotCliRunner {
       );
       if (contextPressureEnabled) {
         try {
-          installOrchestratorHooks(cwd, this.logger);
-          hooksInstalled = true;
+          // installOrchestratorHooks() is fail-open: on internal failure it returns
+          // an empty configPath rather than throwing. Only mark hooks as installed
+          // when the hook config was actually written, otherwise checkpoint enforcement
+          // is silently disabled while the runner believes it is active.
+          const hookInstallResult = installOrchestratorHooks(cwd, this.logger);
+          hooksInstalled = hookInstallResult.configPath.trim().length > 0;
+          if (!hooksInstalled) {
+            this.logger.warn(`[${label}] Orchestrator hooks were not installed; checkpoint enforcement remains disabled.`);
+          }
         } catch (e) {
           this.logger.warn(`[${label}] Failed to install orchestrator hooks: ${e}`);
         }
