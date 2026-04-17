@@ -125,7 +125,7 @@ export function computeCurrentPhase(state: NodeExecutionState): string | undefin
   for (const [phase, status] of Object.entries(state.stepStatuses)) {
     if (status === 'running') { return phase; }
   }
-  const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+  const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
   for (const phase of phaseOrder) {
     const s = state.stepStatuses[phase as keyof typeof state.stepStatuses];
     if (!s || s === 'pending') { return phase; }

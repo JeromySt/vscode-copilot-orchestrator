@@ -142,7 +142,17 @@ export class DefaultJobExecutor implements JobExecutor {
       logError: (m) => this.logEntry(executionKey, phase, 'error', m),
       logOutput: (t, m) => this.logEntry(executionKey, phase, t, m),
       isAborted: () => execution.aborted,
-      setProcess: (p) => { execution.process = p; },
+      setProcess: (p) => {
+        execution.process = p;
+        // Update nodeState.pid immediately so the ProcessStatsProducer can
+        // deliver live process tree data without waiting for execution to complete.
+        // PID is cleared centrally by the state machine on terminal transitions
+        // (succeeded/failed/canceled) — see stateMachine.ts.
+        if (p?.pid) {
+          const ns = context.plan.nodeStates.get(node.id);
+          if (ns) { ns.pid = p.pid; }
+        }
+      },
       setStartTime: (t) => { execution.startTime = t; },
       setIsAgentWork: (v) => { execution.isAgentWork = v; },
     });

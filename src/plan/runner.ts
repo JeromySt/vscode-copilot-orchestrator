@@ -80,6 +80,8 @@ export interface JobExecutor {
     baseBranch: string,
     repoPath: string
   ): Promise<JobWorkSummary>;
+  /** Check if the executor has an active execution for this node (between phases). */
+  isActive?(planId: string, nodeId: string): boolean;
 }
 
 

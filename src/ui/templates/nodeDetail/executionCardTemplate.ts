@@ -62,7 +62,7 @@ export interface ExecutionCardData {
   workSpecHtml?: string;
 }
 
-const PHASE_ORDER = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
+const PHASE_ORDER = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'] as const;
 
 // ─── Icon helpers ─────────────────────────────────────────────────────────────
 
@@ -276,12 +276,13 @@ function workSpecSectionHtml(task?: string, workSpecHtml?: string): string {
 export function splitAttemptLogs(logs: string): Record<string, string> {
   const result: Record<string, string> = { all: logs };
   const markerMap: Record<string, string> = {
-    'merge-fi': 'FORWARD INTEGRATION',
-    'prechecks': 'PRECHECKS',
-    'work': 'WORK',
-    'commit': 'COMMIT',
-    'postchecks': 'POSTCHECKS',
-    'merge-ri': 'REVERSE INTEGRATION',
+    'merge-fi': 'MERGE-FI SECTION',
+    'setup': 'SETUP SECTION',
+    'prechecks': 'PRECHECKS SECTION',
+    'work': 'WORK SECTION',
+    'commit': 'COMMIT SECTION',
+    'postchecks': 'POSTCHECKS SECTION',
+    'merge-ri': 'MERGE-RI SECTION',
   };
 
   for (const phase of PHASE_ORDER) {
@@ -303,10 +304,11 @@ export function splitAttemptLogs(logs: string): Record<string, string> {
 // ─── Logs section renderer ────────────────────────────────────────────────────
 
 function logsSectionHtml(logs: Record<string, string>, attemptNumber: number): string {
-  const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+  const phases = ['all', 'merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
   const phaseLabels: Record<string, string> = {
     'all': '\uD83D\uDCC4 Full Log',
     'merge-fi': '\u21D9\u21D8 Merge FI',
+    'setup': '\uD83D\uDD27 Setup',
     'prechecks': '\u2713 Prechecks',
     'work': '\u2699 Work',
     'commit': '\uD83D\uDCBE Commit',

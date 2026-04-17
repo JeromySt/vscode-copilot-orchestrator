@@ -12,8 +12,10 @@
  */
 
 import type { IContextPressureMonitor } from '../../interfaces/IContextPressureMonitor';
+import type { ICheckpointManager } from '../../interfaces/ICheckpointManager';
 
 const monitors = new Map<string, IContextPressureMonitor>();
+let activeCheckpointManager: ICheckpointManager | undefined;
 
 /**
  * Register an active monitor for a plan node.
@@ -34,4 +36,17 @@ export function unregisterMonitor(planId: string, nodeId: string): void {
  */
 export function getMonitor(planId: string, nodeId: string): IContextPressureMonitor | undefined {
   return monitors.get(`${planId}:${nodeId}`);
+}
+
+/**
+ * Register the singleton ICheckpointManager so handlers can write sentinels
+ * when pressure transitions to critical. Set once at composition time.
+ */
+export function setCheckpointManager(manager: ICheckpointManager): void {
+  activeCheckpointManager = manager;
+}
+
+/** Look up the registered checkpoint manager. */
+export function getCheckpointManager(): ICheckpointManager | undefined {
+  return activeCheckpointManager;
 }

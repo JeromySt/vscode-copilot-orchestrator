@@ -57,7 +57,7 @@ function stripPrefix(line: string): string {
  */
 export class StatsHandler implements IOutputHandler {
   readonly name = 'stats';
-  readonly sources = [OutputSources.stdout];
+  readonly sources = [OutputSources.stdout, OutputSources.stderr];
   readonly windowSize = 1;
 
   private _premiumRequests?: number;

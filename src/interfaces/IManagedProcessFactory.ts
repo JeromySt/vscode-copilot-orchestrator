@@ -30,6 +30,9 @@ export interface LogSourceConfig {
   watch?: boolean;
   /** Debounce interval for rapid fs.watch events (default: 50ms) */
   debounceMs?: number;
+  /** PID of the owning process — when set, directory-mode tailers only tail files
+   *  whose name contains this PID (e.g. `process-{ts}-{pid}.log`). */
+  pid?: number;
 }
 
 /**

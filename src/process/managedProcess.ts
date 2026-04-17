@@ -81,11 +81,14 @@ export class ManagedProcess implements IManagedProcess {
     });
 
     // Start log tailers (ensure directories exist first)
+    const pid = _proc.pid;
     for (const src of logSources) {
       if (src.type === 'directory') {
         try { fs.mkdirSync(src.path, { recursive: true }); } catch { /* best-effort */ }
       }
-      const tailer = new LogFileTailer(src, bus);
+      // Thread PID to directory-mode tailers so they pick only the current process's log
+      const srcWithPid = (src.type === 'directory' && pid) ? { ...src, pid } : src;
+      const tailer = new LogFileTailer(srcWithPid, bus);
       tailer.start();
       this._tailers.push(tailer);
     }

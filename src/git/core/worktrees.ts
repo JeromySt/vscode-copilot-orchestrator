@@ -268,7 +268,8 @@ export async function createDetachedWithTiming(
   worktreePath: string,
   commitish: string,
   log?: GitLogger,
-  additionalSymlinkDirs?: string[]
+  additionalSymlinkDirs?: string[],
+  skipDefaultSymlinks?: boolean
 ): Promise<CreateTiming & { baseCommit: string }> {
   // Acquire mutex to prevent race condition with parallel worktree operations
   const releaseMutex = await acquireRepoMutex(repoPath);
@@ -301,7 +302,7 @@ export async function createDetachedWithTiming(
     const submoduleMs = await setupSubmoduleSymlinks(repoPath, worktreePath, log);
     
     // Symlink shared directories (node_modules, etc.) for tool availability
-    await setupSharedDirectorySymlinks(repoPath, worktreePath, log, additionalSymlinkDirs);
+    await setupSharedDirectorySymlinks(repoPath, worktreePath, log, additionalSymlinkDirs, skipDefaultSymlinks);
     
     const totalMs = Date.now() - totalStart;
     return { worktreeMs, submoduleMs, totalMs, baseCommit };
@@ -327,7 +328,8 @@ export async function createOrReuseDetached(
   worktreePath: string,
   commitish: string,
   log?: GitLogger,
-  additionalSymlinkDirs?: string[]
+  additionalSymlinkDirs?: string[],
+  skipDefaultSymlinks?: boolean
 ): Promise<CreateTiming & { baseCommit: string; reused: boolean }> {
   // Check if worktree already exists and is valid
   if (await isValid(worktreePath)) {
@@ -347,7 +349,7 @@ export async function createOrReuseDetached(
   }
   
   // Create new worktree
-  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log, additionalSymlinkDirs);
+  const result = await createDetachedWithTiming(repoPath, worktreePath, commitish, log, additionalSymlinkDirs, skipDefaultSymlinks);
   return { ...result, reused: false };
 }
 
@@ -617,9 +619,11 @@ async function setupSharedDirectorySymlinks(
   repoPath: string,
   worktreePath: string,
   log?: GitLogger,
-  additionalDirs?: string[]
+  additionalDirs?: string[],
+  skipDefaultSymlinks?: boolean
 ): Promise<void> {
-  const dirs = [...SHARED_DIRECTORIES, ...(additionalDirs || [])];
+  const defaults = skipDefaultSymlinks ? [] : SHARED_DIRECTORIES;
+  const dirs = [...defaults, ...(additionalDirs || [])];
 
   // Deduplicate and validate to prevent path traversal
   const seen = new Set<string>();

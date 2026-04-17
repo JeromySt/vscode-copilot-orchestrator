@@ -15,6 +15,8 @@ import type { IManagedProcess } from '../interfaces/IManagedProcess';
 import type { StatsHandler } from './handlers/statsHandler';
 import type { SessionIdHandler } from './handlers/sessionIdHandler';
 import type { TaskCompleteHandler } from './handlers/taskCompleteHandler';
+import type { ContextPressureHandler } from './handlers/contextPressureHandler';
+import { installOrchestratorHooks, uninstallOrchestratorHooks } from './hookInstaller';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -219,6 +221,26 @@ export class CopilotCliRunner {
       instructionsFile = instructionsSetup.filePath;
       instructionsDir = instructionsSetup.dirPath;
     }
+
+    // Install orchestrator hooks (preToolUse checkpoint gate). The CLI loads
+    // .github/hooks/*.json from the worktree at session start, so this must
+    // happen before the process spawns. Context-pressure enforcement requires
+    // this — the agent ignores in-prompt instructions, but cannot bypass a
+    // preToolUse denial because the CLI blocks the tool call itself.
+    let hooksInstalled = false;
+    if (this.configProvider) {
+      const contextPressureEnabled = this.configProvider.getConfig<boolean>(
+        'copilotOrchestrator.contextPressure', 'enabled', false
+      );
+      if (contextPressureEnabled) {
+        try {
+          installOrchestratorHooks(cwd, this.logger);
+          hooksInstalled = true;
+        } catch (e) {
+          this.logger.warn(`[${label}] Failed to install orchestrator hooks: ${e}`);
+        }
+      }
+    }
     
     // Build the command
     // Auto-derive configDir from cwd for session isolation.
@@ -295,6 +317,11 @@ export class CopilotCliRunner {
       if (instructionsFile) {
         this.cleanupInstructionsFile(instructionsFile, instructionsDir, label);
       }
+      // Cleanup orchestrator hooks (best-effort; keeps worktrees clean between
+      // sessions so a resumed session doesn't see stale hook state).
+      if (hooksInstalled) {
+        try { uninstallOrchestratorHooks(cwd, this.logger); } catch { /* ignore */ }
+      }
     }
   }
   
@@ -341,88 +368,30 @@ export class CopilotCliRunner {
         'copilotOrchestrator.contextPressure', 'enabled', false
       );
       if (contextPressureEnabled) {
-        checkpointPreamble = `## Orchestrator Checkpoint Protocol (MANDATORY)
+        checkpointPreamble = `## CHECKPOINT PROTOCOL — READ THIS FIRST
 
-Before EVERY action you take (before each tool call), you MUST check:
+If \`.orchestrator/CHECKPOINT_REQUIRED\` exists at any time, your context window is critical and you must hand off. **Do these steps IN THIS EXACT ORDER. Do not skip step 1.**
 
-\`\`\`bash
-test -f .orchestrator/CHECKPOINT_REQUIRED
-\`\`\`
-
-If this file EXISTS:
-1. **STOP immediately** — do not start any new work
-2. Finish ONLY the current statement/line you are writing (do not leave syntax errors)
-3. Stage and commit all your work:
+1. **WRITE THE MANIFEST FIRST** (this is your handoff to the next agent — without it your work is lost):
    \`\`\`bash
-   git add -A
-   git commit -m "[checkpoint] <one-line summary of what you completed>"
-   \`\`\`
-4. Create the checkpoint manifest — this is your **memory transfer** to the next agent.
-   Write it as richly as possible so the next agent can start productive work immediately:
-   \`\`\`bash
-   cat > .orchestrator/checkpoint-manifest.json << 'MANIFEST_EOF'
+   cat > .orchestrator/checkpoint-manifest.json << 'EOF'
    {
      "status": "checkpointed",
-     "completed": [
-       {
-         "file": "<path>",
-         "summary": "<what you implemented and key decisions>",
-         "publicApi": "<exports, interfaces, key method signatures>",
-         "patterns": "<coding patterns the remaining work should follow>"
-       }
-     ],
-     "inProgress": {
-       "file": "<file you were working on, if any>",
-       "completedParts": "<what's done in this file>",
-       "remainingParts": "<specific methods/tests NOT done>",
-       "notes": "<any gotchas or decisions made>"
-     },
-     "remaining": [
-       {
-         "file": "<filename>",
-         "description": "<what needs to be built>",
-         "dependsOn": "<what completed items it uses>",
-         "constraints": "<anything you discovered that matters>"
-       }
-     ],
-     "suggestedSplits": [
-       {
-         "name": "<short name for this sub-job>",
-         "files": ["<file1>", "<file2>"],
-         "prompt": "<full prompt for the agent that will do this work — be specific about what to build, what patterns to follow, what APIs are available from completed work, and any pitfalls to avoid>",
-         "priority": 1
-       }
-     ],
-     "codebaseContext": {
-       "buildCommand": "<command that builds the project>",
-       "testCommand": "<command that runs tests>",
-       "conventions": "<naming conventions, patterns used>",
-       "warnings": "<gotchas or issues you encountered>"
-     },
-     "summary": "<one paragraph: what you accomplished and what's left>"
+     "completed": [{"file": "<path>", "summary": "<what you finished>"}],
+     "remaining": [{"file": "<path>", "description": "<what still needs to be done>"}],
+     "summary": "<one sentence: what's done, what's left>"
    }
-   MANIFEST_EOF
+   EOF
    \`\`\`
-   
-   **Writing effective \`suggestedSplits\`**: You know the remaining work best. Group
-   related items together (e.g., an implementation file + its tests). Write each
-   \`prompt\` as if you're briefing a colleague who has never seen this codebase —
-   include the specific APIs from your completed work they'll need, the patterns
-   they should follow, and any constraints or gotchas you discovered. The more
-   specific your prompt, the faster the next agent starts producing real code.
-5. Force-add the manifest and your instruction file to git (they're in .gitignore):
-   \`\`\`bash
-   git add --force .orchestrator/checkpoint-manifest.json
-   git add --force .github/instructions/orchestrator-job-*.md
-   git commit --amend --no-edit
-   \`\`\`
-6. Print exactly: \`[ORCHESTRATOR:CHECKPOINT_COMPLETE]\`
-7. You are done. Exit immediately.
+2. \`git add -A && git commit -m "[checkpoint] <summary>"\`
+3. \`git add --force .orchestrator/checkpoint-manifest.json && git commit --amend --no-edit\`
+4. Print \`[ORCHESTRATOR:CHECKPOINT_COMPLETE]\` and exit.
 
-**IMPORTANT**: The orchestrator will create sub-jobs for the remaining work.
-Your checkpoint commit will be the starting point for those sub-jobs.
-Do not try to rush through remaining items — a clean checkpoint of completed
-work is far more valuable than a hasty attempt at everything.
+A \`preToolUse\` hook in \`.github/hooks/\` enforces this — once the sentinel exists, most tools return \`ORCHESTRATOR_CHECKPOINT_REQUIRED\` errors. When you see that error, jump to step 1 immediately. Do NOT retry the denied tool.
+
+**Never commit without writing the manifest first.** A commit with no manifest = orchestrator fails the job and your work is discarded. Take 30 seconds to fill in the manifest richly (more \`completed\` and \`remaining\` entries = better handoff).
+
+Check for the sentinel periodically with \`test -f .orchestrator/CHECKPOINT_REQUIRED\` (PowerShell: \`Test-Path .orchestrator/CHECKPOINT_REQUIRED\`).
 
 `;
       }
@@ -586,6 +555,25 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
           onProcess?.(rawProc);
         }
 
+        // ── Context-pressure escalation: kill if agent ignores the sentinel ──
+        // The ContextPressureHandler writes the CHECKPOINT_REQUIRED sentinel when
+        // pressure goes critical. If the agent doesn't honor it within the grace
+        // window, we force-kill the process to free the worktree for splitting.
+        let pressureKillTimer: NodeJS.Timeout | undefined;
+        let wasKilledByPressure = false;
+        const pressureHandler = managed.bus.getHandler<ContextPressureHandler>('context-pressure');
+        if (pressureHandler && options.planId && options.jobId) {
+          pressureHandler.monitor.onPressureChange((level) => {
+            if (level !== 'critical' || pressureKillTimer) { return; }
+            this.logger.warn(`[${label}] Context pressure CRITICAL — sentinel written, granting agent 30s to checkpoint before force-kill (PID ${managed.pid})`);
+            pressureKillTimer = setTimeout(() => {
+              this.logger.error(`[${label}] Agent did not checkpoint within 30s of critical pressure — force-killing PID ${managed.pid}`);
+              wasKilledByPressure = true;
+              try { managed.kill(); } catch { /* ignore */ }
+            }, 30_000);
+          });
+        }
+
         // Forward output lines and drive the stats hang timer
         managed.on('line', (line: string, source) => {
           if (source.type === 'stdout' || source.type === 'stderr') {
@@ -593,7 +581,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
             onOutput?.(line);
           }
           // Start grace timer when stats summary is detected but process hasn't exited
-          if (source.type === 'stdout') {
+          // Stats may appear on stdout (older CLI) or stderr (CLI v1.0.31+)
+          if (source.type === 'stdout' || source.type === 'stderr') {
             const stats = managed.bus.getHandler<StatsHandler>('stats');
             if (stats?.getStatsStartedAt() && !statsHangTimer) {
               this.logger.info(`[${label}] Stats summary detected — starting 30s grace timer for process exit`);
@@ -609,6 +598,14 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         managed.on('exit', (code: number | null, signal: string | null) => {
           if (timeoutHandle) { clearTimeout(timeoutHandle); }
           if (statsHangTimer) { clearTimeout(statsHangTimer); }
+          if (pressureKillTimer) { clearTimeout(pressureKillTimer); }
+
+          // Log bus diagnostics on every exit (success or failure) for observability
+          const diag = managed.diagnostics();
+          this.logger.info(`[${label}] Bus diagnostics: handlers=[${diag.handlerNames.join(', ')}], lines=${JSON.stringify(diag.busMetrics.linesBySource)}, invocations=${diag.busMetrics.handlerInvocations}, errors=${diag.busMetrics.handlerErrors}`);
+          for (const tm of diag.tailerMetrics) {
+            this.logger.info(`[${label}] Tailer: file=${tm.currentFile ?? '(none)'}, bytes=${tm.bytesRead}, lines=${tm.linesFed}, polls=${tm.pollReadsPerformed}, watchEvents=${tm.watchEventsReceived}, errors=${tm.readErrors}`);
+          }
 
           const sessionIdHandler = managed.bus.getHandler<SessionIdHandler>('session-id');
           const taskCompleteHandler = managed.bus.getHandler<TaskCompleteHandler>('task-complete');
@@ -621,6 +618,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
           const effectiveCode = (code === null && signal === null && sawTaskComplete) ? 0
             // Stats-hang kill: the work completed, only the process hung — treat as success
             : (wasKilledByStatsHang && statsHandler?.getMetrics()) ? 0
+            // Pressure-kill: agent ignored sentinel → treat as success so commit/reshape can proceed
+            : wasKilledByPressure ? 0
             : code;
           const metrics = statsHandler?.getMetrics();
           if (metrics && !metrics.tokenUsage && metrics.modelBreakdown?.length) {
@@ -653,6 +652,8 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
               this.logger.info(`[${label}] Copilot CLI completed (exit code null coerced to 0 — task completion marker was present)`);
             } else if (wasKilledByStatsHang) {
               this.logger.warn(`[${label}] Copilot CLI completed (stats-hang force-kill → treated as success since work finished)`);
+            } else if (wasKilledByPressure) {
+              this.logger.warn(`[${label}] Copilot CLI force-killed due to context pressure escalation (agent ignored sentinel) — treating as success so checkpoint reshape can proceed`);
             } else {
               this.logger.info(`[${label}] Copilot CLI completed successfully`);
             }
@@ -663,6 +664,7 @@ ${instructions ? `## Additional Context\n\n${instructions}` : ''}
         managed.on('error', (err: Error) => {
           if (timeoutHandle) { clearTimeout(timeoutHandle); }
           if (statsHangTimer) { clearTimeout(statsHangTimer); }
+          if (pressureKillTimer) { clearTimeout(pressureKillTimer); }
           this.logger.error(`[${label}] Copilot CLI error: ${err.message}`);
           this.logger.error(`[${label}] Process diagnostics: ${JSON.stringify(managed.diagnostics())}`);
           resolve({ success: false, error: err.message });
@@ -896,7 +898,11 @@ export function buildCommand(
 
   if (sharePath) { cmdArgs.push('--share', sharePath); }
   if (sessionId) { cmdArgs.push('--resume', sessionId); }
-  if (maxTurns && maxTurns > 0) { cmdArgs.push('--max-turns', String(maxTurns)); }
+  // --max-turns was removed in CLI v1.0.31 — skip if not supported
+  // TODO: version-gate via getCachedModels().capabilities when buildCommand gains access
+  if (maxTurns && maxTurns > 0) {
+    log.warn(`--max-turns ${maxTurns} requested but may not be supported by CLI v1.0.31+. Skipping.`);
+  }
   if (effort) { cmdArgs.push('--effort', effort); }
 
   const commandString = `copilot ${cmdArgs.map(a => a.includes(' ') ? JSON.stringify(a) : a).join(' ')}`;

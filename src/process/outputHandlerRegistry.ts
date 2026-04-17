@@ -12,6 +12,9 @@
 
 import type { IOutputHandlerRegistry, IOutputHandlerFactory, HandlerContext } from '../interfaces/IOutputHandlerRegistry';
 import type { IOutputHandler } from '../interfaces/IOutputHandler';
+import { Logger } from '../core/logger';
+
+const log = Logger.for('process-output-bus');
 
 export class OutputHandlerRegistry implements IOutputHandlerRegistry {
   private _factories = new Map<string, IOutputHandlerFactory>();
@@ -22,13 +25,26 @@ export class OutputHandlerRegistry implements IOutputHandlerRegistry {
 
   createHandlers(context: HandlerContext): IOutputHandler[] {
     const handlers: IOutputHandler[] = [];
+    const skipped: string[] = [];
     for (const factory of this._factories.values()) {
       if (factory.processFilter.includes('*') ||
           factory.processFilter.includes(context.processLabel)) {
-        const handler = factory.create(context);
-        if (handler) { handlers.push(handler); }
+        try {
+          const handler = factory.create(context);
+          if (handler) { handlers.push(handler); }
+          else { skipped.push(factory.name); }
+        } catch (err) {
+          log.error('Handler factory threw', { factory: factory.name, error: String(err) });
+        }
       }
     }
+    log.info('Handlers created', {
+      label: context.processLabel,
+      planId: context.planId ?? '(none)',
+      nodeId: context.nodeId ?? '(none)',
+      created: handlers.map(h => h.name).join(', ') || '(none)',
+      skipped: skipped.join(', ') || '(none)',
+    });
     return handlers;
   }
 }

@@ -273,7 +273,18 @@ export class LogFileTailer {
 
     if (files.length === 0) { return; }
 
-    const newest = path.join(dirPath, files[0].name);
+    // When PID is known, pick only the file matching this process (e.g. process-{ts}-{pid}.log).
+    // This prevents replaying stale logs from previous attempts sharing the same worktree.
+    let target: { name: string; mtime: number } | undefined;
+    if (this._config.pid) {
+      const pidSuffix = `-${this._config.pid}.log`;
+      target = files.find(f => f.name.endsWith(pidSuffix));
+      if (!target) { return; } // CLI hasn't created its log file yet — wait for next poll
+    } else {
+      target = files[0]; // fallback: newest file
+    }
+
+    const newest = path.join(dirPath, target.name);
     if (newest === this._currentFile) { return; }
 
     // Flush remaining bytes from old file before switching

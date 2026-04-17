@@ -154,7 +154,7 @@ export async function handleGetJobAttempts(args: any, ctx: PlanHandlerContext): 
   
   // Get specific attempt or all attempts
   if (args.attemptNumber) {
-    const attempt = ctx.PlanRunner.getNodeAttempt(args.planId, jobIdValue, args.attemptNumber);
+    const attempt = ctx.PlanRunner.getNodeAttempt(args.planId, node.id, args.attemptNumber);
     if (!attempt) {
       return errorResult(`Attempt ${args.attemptNumber} not found`);
     }
@@ -169,7 +169,7 @@ export async function handleGetJobAttempts(args: any, ctx: PlanHandlerContext): 
   }
   
   // Return all attempts
-  const attempts = ctx.PlanRunner.getNodeAttempts(args.planId, jobIdValue);
+  const attempts = ctx.PlanRunner.getNodeAttempts(args.planId, node.id);
   
   // Optionally strip logs for compact response
   const formattedAttempts = args.includeLogs 

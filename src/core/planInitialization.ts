@@ -137,6 +137,11 @@ export async function initializePlanRunner(
   planRunner.setCheckpointManager(new DefaultCheckpointManager(fileSystem));
   planRunner.setJobSplitter(new DefaultJobSplitter(configProvider));
 
+  // Also expose the checkpoint manager to the global pressure registry so the
+  // ContextPressureHandler can write the sentinel when level transitions to critical.
+  const { setCheckpointManager: setGlobalCheckpointManager } = await import('../plan/analysis/pressureMonitorRegistry');
+  setGlobalCheckpointManager(new DefaultCheckpointManager(fileSystem));
+
   // Register PlanRecovery service now that PlanRunner exists
   // (IPlanRecovery needs IPlanRunner, so it must be registered after PlanRunner is created)
   const { PlanRecovery } = await import('../plan/planRecovery');

@@ -144,31 +144,56 @@ export class ContextPressureCard extends SubscribableControl {
     const el = this.getElement(this._elementId);
     if (!el) { return; }
 
-    if (!data || !data.maxPromptTokens) {
+    if (!data) {
       el.style.display = 'none';
       return;
     }
 
-    const pct = Math.round((data.currentInputTokens / data.maxPromptTokens) * 100);
-    const clampedPct = Math.min(pct, 100);
-    const risk = computeSplitRisk(data);
-    const growth = computeGrowthRate(data.tokenHistory);
-    const color = barColorVar(data.level);
-
-    let detailsHtml = `<span>input_tokens: ${formatTokens(data.currentInputTokens)}</span>`;
-    if (growth > 0) {
-      detailsHtml += `<span>~${formatTokens(growth)}/turn</span>`;
-    }
-    if (risk.turnsRemaining < Infinity) {
-      detailsHtml += `<span>~${risk.turnsRemaining} turns remaining</span>`;
+    // Show card when we have either pressure data (maxPromptTokens) or model usage data
+    const hasTokenData = !!data.maxPromptTokens;
+    const hasModelUsage = data.modelBreakdown && data.modelBreakdown.length > 0;
+    if (!hasTokenData && !hasModelUsage) {
+      el.style.display = 'none';
+      return;
     }
 
-    let bannerHtml = '';
-    if (data.level === 'critical') {
-      bannerHtml = `<div class="context-pressure-checkpoint-banner">
-        ⑃ Agent will checkpoint on next turn boundary.
-        Remaining work will be split into sub-jobs.
-      </div>`;
+    const maxTokens = data.maxPromptTokens || data.maxContextWindow || 0;
+
+    // Pressure bar section (only when we have token limits)
+    let pressureBarHtml = '';
+    if (maxTokens > 0 && data.currentInputTokens > 0) {
+      const pct = Math.round((data.currentInputTokens / maxTokens) * 100);
+      const clampedPct = Math.min(pct, 100);
+      const risk = computeSplitRisk(data);
+      const growth = computeGrowthRate(data.tokenHistory);
+      const color = barColorVar(data.level);
+
+      let detailsHtml = `<span>input_tokens: ${formatTokens(data.currentInputTokens)}</span>`;
+      if (growth > 0) {
+        detailsHtml += `<span>~${formatTokens(growth)}/turn</span>`;
+      }
+      if (risk.turnsRemaining < Infinity) {
+        detailsHtml += `<span>~${risk.turnsRemaining} turns remaining</span>`;
+      }
+
+      let bannerHtml = '';
+      if (data.level === 'critical') {
+        bannerHtml = `<div class="context-pressure-checkpoint-banner">
+          ⑃ Agent will checkpoint on next turn boundary.
+          Remaining work will be split into sub-jobs.
+        </div>`;
+      }
+
+      pressureBarHtml = `
+        <div class="context-pressure-bar-container">
+          <div class="context-pressure-bar context-pressure-${data.level}" style="width:${clampedPct}%;background:${color}"></div>
+        </div>
+        <div class="context-pressure-stats">${pct}% of ${formatTokens(maxTokens)}</div>
+        <div class="context-pressure-details">${detailsHtml}</div>
+        <div class="context-pressure-status context-pressure-${data.level}">
+          Status: ${statusIcon(data.level)} ${capitalize(data.level)}${risk.label !== 'None' ? ` · Split risk: ${risk.label}` : ''}
+        </div>
+        ${bannerHtml}`;
     }
 
     // Real-time model token breakdown
@@ -191,15 +216,7 @@ export class ContextPressureCard extends SubscribableControl {
     if (parentSection) { (parentSection as HTMLElement).style.display = ''; }
     el.innerHTML = `<div class="context-pressure-section">
       <div class="context-pressure-label">🧠 Context Window</div>
-      <div class="context-pressure-bar-container">
-        <div class="context-pressure-bar context-pressure-${data.level}" style="width:${clampedPct}%;background:${color}"></div>
-      </div>
-      <div class="context-pressure-stats">${pct}% of ${formatTokens(data.maxPromptTokens)}</div>
-      <div class="context-pressure-details">${detailsHtml}</div>
-      <div class="context-pressure-status context-pressure-${data.level}">
-        Status: ${statusIcon(data.level)} ${capitalize(data.level)}${risk.label !== 'None' ? ` · Split risk: ${risk.label}` : ''}
-      </div>
-      ${bannerHtml}
+      ${pressureBarHtml}
       ${modelHtml}
     </div>`;
 

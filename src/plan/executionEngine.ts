@@ -194,7 +194,18 @@ export class JobExecutionEngine {
       worktreePath: nodeState.worktreePath,
       baseCommit: nodeState.baseCommit,
     };
-    nodeState.attemptHistory = [...(nodeState.attemptHistory || []), placeholder];
+    // Remove any stale "running" placeholders left behind by crashed attempts
+    // (e.g. extension reload killed the process before recordCompletedAttempt ran).
+    // Mark them as failed so the history stays accurate.
+    const existing = nodeState.attemptHistory || [];
+    for (const att of existing) {
+      if (att.status === 'running') {
+        att.status = 'failed';
+        att.error = 'Process killed (extension reload or crash)';
+        if (!att.endedAt) { att.endedAt = attemptStartedAt; }
+      }
+    }
+    nodeState.attemptHistory = [...existing, placeholder];
   }
 
   /**
@@ -312,12 +323,20 @@ export class JobExecutionEngine {
       this.log.debug(`Setting up worktree for job ${node.name} at ${worktreePath} from ${baseCommitish}`);
       let timing: Awaited<ReturnType<typeof this.git.worktrees.createOrReuseDetached>>;
       try {
+        // When worktreeInit is configured, skip the default node_modules symlink —
+        // the init commands (npm ci, etc.) will install deps into the worktree's own
+        // node_modules. Symlinking would cause concurrent write conflicts (EPERM/EBUSY).
+        const hasWorktreeInit = plan.spec.worktreeInit && plan.spec.worktreeInit.length > 0;
+        const symlinkDirs = hasWorktreeInit
+          ? (plan.spec.additionalSymlinkDirs || []) // Only user-specified extra dirs, NOT node_modules
+          : undefined; // undefined = use defaults (includes node_modules)
         timing = await this.git.worktrees.createOrReuseDetached(
           plan.repoPath,
           worktreePath,
           baseCommitish,
           s => this.log.debug(s),
-          plan.spec.additionalSymlinkDirs
+          symlinkDirs,
+          hasWorktreeInit // skipDefaultSymlinks when worktreeInit is set
         );
       } catch (wtError: any) {
         // Worktree creation is part of FI phase - log and set correct phase
@@ -584,6 +603,7 @@ export class JobExecutionEngine {
             workUsed: await resolveSpec('work'),
             metrics: nodeState.metrics,
             phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
+            contextPressureSnapshot: nodeState.contextPressureSnapshot,
           };
           this.recordCompletedAttempt(nodeState, failedAttempt, node.id);
           
@@ -595,7 +615,7 @@ export class JobExecutionEngine {
           // and resuming from that phase. Earlier phases that passed are
           // skipped; later phases (including commit) run normally.
           const failedPhase = result.failedPhase || 'work';
-          const isHealablePhase = ['prechecks', 'work', 'postchecks'].includes(failedPhase);
+          const isHealablePhase = ['setup', 'prechecks', 'work', 'postchecks'].includes(failedPhase);
           // Resolve the failed phase's work spec: prefer inline, fall back to disk (finalized plans)
           const failedWorkSpecInline = failedPhase === 'prechecks' ? node.prechecks
             : failedPhase === 'postchecks' ? node.postchecks
@@ -687,8 +707,13 @@ export class JobExecutionEngine {
               this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-RETRY: AGENT INTERRUPTED, RETRYING ==========', nodeState.attempts);
               this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" agent was externally killed. Retrying same agent.`, nodeState.attempts);
               
-              // Reset state for the retry attempt (do NOT increment attempts — auto-retries
-              // are sub-attempts of the current attempt, not new user-visible attempts)
+              // Increment attempt counter so auto-heal retries get unique attempt numbers
+              // in the UI history (they appear as full entries, not sub-attempts).
+              await this.incrementAttempt(plan, node.id, nodeState);
+              attemptStartedAt = Date.now();
+              this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
+
+              // Reset state for the retry attempt
               nodeState.error = undefined;
               // nodeState.startedAt is set-once — each attempt tracks its own startedAt in AttemptRecord
 
@@ -855,6 +880,11 @@ export class JobExecutionEngine {
             this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', '========== AUTO-HEAL: AI-ASSISTED FIX ATTEMPT ==========', nodeState.attempts);
             this.execLog(plan.id, node.id, failedPhase as ExecutionPhase, 'info', `Phase "${failedPhase}" failed. Delegating to Copilot agent to diagnose and fix.`, nodeState.attempts);
             
+            // Increment attempt counter so auto-heal gets a unique attempt number in the UI
+            await this.incrementAttempt(plan, node.id, nodeState);
+            attemptStartedAt = Date.now();
+            this.recordRunningAttempt(nodeState, attemptStartedAt, 'auto-heal');
+
             // Gather context the agent needs to diagnose and fix the failure:
             // 1. The original command that was run
             // 2. The full execution logs (stdout/stderr) from the failed phase
@@ -1361,6 +1391,7 @@ export class JobExecutionEngine {
           workUsed: await resolveSpec('work'),
           metrics: nodeState.metrics,
           phaseMetrics: nodeState.phaseMetrics ? { ...nodeState.phaseMetrics } : undefined,
+          contextPressureSnapshot: nodeState.contextPressureSnapshot,
         };
         this.recordCompletedAttempt(nodeState, successAttempt, node.id);
         
@@ -1503,11 +1534,14 @@ export class JobExecutionEngine {
               this.state.events.emit('planReshaped', plan.id);
 
               // Store checkpoint metadata on nodeState
-              const snapshotPressure = nodeState.contextPressureSnapshot?.maxPromptTokens
-                ? nodeState.contextPressureSnapshot.currentInputTokens / nodeState.contextPressureSnapshot.maxPromptTokens
+              const snap = nodeState.contextPressureSnapshot;
+              const snapshotPressure = snap?.maxPromptTokens
+                ? snap.currentInputTokens / snap.maxPromptTokens
                 : 0;
               nodeState.contextPressureCheckpoint = {
                 pressure: snapshotPressure,
+                tokensConsumed: snap?.currentInputTokens,
+                maxTokens: snap?.maxPromptTokens,
                 subJobCount: chunks.length,
                 subJobIds: subJobProducerIds,
                 fanInJobId: fanInSpec.producerId,

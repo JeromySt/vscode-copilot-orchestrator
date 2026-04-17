@@ -463,6 +463,17 @@ export interface AttemptRecord {
   /** Per-phase AI usage metrics breakdown */
   phaseMetrics?: Partial<Record<'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup', CopilotUsageMetrics>>;
 
+  /** Context pressure snapshot at end of this attempt (persisted for UI) */
+  contextPressureSnapshot?: {
+    level: string;
+    currentInputTokens: number;
+    maxPromptTokens?: number;
+    compactionDetected: boolean;
+    modelBreakdown?: Array<{ model: string; inputTokens: number; outputTokens: number; cachedTokens: number; turns: number }>;
+    totalTurns?: number;
+    turnsPerSecond?: number;
+  };
+
   /**
    * Attempt-level state history.
    * Tracks transitions: scheduled → running → succeeded/failed.
