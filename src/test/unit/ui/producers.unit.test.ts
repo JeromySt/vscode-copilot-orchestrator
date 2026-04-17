@@ -469,14 +469,14 @@ suite('computeCurrentPhase', () => {
   });
 
   test('returns first pending phase when none running', () => {
-    const state = makeState({ stepStatuses: { 'merge-fi': 'success', prechecks: 'success' } });
+    const state = makeState({ stepStatuses: { 'merge-fi': 'success', setup: 'success', prechecks: 'success' } });
     assert.strictEqual(computeCurrentPhase(state), 'work');
   });
 
   test('returns undefined when all phases complete', () => {
     const state = makeState({
       stepStatuses: {
-        'merge-fi': 'success', prechecks: 'success', work: 'success',
+        'merge-fi': 'success', setup: 'success', prechecks: 'success', work: 'success',
         commit: 'success', postchecks: 'success', 'merge-ri': 'success',
       },
     });

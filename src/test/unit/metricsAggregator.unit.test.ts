@@ -300,8 +300,8 @@ suite('metricsAggregator', () => {
 			});
 
 			const result = getNodeMetrics(state);
-			// When attemptHistory exists, state.metrics is ignored (even if attemptHistory has no metrics)
-			assert.strictEqual(result, undefined);
+			// Fallback: when attemptHistory has no metrics, state.metrics is used as the fallback source
+			assert.deepStrictEqual(result, state.metrics);
 		});
 
 		test('prevents double-counting after JSON deserialization (separate object instances)', () => {

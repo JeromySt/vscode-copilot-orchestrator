@@ -381,7 +381,9 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.commandString.includes('--max-turns 5'));
+      // --max-turns was removed from CLI v1.0.31+ — buildCommand now logs a warning instead
+      assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/--max-turns.*may not be supported/));
+      assert.ok(!cmd.commandString.includes('--max-turns'));
     });
 
     test('should not add maxTurns if zero', () => {
@@ -437,7 +439,8 @@ suite('copilotCliRunner', () => {
       assert.ok(cmd.commandString.includes(`--log-dir ${q(testLogDir)}`));
       assert.ok(cmd.commandString.includes(`--share ${q(testSharePath)}`));
       assert.ok(cmd.commandString.includes('--resume session-123'));
-      assert.ok(cmd.commandString.includes('--max-turns 10'));
+      // --max-turns removed from CLI v1.0.31+ — no longer in commandString
+      assert.ok(!cmd.commandString.includes('--max-turns'));
     });
 
     test('should log error if cwd does not exist', () => {
