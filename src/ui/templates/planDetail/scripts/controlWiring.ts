@@ -162,6 +162,7 @@ export function renderControlWiring(data: PlanScriptsData): string {
     // Route postMessage from extension into EventBus topics
     window.addEventListener('message', function(event) {
       var msg = event.data;
+      if (!msg || typeof msg.type !== 'string') { return; }
       if (msg.type === 'allProcessStats') {
         bus.emit(Topics.PROCESS_STATS, msg);
       } else if (msg.type === 'statusUpdate') {

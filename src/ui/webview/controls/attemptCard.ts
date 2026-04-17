@@ -363,7 +363,6 @@ export class AttemptCard extends SubscribableControl {
 
     // Determine if we need a full rebuild or can do differential updates
     const sorted = attempts.slice().sort((a, b) => b.attemptNumber - a.attemptNumber);
-    const currentAttemptNums = new Set(sorted.map(a => a.attemptNumber));
     const needsFullRebuild = sorted.some(a => !this._renderedAttempts.has(a.attemptNumber));
 
     if (needsFullRebuild) {
@@ -645,7 +644,6 @@ export class AttemptCard extends SubscribableControl {
 
     // ── Metrics section: update if metrics arrived ──
     if (att.metricsHtml && (!prev || !prev.metricsHtml)) {
-      let metricsSection = card.querySelector('.attempt-section .attempt-section-title');
       // Find existing metrics section or create one
       let found = false;
       card.querySelectorAll('.attempt-section-title').forEach(t => {

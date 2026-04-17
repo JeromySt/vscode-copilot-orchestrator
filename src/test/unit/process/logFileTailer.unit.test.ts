@@ -415,7 +415,7 @@ suite('LogFileTailer', () => {
       fs.writeFileSync(filePath, '');
 
       const bus = new ProcessOutputBus();
-      const { handler, lines } = makeCollector('watch-src');
+      const { handler } = makeCollector('watch-src');
       bus.register(handler);
 
       const config: LogSourceConfig = {

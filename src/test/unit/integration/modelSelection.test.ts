@@ -33,11 +33,6 @@ function makeTmpDir(): string {
   return dir;
 }
 
-const mockGitOps = {
-  branches: { currentOrNull: async () => 'main', isDefaultBranch: async () => false, exists: async () => false, create: async () => {}, current: async () => 'main' },
-  worktrees: {}, merge: {}, repository: {}, orchestrator: {}, gitignore: { ensureGitignoreEntries: async () => {} }, command: {} as any,
-};
-
 const HELP_OUTPUT = `Usage: copilot [options]
 
 Options:
@@ -63,23 +58,6 @@ function fakeProc(exitCode: number, stdout = ''): ChildProcess {
   return proc as ChildProcess;
 }
 
-function fakeSpawnProc(exitCode: number | null = 0, stdoutData = '', stderrData = ''): ChildProcess {
-  const proc = new EventEmitter() as any;
-  proc.pid = 12345;
-  proc.kill = sinon.stub();
-  proc.stdout = new EventEmitter();
-  proc.stderr = new EventEmitter();
-  proc.stdin = null;
-  setTimeout(() => {
-    if (stdoutData) {proc.stdout.emit('data', Buffer.from(stdoutData));}
-    if (stderrData) {proc.stderr.emit('data', Buffer.from(stderrData));}
-    setTimeout(() => {
-      proc.emit('exit', exitCode);
-      proc.emit('close', exitCode);
-    }, 10);
-  }, 10);
-  return proc as ChildProcess;
-}
 
 suite('Model Selection Integration', () => {
   let quiet: { restore: () => void };
