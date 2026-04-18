@@ -10,6 +10,9 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { installOrchestratorHooks, uninstallOrchestratorHooks } from '../../../agent/hookInstaller';
+import { DefaultFileSystem } from '../../../core/defaultFileSystem';
+
+const fsx = new DefaultFileSystem();
 
 suite('hookInstaller', () => {
     let tmpRoot: string;
@@ -23,7 +26,7 @@ suite('hookInstaller', () => {
     });
 
     test('installOrchestratorHooks writes 5 hook files into .github/hooks', () => {
-        const result = installOrchestratorHooks(tmpRoot);
+        const result = installOrchestratorHooks(tmpRoot, fsx);
         assert.ok(result.configPath.length > 0, 'configPath should be set');
         assert.strictEqual(result.scriptPaths.length, 4, 'should write 4 script files');
 
@@ -36,7 +39,7 @@ suite('hookInstaller', () => {
     });
 
     test('orchestrator-hooks.json declares preToolUse and postToolUse', () => {
-        installOrchestratorHooks(tmpRoot);
+        installOrchestratorHooks(tmpRoot, fsx);
         const cfgPath = path.join(tmpRoot, '.github', 'hooks', 'orchestrator-hooks.json');
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
         assert.strictEqual(cfg.version, 1);
@@ -53,17 +56,17 @@ suite('hookInstaller', () => {
     });
 
     test('installOrchestratorHooks is idempotent (overwrites)', () => {
-        installOrchestratorHooks(tmpRoot);
+        installOrchestratorHooks(tmpRoot, fsx);
         const cfgPath = path.join(tmpRoot, '.github', 'hooks', 'orchestrator-hooks.json');
         // Tamper
         fs.writeFileSync(cfgPath, '{"corrupt": true}', 'utf8');
-        installOrchestratorHooks(tmpRoot);
+        installOrchestratorHooks(tmpRoot, fsx);
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
         assert.strictEqual(cfg.version, 1, 'second install should overwrite');
     });
 
     test('preToolUse script body references the sentinel and manifest paths', () => {
-        installOrchestratorHooks(tmpRoot);
+        installOrchestratorHooks(tmpRoot, fsx);
         const sh = fs.readFileSync(path.join(tmpRoot, '.github', 'hooks', 'orchestrator-pressure-gate.sh'), 'utf8');
         const ps1 = fs.readFileSync(path.join(tmpRoot, '.github', 'hooks', 'orchestrator-pressure-gate.ps1'), 'utf8');
         for (const body of [sh, ps1]) {
@@ -75,10 +78,10 @@ suite('hookInstaller', () => {
     });
 
     test('uninstallOrchestratorHooks removes all hook files', () => {
-        installOrchestratorHooks(tmpRoot);
+        installOrchestratorHooks(tmpRoot, fsx);
         const hooksDir = path.join(tmpRoot, '.github', 'hooks');
         assert.ok(fs.existsSync(path.join(hooksDir, 'orchestrator-hooks.json')));
-        uninstallOrchestratorHooks(tmpRoot);
+        uninstallOrchestratorHooks(tmpRoot, fsx);
         for (const name of [
             'orchestrator-hooks.json',
             'orchestrator-pressure-gate.ps1',
@@ -92,7 +95,7 @@ suite('hookInstaller', () => {
 
     test('uninstallOrchestratorHooks is safe when nothing is installed', () => {
         // Should not throw even though .github/hooks does not exist
-        assert.doesNotThrow(() => uninstallOrchestratorHooks(tmpRoot));
+        assert.doesNotThrow(() => uninstallOrchestratorHooks(tmpRoot, fsx));
     });
 
     test('installOrchestratorHooks accepts an optional logger', () => {
@@ -103,7 +106,7 @@ suite('hookInstaller', () => {
             error: (m: string) => logs.push(`error:${m}`),
             info: (m: string) => logs.push(`info:${m}`),
         };
-        const result = installOrchestratorHooks(tmpRoot, logger as never);
+        const result = installOrchestratorHooks(tmpRoot, fsx, logger as never);
         assert.ok(result.configPath.length > 0);
         // At least one debug log about installation should be emitted
         assert.ok(logs.some(l => l.startsWith('debug:') && l.includes('Installed orchestrator hooks')), 'should log installation');
