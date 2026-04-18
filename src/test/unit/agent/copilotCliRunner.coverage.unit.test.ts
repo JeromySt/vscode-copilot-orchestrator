@@ -316,7 +316,7 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, urlSanitizer: sanitizerStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://example.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://example.com'));
       assert.ok(cmd.commandString.includes('*.github.com'));
       assert.ok(!cmd.commandString.includes('bad-url'));
       assert.ok((mockLogger.info as sinon.SinonStub).calledWithMatch(/2 of 3 passed validation/));
@@ -381,7 +381,9 @@ suite('copilotCliRunner', () => {
         { logger: mockLogger, existsSync: existsStub, fallbackCwd: testFallback }
       );
 
-      assert.ok(cmd.commandString.includes('--max-turns 5'));
+      // --max-turns was removed from CLI v1.0.31+ — buildCommand now logs a warning instead
+      assert.ok((mockLogger.warn as sinon.SinonStub).calledWithMatch(/--max-turns.*may not be supported/));
+      assert.ok(!cmd.commandString.includes('--max-turns'));
     });
 
     test('should not add maxTurns if zero', () => {
@@ -431,13 +433,14 @@ suite('copilotCliRunner', () => {
       assert.ok(cmd.commandString.includes('-p "complex task"'));
       assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testCwd))}`));
       assert.ok(cmd.commandString.includes(`--add-dir ${q(path.resolve(testFolder1))}`));
-      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.indexOf('https://api.example.com') !== -1);
+      assert.ok(cmd.commandString.includes('--allow-url') && cmd.commandString.includes('https://api.example.com'));
       assert.ok(cmd.commandString.includes(`--config-dir ${q(testConfig)}`));
       assert.ok(cmd.commandString.includes('--model gpt-5'));
       assert.ok(cmd.commandString.includes(`--log-dir ${q(testLogDir)}`));
       assert.ok(cmd.commandString.includes(`--share ${q(testSharePath)}`));
       assert.ok(cmd.commandString.includes('--resume session-123'));
-      assert.ok(cmd.commandString.includes('--max-turns 10'));
+      // --max-turns removed from CLI v1.0.31+ — no longer in commandString
+      assert.ok(!cmd.commandString.includes('--max-turns'));
     });
 
     test('should log error if cwd does not exist', () => {

@@ -9,8 +9,6 @@
 
 import * as vscode from 'vscode';
 import { PlanRunner, PlanInstance, PlanStatus, NodeStatus } from '../plan';
-import { planDetailPanel } from './panels/planDetailPanel';
-import { NodeDetailPanel } from './panels/nodeDetailPanel';
 import type { IPulseEmitter, Disposable as PulseDisposable } from '../interfaces/IPulseEmitter';
 import type { IPRLifecycleManager } from '../interfaces/IPRLifecycleManager';
 import type { ManagedPR } from '../plan/types/prLifecycle';
@@ -50,7 +48,7 @@ import { ReleaseListProducer } from './producers/releaseListProducer';
  * vscode.window.registerWebviewViewProvider(plansViewProvider.viewType, provider);
  * ```
  */
-export class plansViewProvider implements vscode.WebviewViewProvider {
+export class plansViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   /** View identifier used to register this provider with VS Code. */
   public static readonly viewType = 'orchestrator.plansView';
   
@@ -95,6 +93,29 @@ export class plansViewProvider implements vscode.WebviewViewProvider {
     //
     // No direct PlanRunner, PRLifecycleManager, or ReleaseManager event
     // listeners needed for data delivery.
+  }
+
+  /**
+   * Tear down all subscriptions and registered producers. Called by VS Code
+   * when the extension is deactivated (the provider is pushed onto
+   * `context.subscriptions`). Producers that attached EventEmitter listeners
+   * (e.g. ReleaseListProducer, ReleaseStateProducer) will detach them via
+   * their own `dispose()` hooks, preventing leaks across extension reloads.
+   */
+  dispose(): void {
+    if (this._pulseSubscription) {
+      this._pulseSubscription.dispose();
+      this._pulseSubscription = undefined;
+    }
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = undefined;
+    }
+    if (this._capacityDebounceTimer) {
+      clearTimeout(this._capacityDebounceTimer);
+      this._capacityDebounceTimer = undefined;
+    }
+    this._subscriptionManager.dispose();
   }
   
   /**

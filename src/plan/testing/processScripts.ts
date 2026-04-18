@@ -190,26 +190,45 @@ export function contextPressureLogLines(level: 'normal' | 'elevated' | 'critical
     ],
   };
 
+  // Model limits: emit as pretty-printed JSON across multiple lines to match
+  // the real Copilot CLI debug-log format. Each field lands on its own line,
+  // which exercises the handler's per-line state tracking.
   const lines: ScriptedLine[] = [
-    {
-      text: `{"max_prompt_tokens": ${maxPrompt}, "max_context_window_tokens": ${maxWindow}}`,
-      delayMs: longRunning ? 2000 : 200,
-    },
+    { text: '  "capabilities": {', delayMs: longRunning ? 1000 : 100 },
+    { text: '    "family": "claude-sonnet-4.6",', delayMs: 50 },
+    { text: '    "limits": {', delayMs: 50 },
+    { text: `      "max_context_window_tokens": ${maxWindow},`, delayMs: 50 },
+    { text: '      "max_output_tokens": 32000,', delayMs: 50 },
+    { text: `      "max_prompt_tokens": ${maxPrompt}`, delayMs: longRunning ? 1000 : 200 },
+    { text: '    }', delayMs: 50 },
+    { text: '  },', delayMs: 50 },
   ];
 
   for (const usage of usageByLevel[level]) {
-    // Include model name so the handler can extract it from the window
-    lines.push({
-      text: `{"kind": "assistant_usage", "model": "claude-sonnet-4", "input_tokens": ${usage.input}, "output_tokens": ${usage.output}, "cache_read_tokens": ${Math.round(usage.input * 0.85)}}`,
-      delayMs: usage.delayMs,
-    });
+    // Pretty-printed `metrics` block: model name, input_tokens, output_tokens,
+    // and cache_read_tokens each on their own line — matches real CLI output.
+    lines.push(
+      { text: '{', delayMs: usage.delayMs },
+      { text: '  "kind": "assistant_usage",', delayMs: 20 },
+      { text: '  "model": "claude-sonnet-4",', delayMs: 20 },
+      { text: '  "metrics": {', delayMs: 20 },
+      { text: `    "input_tokens": ${usage.input},`, delayMs: 20 },
+      { text: `    "input_tokens_uncached": ${usage.input},`, delayMs: 20 },
+      { text: `    "output_tokens": ${usage.output},`, delayMs: 20 },
+      { text: `    "cache_read_tokens": ${Math.round(usage.input * 0.85)},`, delayMs: 20 },
+      { text: '    "cache_write_tokens": 0', delayMs: 20 },
+      { text: '  }', delayMs: 20 },
+      { text: '}', delayMs: 20 },
+    );
   }
 
   if (level === 'critical') {
-    lines.push({
-      text: '{"event": "context_truncation", "truncateBasedOn": "tokenCount"}',
-      delayMs: 300,
-    });
+    lines.push(
+      { text: '{', delayMs: 200 },
+      { text: '  "event": "context_truncation",', delayMs: 20 },
+      { text: '  "truncateBasedOn": "tokenCount"', delayMs: 20 },
+      { text: '}', delayMs: 50 },
+    );
   }
 
   return lines;

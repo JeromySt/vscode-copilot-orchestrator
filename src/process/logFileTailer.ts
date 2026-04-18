@@ -102,18 +102,28 @@ export class LogFileTailer {
    * Returns the file descriptor or undefined if the file is inaccessible or unsafe.
    *
    * Security: path is validated against _safeBaseDir (path traversal prevention),
-   * opened O_RDONLY (no creation/write), and the tailer only reads log files produced
-   * by the Copilot CLI in worktree-scoped directories — never user-supplied paths.
+   * opened O_RDONLY (no creation/write), symlinks rejected via lstatSync() before
+   * opening (cross-platform alternative to O_NOFOLLOW), and the tailer only reads
+   * log files produced by the Copilot CLI in worktree-scoped directories — never
+   * user-supplied paths.
    */
   private _safeOpenReadOnly(filePath: string): number | undefined {
     if (!this._isSafePath(filePath)) {
       log.debug('Rejected file outside safe base dir', { file: filePath, base: this._safeBaseDir });
       return undefined;
     }
+    // CodeQL: js/insecure-temporary-file — false positive: file opened O_RDONLY (no creation
+    // or write), path validated against _safeBaseDir via _isSafePath(), and lstatSync() below
+    // rejects symlinks before the fd is opened, preventing symlink-based traversal attacks.
     try {
       // Path validated above — reconstruct from safe base so static analysis can verify containment.
       const resolved = path.resolve(filePath);
       const safePath = path.join(this._safeBaseDir, path.relative(this._safeBaseDir, resolved));
+      // Reject symlinks before opening (cross-platform alternative to O_NOFOLLOW).
+      if (fs.lstatSync(safePath).isSymbolicLink()) {
+        log.debug('Rejected symlink in log path', { file: safePath });
+        return undefined;
+      }
       return fs.openSync(safePath, fs.constants.O_RDONLY);
     } catch {
       return undefined;
@@ -273,7 +283,18 @@ export class LogFileTailer {
 
     if (files.length === 0) { return; }
 
-    const newest = path.join(dirPath, files[0].name);
+    // When PID is known, pick only the file matching this process (e.g. process-{ts}-{pid}.log).
+    // This prevents replaying stale logs from previous attempts sharing the same worktree.
+    let target: { name: string; mtime: number } | undefined;
+    if (this._config.pid) {
+      const pidSuffix = `-${this._config.pid}.log`;
+      target = files.find(f => f.name.endsWith(pidSuffix));
+      if (!target) { return; } // CLI hasn't created its log file yet — wait for next poll
+    } else {
+      target = files[0]; // fallback: newest file
+    }
+
+    const newest = path.join(dirPath, target.name);
     if (newest === this._currentFile) { return; }
 
     // Flush remaining bytes from old file before switching

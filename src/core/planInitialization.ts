@@ -134,8 +134,17 @@ export async function initializePlanRunner(
   const { DefaultJobSplitter } = await import('../plan/analysis/jobSplitter');
   const fileSystem = container.resolve<import('../interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
   const configProvider = container.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
-  planRunner.setCheckpointManager(new DefaultCheckpointManager(fileSystem));
+  // Reuse a single CheckpointManager instance for both the plan runner and the
+  // global pressure registry, so the ContextPressureHandler and the runner observe
+  // the same checkpoint state (avoids divergent behavior between the two paths).
+  const checkpointManager = new DefaultCheckpointManager(fileSystem);
+  planRunner.setCheckpointManager(checkpointManager);
   planRunner.setJobSplitter(new DefaultJobSplitter(configProvider));
+
+  // Also expose the checkpoint manager to the global pressure registry so the
+  // ContextPressureHandler can write the sentinel when level transitions to critical.
+  const { setCheckpointManager: setGlobalCheckpointManager } = await import('../plan/analysis/pressureMonitorRegistry');
+  setGlobalCheckpointManager(checkpointManager);
 
   // Register PlanRecovery service now that PlanRunner exists
   // (IPlanRecovery needs IPlanRunner, so it must be registered after PlanRunner is created)
@@ -335,7 +344,8 @@ export function initializePlansView(
   const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager, releaseManager);
   
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
+    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView),
+    plansView,
   );
 
   // Initialize TreeView for badge functionality - AFTER plan recovery is complete
@@ -374,7 +384,8 @@ export function initializePlansViewWithReleaseManager(
   const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager, releaseManager);
   
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
+    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView),
+    plansView,
   );
 
   // Initialize TreeView for badge functionality - AFTER plan recovery is complete

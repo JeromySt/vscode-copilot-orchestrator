@@ -113,8 +113,11 @@ export function getNodeMetrics(state: NodeExecutionState): CopilotUsageMetrics |
 				allMetrics.push(attempt.metrics);
 			}
 		}
-	} else if (state.metrics) {
-		// Only use state.metrics if there's no attempt history (fallback for legacy data)
+	}
+	
+	// Fallback: use state.metrics if attempt history had no metrics
+	// (e.g., after reload when attempt records are ref-based and metrics aren't inline)
+	if (allMetrics.length === 0 && state.metrics) {
 		allMetrics.push(state.metrics);
 	}
 
@@ -122,7 +125,24 @@ export function getNodeMetrics(state: NodeExecutionState): CopilotUsageMetrics |
 		return undefined;
 	}
 
-	return aggregateMetrics(allMetrics);
+	const result = aggregateMetrics(allMetrics);
+
+	// Enrich with context pressure model breakdown if StatsHandler didn't
+	// capture model data (CLI may not print summary stats to stdout).
+	// The ContextPressureHandler captures per-model tokens from the debug log.
+	if (!result.modelBreakdown || result.modelBreakdown.length === 0) {
+		const snap = state.contextPressureSnapshot;
+		if (snap?.modelBreakdown && snap.modelBreakdown.length > 0) {
+			result.modelBreakdown = snap.modelBreakdown.map(m => ({
+				model: m.model,
+				inputTokens: m.inputTokens,
+				outputTokens: m.outputTokens,
+				cachedTokens: m.cachedTokens,
+			}));
+		}
+	}
+
+	return result;
 }
 
 /**

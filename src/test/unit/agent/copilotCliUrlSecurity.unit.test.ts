@@ -332,7 +332,7 @@ suite('CopilotCliRunner - URL Security', () => {
     // but can be anywhere after that
     assert.ok(cmd.startsWith('copilot -p'),
       'Command should start with copilot and task');
-    assert.ok(cmd.includes('--allow-url') && cmd.indexOf('https://api.example.com') !== -1,
+    assert.ok(cmd.includes('--allow-url') && cmd.includes('https://api.example.com'),
       'Command should include the URL flag');
   });
 
@@ -525,7 +525,7 @@ suite('CopilotCliRunner - URL Security', () => {
         ]
       }).commandString;
 
-      assert.ok(cmd.includes('--allow-url') && cmd.indexOf('https://valid.example.com') !== -1,
+      assert.ok(cmd.includes('--allow-url') && cmd.includes('https://valid.example.com'),
         'Valid URL should be included');
       assert.ok(!cmd.includes('evil.com'), 'Injection attempt should be filtered');
       assert.ok(!cmd.includes('allow-all-urls'), 'Argument injection should be filtered');

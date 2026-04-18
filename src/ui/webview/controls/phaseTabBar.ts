@@ -29,6 +29,7 @@ export interface PhaseTabBarData {
 const DEFAULT_PHASES: PhaseInfo[] = [
   { id: 'all', name: 'Full Log', icon: '📋' },
   { id: 'merge-fi', name: 'Merge FI', icon: '↓' },
+  { id: 'setup', name: 'Setup', icon: '🔧' },
   { id: 'prechecks', name: 'Prechecks', icon: '✓' },
   { id: 'work', name: 'Work', icon: '⚙' },
   { id: 'commit', name: 'Commit', icon: '💾' },

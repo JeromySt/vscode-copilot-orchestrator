@@ -52,6 +52,7 @@ export interface AttemptCardData {
   workUsedHtml?: string;
   prechecksUsedHtml?: string;
   postchecksUsedHtml?: string;
+  setupUsedHtml?: string;
   logs?: string;
   metricsHtml?: string;
   expanded?: boolean;
@@ -287,12 +288,13 @@ export class AttemptCard extends SubscribableControl {
   /** Extract log lines for a specific phase from the full log text. */
   private extractPhaseFromText(text: string, phase: string): string {
     const markers: Record<string, [string, string]> = {
-      'merge-fi': ['FORWARD INTEGRATION', 'FORWARD INTEGRATION'],
+      'merge-fi': ['MERGE-FI SECTION START', 'MERGE-FI SECTION END'],
+      'setup': ['SETUP SECTION START', 'SETUP SECTION END'],
       'prechecks': ['PRECHECKS SECTION START', 'PRECHECKS SECTION END'],
       'work': ['WORK SECTION START', 'WORK SECTION END'],
       'commit': ['COMMIT SECTION START', 'COMMIT SECTION END'],
       'postchecks': ['POSTCHECKS SECTION START', 'POSTCHECKS SECTION END'],
-      'merge-ri': ['REVERSE INTEGRATION', 'REVERSE INTEGRATION'],
+      'merge-ri': ['MERGE-RI SECTION START', 'MERGE-RI SECTION END'],
     };
     const m = markers[phase];
     if (!m) return '';
@@ -309,19 +311,22 @@ export class AttemptCard extends SubscribableControl {
   /** Detect which phase the log content is currently in based on section markers. */
   private detectCurrentPhase(text: string): string {
     const phaseMarkers: Array<[string, string]> = [
-      ['merge-fi', 'FORWARD INTEGRATION'],
+      ['merge-fi', 'MERGE-FI SECTION START'],
+      ['setup', 'SETUP SECTION START'],
       ['prechecks', 'PRECHECKS SECTION START'],
       ['work', 'WORK SECTION START'],
       ['commit', 'COMMIT SECTION START'],
       ['postchecks', 'POSTCHECKS SECTION START'],
-      ['merge-ri', 'REVERSE INTEGRATION MERGE START'],
+      ['merge-ri', 'MERGE-RI SECTION START'],
     ];
     const endMarkers: Array<[string, string]> = [
+      ['merge-fi', 'MERGE-FI SECTION END'],
+      ['setup', 'SETUP SECTION END'],
       ['prechecks', 'PRECHECKS SECTION END'],
       ['work', 'WORK SECTION END'],
       ['commit', 'COMMIT SECTION END'],
       ['postchecks', 'POSTCHECKS SECTION END'],
-      ['merge-ri', 'REVERSE INTEGRATION MERGE END'],
+      ['merge-ri', 'MERGE-RI SECTION END'],
     ];
     let latestPhase = '';
     let latestIdx = -1;
@@ -358,7 +363,6 @@ export class AttemptCard extends SubscribableControl {
 
     // Determine if we need a full rebuild or can do differential updates
     const sorted = attempts.slice().sort((a, b) => b.attemptNumber - a.attemptNumber);
-    const currentAttemptNums = new Set(sorted.map(a => a.attemptNumber));
     const needsFullRebuild = sorted.some(a => !this._renderedAttempts.has(a.attemptNumber));
 
     if (needsFullRebuild) {
@@ -585,7 +589,7 @@ export class AttemptCard extends SubscribableControl {
     if (att.stepStatuses) {
       const indicators = card.querySelector('.step-indicators');
       if (indicators) {
-        const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+        const phases = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
         const icons = indicators.querySelectorAll('.step-icon');
         phases.forEach((p, i) => {
           if (icons[i]) {
@@ -640,7 +644,6 @@ export class AttemptCard extends SubscribableControl {
 
     // ── Metrics section: update if metrics arrived ──
     if (att.metricsHtml && (!prev || !prev.metricsHtml)) {
-      let metricsSection = card.querySelector('.attempt-section .attempt-section-title');
       // Find existing metrics section or create one
       let found = false;
       card.querySelectorAll('.attempt-section-title').forEach(t => {
@@ -673,7 +676,11 @@ export class AttemptCard extends SubscribableControl {
 
   /** Render the post-split checkpoint summary section. */
   private renderCheckpointSection(cp: CheckpointData): string {
-    const pressurePct = Math.round(cp.pressure);
+    // cp.pressure is stored as a fraction (0..1). Convert to a percentage
+    // for display. Values >1 are assumed to already be percentages (legacy).
+    const pressurePct = cp.pressure > 1
+      ? Math.round(cp.pressure)
+      : Math.round(cp.pressure * 100);
 
     // Sub-job list with status icons and clickable links
     const subJobListItems = cp.subJobs.map((sj, idx) => {
@@ -759,6 +766,7 @@ export class AttemptCard extends SubscribableControl {
     const ss = att.stepStatuses || {};
     const stepIndicators = '<span class="step-indicators">'
       + stepIconHtml(ss['merge-fi'])
+      + stepIconHtml(ss['setup'])
       + stepIconHtml(ss['prechecks'])
       + stepIconHtml(ss['work'])
       + stepIconHtml(ss['commit'])
@@ -843,6 +851,9 @@ export class AttemptCard extends SubscribableControl {
       : '';
 
     // ── Specs sections ──
+    const setupHtml = att.setupUsedHtml
+      ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD27 Setup</div>' + att.setupUsedHtml + '</div>'
+      : '';
     const prechecksHtml = att.prechecksUsedHtml
       ? '<div class="attempt-section"><div class="attempt-section-title">\uD83D\uDD0D Prechecks</div>' + att.prechecksUsedHtml + '</div>'
       : '';
@@ -854,10 +865,11 @@ export class AttemptCard extends SubscribableControl {
       : '';
 
     // ── Unified log section — one container for both live streaming and static logs ──
-    const phases = ['all', 'merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+    const phases = ['all', 'merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
     const phaseLabels: Record<string, string> = {
       'all': '\uD83D\uDCC4 Full Log',
       'merge-fi': '\u21D9\u21D8 Merge FI',
+      'setup': '\uD83D\uDD27 Setup',
       'prechecks': '\u2713 Prechecks',
       'work': '\u2699 Work',
       'commit': '\uD83D\uDCBE Commit',
@@ -891,7 +903,7 @@ export class AttemptCard extends SubscribableControl {
       + '</div></div>';
 
     // ── Running placeholder ──
-    const hasBodyContent = errorHtml || metricsHtml || checkpointHtml || ctxItems.length > 0 || prechecksHtml || workHtml || postchecksHtml;
+    const hasBodyContent = errorHtml || metricsHtml || checkpointHtml || ctxItems.length > 0 || setupHtml || prechecksHtml || workHtml || postchecksHtml;
     const runningPlaceholder = (!hasBodyContent && isRunning)
       ? '<div class="attempt-section"><div class="attempt-running-indicator">\u27F3 Executing\u2026</div></div>'
       : '';
@@ -911,7 +923,7 @@ export class AttemptCard extends SubscribableControl {
       + '</div>'
       + '</div>'
       + '<div class="attempt-body" style="display:' + bodyDisplay + ';">'
-      + runningPlaceholder + errorHtml + metricsHtml + checkpointHtml + contextHtml + prechecksHtml + workHtml + postchecksHtml + logSection
+      + runningPlaceholder + errorHtml + metricsHtml + checkpointHtml + contextHtml + setupHtml + prechecksHtml + workHtml + postchecksHtml + logSection
       + '</div>'
       + '</div>';
   }

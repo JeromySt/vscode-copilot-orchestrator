@@ -117,7 +117,7 @@ suite('StatsHandler', () => {
 
     test('has correct sources', () => {
       const handler = new StatsHandler();
-      assert.deepStrictEqual(handler.sources, [OutputSources.stdout]);
+      assert.deepStrictEqual(handler.sources, [OutputSources.stdout, OutputSources.stderr]);
     });
 
     test('has windowSize of 1', () => {

@@ -65,6 +65,15 @@ export interface EventProducer<TCursor = any> {
    * @returns Delta content and updated cursor, or null if no changes.
    */
   readDelta(key: string, cursor: TCursor): { content: any; cursor: TCursor } | null;
+
+  /**
+   * Optional teardown hook. Called by `WebViewSubscriptionManager.dispose()`.
+   * Producers that attach long-lived listeners (e.g. EventEmitter handlers on
+   * a manager) MUST implement this to detach those listeners, otherwise the
+   * subscription manager will leak references when the host view is recreated
+   * (extension reload, tests, future refactors).
+   */
+  dispose?(): void;
 }
 
 /** Internal subscription record. */
@@ -230,6 +239,20 @@ export class WebViewSubscriptionManager {
         this.subs.delete(id);
       }
     }
+  }
+
+  /**
+   * Tear down the manager: clear all subscriptions and dispose every
+   * registered producer that implements the optional `dispose()` hook.
+   * Call this when the host (e.g. plansViewProvider) is being disposed so
+   * producer-attached EventEmitter listeners do not leak across reloads.
+   */
+  dispose(): void {
+    this.subs.clear();
+    for (const producer of this.producers.values()) {
+      try { producer.dispose?.(); } catch { /* best-effort */ }
+    }
+    this.producers.clear();
   }
 
   /**

@@ -81,12 +81,28 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
       // --- Phase 1: Checkpoint sentinel/manifest detection (§6.4) ---
       const checkpointMode = await this.detectCheckpointMode(worktreePath, ctx);
       if (checkpointMode === 'failed') {
-        return {
-          success: false,
-          error: 'Checkpoint sentinel present but no manifest written. ' +
-            'The agent must create .orchestrator/checkpoint-manifest.json with completed/remaining ' +
-            'work details and force-add it to git before committing.',
-        };
+        // Attempt to synthesize a fallback manifest from git diff + node task.
+        // This rescues the pipeline when the agent commits but forgets to
+        // write the manifest (a common high-pressure failure mode).
+        const synthesized = await this.synthesizeFallbackManifest(worktreePath, node, ctx);
+        if (synthesized) {
+          ctx.logInfo('Synthesized fallback manifest — proceeding with commit phase');
+          // Re-detect: should now be 'checkpointing'
+          const newMode = await this.detectCheckpointMode(worktreePath, ctx);
+          if (newMode === 'failed') {
+            return {
+              success: false,
+              error: 'Checkpoint sentinel present but no manifest written, and fallback synthesis failed.',
+            };
+          }
+        } else {
+          return {
+            success: false,
+            error: 'Checkpoint sentinel present but no manifest written. ' +
+              'The agent must create .orchestrator/checkpoint-manifest.json with completed/remaining ' +
+              'work details and force-add it to git before committing.',
+          };
+        }
       }
 
       // --- Core commit logic ---
@@ -239,6 +255,88 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
       return 'consuming';
     }
     return 'normal';
+  }
+
+  /**
+   * Synthesize a fallback checkpoint manifest when the agent committed work
+   * but failed to write the manifest itself (a common failure mode under
+   * high context pressure — the model skips steps).
+   *
+   * Builds a minimal valid manifest from:
+   *  - The list of files changed since baseCommit (`git diff --name-only`)
+   *  - The original node task description
+   *
+   * The manifest is then force-added and amended into the latest commit so
+   * the consuming-mode cleanup logic picks it up correctly.
+   *
+   * Returns true if synthesis succeeded, false otherwise.
+   */
+  private async synthesizeFallbackManifest(
+    worktreePath: string,
+    node: JobNode,
+    ctx: CommitPhaseContext,
+  ): Promise<boolean> {
+    if (!this.fileSystem) { return false; }
+    try {
+      // Determine which files the agent touched since base (committed + uncommitted)
+      let changedFiles: string[] = [];
+      try {
+        const baseCommit = ctx.baseCommit;
+        if (baseCommit) {
+          const changes = await this.git.repository.getFileChangesBetween(baseCommit, 'HEAD', worktreePath);
+          changedFiles = changes.map(c => c.path);
+        }
+        // Also include any uncommitted dirty files
+        const dirty = await this.git.repository.getDirtyFiles(worktreePath);
+        for (const f of dirty) {
+          if (!changedFiles.includes(f)) { changedFiles.push(f); }
+        }
+      } catch (e: any) {
+        ctx.logInfo(`Fallback manifest: could not enumerate changes (${e?.message ?? e})`);
+      }
+
+      const completed = changedFiles.map(f => ({
+        file: f,
+        summary: 'Modified by parent agent before checkpoint (auto-synthesized — agent did not write manifest)',
+      }));
+
+      const manifest = {
+        status: 'checkpointed' as const,
+        completed,
+        remaining: [{
+          file: '<unknown>',
+          description: `Continue the original task: ${node.task}. The parent agent ran out of context and did not write a manifest. Review the committed changes (${changedFiles.length} file(s)) and complete any remaining work.`,
+        }],
+        summary: `Auto-synthesized fallback manifest. Parent agent committed/modified ${changedFiles.length} file(s) but did not write a manifest before exiting. Original task: ${node.task}`,
+      };
+
+      const manifestAbsPath = path.join(worktreePath, CHECKPOINT_MANIFEST_REL);
+      const manifestDir = path.dirname(manifestAbsPath);
+      try { await this.fileSystem.mkdirAsync(manifestDir, { recursive: true }); } catch { /* ignore */ }
+      await this.fileSystem.writeFileAsync(manifestAbsPath, JSON.stringify(manifest, null, 2));
+
+      // Force-add the manifest (it's in .gitignore) and amend the latest commit
+      // so the consuming-mode cleanup logic picks it up. Use raw git command
+      // since IGitRepository doesn't expose --force or --amend.
+      try {
+        await this.git.command.execAsync(
+          ['add', '--force', '--', CHECKPOINT_MANIFEST_REL.replace(/\\/g, '/')],
+          { cwd: worktreePath },
+        );
+        await this.git.command.execAsync(
+          ['commit', '--amend', '--no-edit'],
+          { cwd: worktreePath },
+        );
+        ctx.logInfo(`Fallback manifest written and amended into HEAD (${changedFiles.length} file(s))`);
+      } catch (e: any) {
+        ctx.logInfo(`Fallback manifest: amend failed (${e?.message ?? e}) — file written but not committed`);
+        // Still return true — manifest exists on disk
+      }
+      return true;
+    } catch (e: any) {
+      ctx.logError(`Fallback manifest synthesis failed: ${e?.message ?? e}`);
+      return false;
+    }
   }
 
   /**

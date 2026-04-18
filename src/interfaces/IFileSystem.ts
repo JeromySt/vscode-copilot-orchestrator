@@ -133,6 +133,15 @@ export interface IFileSystem {
   /** Read directory entries (async). */
   readdirAsync(dirPath: string): Promise<string[]>;
 
+  /** Read directory entries (sync). */
+  readdirSync(dirPath: string): string[];
+
+  /** Remove an empty directory (sync). */
+  rmdirSync(dirPath: string): void;
+
+  /** Change a file's mode (sync). No-op on Windows. */
+  chmodSync(filePath: string, mode: number): void;
+
   /** Get file/link stats without following symlinks (async). */
   lstatAsync(filePath: string): Promise<{ isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean }>;
 

@@ -20,6 +20,7 @@ export function renderPlansViewMessageRouter(): string {
 // ── Message Handler ──────────────────────────────────────────────────
 window.addEventListener('message', function(ev) {
   var msg = ev.data;
+  if (!msg || typeof msg.type !== 'string') { return; }
   switch (msg.type) {
     case 'pulse':
       bus.emit(PlansTopics.PULSE);

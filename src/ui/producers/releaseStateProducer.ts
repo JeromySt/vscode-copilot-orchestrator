@@ -22,7 +22,7 @@ export type ReleaseStateCursor = string;
 export interface ReleaseStreamEvent {
   type: 'taskOutput' | 'cycleCompleted' | 'prUpdate' | 'actionTaken' |
         'findingsResolved' | 'findingsProcessing' | 'monitoringStopped' |
-        'pollIntervalChanged';
+        'pollIntervalChanged' | 'taskStatusChanged' | 'plansAdded' | 'prAdopted';
   data: any;
 }
 
@@ -91,6 +91,15 @@ export class ReleaseStateProducer implements EventProducer<ReleaseStateCursor> {
       }));
       this._listenAndBuffer(mgr, 'pollIntervalChanged', (releaseId: string, intervalTicks: number) => ({
         type: 'pollIntervalChanged' as const, data: { intervalSeconds: intervalTicks },
+      }));
+      this._listenAndBuffer(mgr, 'taskStatusChanged', (releaseId: string, taskId: string, status: string) => ({
+        type: 'taskStatusChanged' as const, data: { taskId, status },
+      }));
+      this._listenAndBuffer(mgr, 'plansAdded', (releaseId: string, planIds: string[]) => ({
+        type: 'plansAdded' as const, data: { planIds },
+      }));
+      this._listenAndBuffer(mgr, 'prAdopted', (releaseId: string, prNumber: number) => ({
+        type: 'prAdopted' as const, data: { prNumber },
       }));
     }
   }

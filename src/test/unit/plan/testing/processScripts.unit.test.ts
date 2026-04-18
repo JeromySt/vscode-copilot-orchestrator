@@ -92,7 +92,8 @@ suite('processScripts', () => {
     test('normal level has model limits and low token counts', () => {
       const lines = contextPressureLogLines('normal');
       assert.ok(lines.length >= 2);
-      assert.ok(lines[0].text.includes('max_prompt_tokens'));
+      const maxPromptLine = lines.find(l => l.text.includes('max_prompt_tokens'));
+      assert.ok(maxPromptLine, 'Should have a line with max_prompt_tokens');
     });
 
     test('elevated level has more entries than normal', () => {

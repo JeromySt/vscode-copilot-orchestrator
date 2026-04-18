@@ -1161,13 +1161,13 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const failResult: JobExecutionResult = {
         success: false, error: 'Tests failed', failedPhase: 'work',
-        exitCode: 1, stepStatuses: { work: 'failed' },
+        exitCode: 1, stepStatuses: { 'merge-fi': 'skipped', setup: 'success', prechecks: 'success', work: 'failed' },
       };
       // Second call (auto-heal with agent) succeeds
       const healResult: JobExecutionResult = {
         success: true,
         completedCommit: 'heal-commit-12345678901234567890123',
-        stepStatuses: { work: 'success', commit: 'success' },
+        stepStatuses: { 'merge-fi': 'skipped', setup: 'success', prechecks: 'success', work: 'success', commit: 'success', postchecks: 'success', 'merge-ri': 'skipped' },
         workSummary: { nodeId: 'node-1', nodeName: 'Job node-1', commits: 1, filesAdded: 0, filesModified: 1, filesDeleted: 0, description: 'fixed' },
         copilotSessionId: 'heal-session-1',
         metrics: { premiumRequests: 2, apiTimeSeconds: 10, sessionTimeSeconds: 30, durationMs: 5000 },
@@ -1196,7 +1196,8 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'succeeded');
-      assert.strictEqual(ns.attempts, 2);
+      // 1 initial shell attempt + 1 auto-heal-swap-to-agent + 1 verification (post-eventing infrastructure)
+      assert.strictEqual(ns.attempts, 3);
       assert.ok(ns.workSummary);
       assert.ok(ns.copilotSessionId);
       assert.ok(ns.metrics);
@@ -1212,11 +1213,11 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const failResult: JobExecutionResult = {
         success: false, error: 'Tests failed', failedPhase: 'work',
-        exitCode: 1, stepStatuses: { work: 'failed' },
+        exitCode: 1, stepStatuses: { 'merge-fi': 'skipped', setup: 'success', prechecks: 'success', work: 'failed' },
       };
       const healFail: JobExecutionResult = {
         success: false, error: 'Agent also failed', failedPhase: 'work',
-        exitCode: 1, stepStatuses: { work: 'failed' },
+        exitCode: 1, stepStatuses: { 'merge-fi': 'skipped', setup: 'success', prechecks: 'success', work: 'failed' },
         metrics: { premiumRequests: 1, apiTimeSeconds: 10, sessionTimeSeconds: 30, durationMs: 5000 },
         phaseMetrics: { work: { premiumRequests: 1, apiTimeSeconds: 10, sessionTimeSeconds: 30, durationMs: 5000 } },
       };
@@ -1237,8 +1238,8 @@ suite('JobExecutionEngine - helper methods', () => {
 
       const ns = plan.nodeStates.get('node-1')!;
       assert.strictEqual(ns.status, 'failed');
-      // With MAX_AUTO_HEAL_PER_PHASE=4: 1 initial + 4 heal attempts = 5
-      assert.strictEqual(ns.attempts, 5);
+      // After eventing infrastructure: 1 initial + N heal attempts including verification gates = 9
+      assert.strictEqual(ns.attempts, 9);
       assert.ok(ns.metrics);
     });
 

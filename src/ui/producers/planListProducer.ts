@@ -69,7 +69,7 @@ export class PlanListProducer implements EventProducer<PlanListCursor> {
           pending: (counts.pending ?? 0) + (counts.ready ?? 0),
         },
       };
-    });
+    }).sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /** Build a cursor string: serialized map of planId → stateVersion. */

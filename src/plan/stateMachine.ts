@@ -143,6 +143,10 @@ export class PlanStateMachine extends EventEmitter {
     }
     if (isTerminal(newStatus)) {
       if (!updates?.endedAt) { state.endedAt = now; }
+      // Clear PID on terminal state — the process is no longer relevant.
+      // Prevents the liveness watchdog from seeing a stale PID and
+      // double-failing an already-terminal node.
+      state.pid = undefined;
     }
     
     // Record transition in node's state history (canonical source of truth)

@@ -170,6 +170,14 @@ export class ExecutionPump {
         for (const [nodeId, state] of plan.nodeStates) {
           if (state.status === 'running' && state.pid) {
             if (!this.state.processMonitor.isRunning(state.pid)) {
+              // If the executor still has an active execution for this node,
+              // the process may have exited between phases (e.g. prechecks
+              // agent finished, work phase about to start). Don't kill it.
+              if (this.state.executor?.isActive?.(planId, nodeId)) {
+                this.log.debug(`Watchdog: PID ${state.pid} for "${plan.jobs.get(nodeId)?.name}" is dead but executor still active — skipping (inter-phase gap)`);
+                state.pid = undefined; // Clear stale PID so we don't re-check it
+                continue;
+              }
               const node = plan.jobs.get(nodeId);
               this.log.warn(`Watchdog: PID ${state.pid} for node "${node?.name || nodeId}" is no longer running — marking as failed (possible hibernate/crash)`);
               state.error = `Process ${state.pid} died unexpectedly (system hibernate or crash). Retry to resume.`;

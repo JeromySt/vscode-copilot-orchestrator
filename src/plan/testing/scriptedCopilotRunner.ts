@@ -24,14 +24,23 @@ const log = Logger.for('plan');
 /**
  * Write log-file entries to disk on timers so the LogFileTailer picks them up.
  * This enables the ContextPressureHandler to detect token usage from debug logs.
+ *
+ * The LogFileTailer's directory-mode filters files by PID suffix (`*-{pid}.log`)
+ * to avoid replaying stale logs from previous attempts. We inject the scripted
+ * process PID into the filename so the tailer picks it up.
  */
 function scheduleLogFileWrites(
   logFiles: LogFileScript[],
   baseDir: string,
   proc: FakeChildProcess,
 ): void {
+  const pid = proc.pid;
   for (const logFile of logFiles) {
-    const filePath = path.join(baseDir, logFile.relativePath);
+    // Transform `debug.log` → `debug-{pid}.log` to satisfy the tailer's PID filter.
+    const ext = path.extname(logFile.relativePath);
+    const stem = logFile.relativePath.slice(0, logFile.relativePath.length - ext.length);
+    const pidScopedRelative = pid ? `${stem}-${pid}${ext}` : logFile.relativePath;
+    const filePath = path.join(baseDir, pidScopedRelative);
     let elapsed = 0;
     for (const line of logFile.lines) {
       const delay = line.delayMs ?? 0;

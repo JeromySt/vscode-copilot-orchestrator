@@ -207,7 +207,20 @@ NEXT STEPS after creation:
           },
           worktreeInit: {
             type: 'array',
-            description: 'Worktree initialization commands executed in the setup phase of EVERY job, after forward-integration merge and before prechecks/work. Runs sequentially; if any fails, the job fails in setup. Use for dependency installation, package restore, code generation, or git hook setup. Supports all standard work spec types (shell, process, agent). Also auto-detects .github/instructions/worktree-init.instructions.md — if present in the repo, it is executed as an agent init step automatically (no config needed). Example: [{"type": "shell", "command": "npm ci", "shell": "bash"}, {"type": "shell", "command": "dotnet husky install"}]',
+            description: `Worktree initialization commands executed in the setup phase of EVERY job, after forward-integration merge and before prechecks/work. Runs sequentially; if any fails, the job is auto-healed. Each worktree gets its own isolated copy of dependencies (no shared symlinks when worktreeInit is set).
+
+IMPORTANT: When worktreeInit is configured, node_modules is NOT symlinked from the main repo. Each worktree runs its own install. npm/yarn/pnpm use a shared global cache (~/.npm, ~/.yarn/cache) so subsequent installs are fast cache hits (~5-8s).
+
+Recommended patterns by language:
+- Node.js: ["npm ci"] — deterministic, uses lockfile, shared cache. Or ["yarn install --frozen-lockfile"] / ["pnpm install --frozen-lockfile"]
+- .NET: [{"type": "shell", "command": "dotnet restore --no-cache", "shell": "powershell"}]
+- Python: [{"type": "shell", "command": "python -m venv .venv && .venv/bin/pip install -r requirements.txt", "shell": "bash"}]
+- Rust: [{"type": "shell", "command": "cargo fetch", "shell": "bash"}] — downloads crates to shared cache
+- Go: no init needed — Go modules cache is global by default
+- Java/Gradle: [{"type": "shell", "command": "./gradlew dependencies --no-daemon", "shell": "bash"}]
+- Java/Maven: [{"type": "shell", "command": "mvn dependency:resolve -q", "shell": "bash"}]
+
+Also auto-detects .github/instructions/worktree-init.instructions.md if present.`,
             items: {
               oneOf: [
                 { type: 'string' },
@@ -749,7 +762,9 @@ EXAMPLES:
           },
           worktreeInit: {
             type: 'array',
-            description: 'Worktree initialization commands executed in the setup phase of EVERY job. Runs after FI merge, before prechecks/work. Use for npm ci, dotnet restore, husky install, etc. Also auto-detects .github/instructions/worktree-init.instructions.md if present in the repo.',
+            description: `Worktree initialization commands executed in the setup phase of EVERY job. Runs after FI merge, before prechecks/work. When set, node_modules is NOT symlinked — each worktree installs its own deps (npm global cache makes this fast).
+
+Recommended: ["npm ci"] for Node.js, ["dotnet restore"] for .NET, ["pip install -r requirements.txt"] for Python, ["cargo fetch"] for Rust. Also auto-detects .github/instructions/worktree-init.instructions.md if present.`,
             items: {
               oneOf: [
                 { type: 'string' },

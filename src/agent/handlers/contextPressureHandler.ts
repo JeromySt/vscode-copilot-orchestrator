@@ -13,7 +13,10 @@ import { OutputSources } from '../../interfaces/IOutputHandler';
 import type { IOutputHandlerFactory, HandlerContext } from '../../interfaces/IOutputHandlerRegistry';
 import type { IContextPressureMonitor } from '../../interfaces/IContextPressureMonitor';
 import { ContextPressureMonitor } from '../../plan/analysis/contextPressureMonitor';
-import { registerMonitor, unregisterMonitor } from '../../plan/analysis/pressureMonitorRegistry';
+import { registerMonitor, unregisterMonitor, getCheckpointManager } from '../../plan/analysis/pressureMonitorRegistry';
+import { Logger } from '../../core/logger';
+
+const log = Logger.for('context-pressure');
 
 // ── Regex patterns (from PROCESS_OUTPUT_BUS_DESIGN.md §6.2) ──
 
@@ -104,9 +107,14 @@ export class ContextPressureHandler implements IOutputHandler {
       acc.inputTokens += inputTokens;
       acc.outputTokens += outputTokens;
       acc.cachedTokens += cachedTokens;
-      acc.turns++;
-      this._totalTurns++;
-      if (!this._firstTurnAt) { this._firstTurnAt = Date.now(); }
+      // Only count a turn on the input_tokens line — in pretty-printed debug
+      // logs, input_tokens and output_tokens arrive on separate lines and we
+      // don't want to double-count a single model call as two turns.
+      if (inputTokens > 0) {
+        acc.turns++;
+        this._totalTurns++;
+        if (!this._firstTurnAt) { this._firstTurnAt = Date.now(); }
+      }
 
       // Push accumulated AI usage to monitor for producer delivery
       const usage = this.getModelTokenUsage();
@@ -167,6 +175,53 @@ export const ContextPressureHandlerFactory: IOutputHandlerFactory = {
     }
     const monitor = new ContextPressureMonitor(ctx.planId, ctx.nodeId, 1, 'work');
     registerMonitor(ctx.planId, ctx.nodeId, monitor);
+
+    // Subscribe to pressure transitions and write the checkpoint sentinel
+    // when level becomes critical. The agent picks up the sentinel and
+    // initiates the checkpoint protocol.
+    if (ctx.worktreePath) {
+      const worktreePath = ctx.worktreePath;
+      let sentinelWritten = false;
+      monitor.onPressureChange((level, state) => {
+        if (level !== 'critical' || sentinelWritten) { return; }
+        const mgr = getCheckpointManager();
+        if (!mgr) {
+          log.warn('Pressure critical but no checkpoint manager registered — cannot write sentinel', {
+            planId: ctx.planId, nodeId: ctx.nodeId,
+          });
+          return;
+        }
+        sentinelWritten = true;
+        const adaptedState = {
+          level: state.level,
+          currentInputTokens: state.currentInputTokens,
+          maxPromptTokens: state.maxPromptTokens ?? 0,
+          pressure: state.maxPromptTokens
+            ? state.currentInputTokens / state.maxPromptTokens
+            : 0,
+        };
+        mgr.writeSentinel(worktreePath, adaptedState).then(() => {
+          log.info('Checkpoint sentinel written for critical pressure', {
+            planId: ctx.planId,
+            nodeId: ctx.nodeId,
+            worktreePath,
+            currentInputTokens: state.currentInputTokens,
+            maxPromptTokens: state.maxPromptTokens,
+          });
+        }).catch(err => {
+          log.error('Failed to write checkpoint sentinel', {
+            planId: ctx.planId,
+            nodeId: ctx.nodeId,
+            error: String(err),
+          });
+        });
+      });
+    } else {
+      log.warn('No worktreePath in handler context — checkpoint sentinel cannot be written on critical pressure', {
+        planId: ctx.planId, nodeId: ctx.nodeId,
+      });
+    }
+
     return new ContextPressureHandler(monitor);
   },
 };

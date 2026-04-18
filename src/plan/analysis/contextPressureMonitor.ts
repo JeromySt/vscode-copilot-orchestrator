@@ -107,8 +107,14 @@ export class ContextPressureMonitor implements IContextPressureMonitor {
   }
 
   recordTurnUsage(inputTokens: number, outputTokens: number): void {
-    this._state.currentInputTokens = inputTokens;
-    this._state.tokenHistory.push(inputTokens);
+    // In pretty-printed debug logs, input_tokens and output_tokens arrive on
+    // separate lines. Only overwrite the running input-token count when we
+    // actually saw a non-zero input_tokens value — otherwise an output-only
+    // line would reset the pressure bar to zero.
+    if (inputTokens > 0) {
+      this._state.currentInputTokens = inputTokens;
+      this._state.tokenHistory.push(inputTokens);
+    }
     this._state.lastUpdated = Date.now();
 
     log.debug('Turn usage recorded', {
@@ -123,8 +129,10 @@ export class ContextPressureMonitor implements IContextPressureMonitor {
   }
 
   setModelLimits(maxPromptTokens: number, maxContextWindow: number): void {
-    this._state.maxPromptTokens = maxPromptTokens;
-    this._state.maxContextWindow = maxContextWindow;
+    // Only update non-zero values — the debug log may report limits on
+    // separate lines, so each call may only have one field populated.
+    if (maxPromptTokens > 0) { this._state.maxPromptTokens = maxPromptTokens; }
+    if (maxContextWindow > 0) { this._state.maxContextWindow = maxContextWindow; }
     this._state.lastUpdated = Date.now();
 
     log.info('Model limits set', {

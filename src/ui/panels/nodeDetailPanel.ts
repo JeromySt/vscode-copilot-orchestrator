@@ -378,7 +378,7 @@ function getCurrentExecutionPhase(state: NodeExecutionState | undefined): string
   }
   
   // If nothing is currently running, return the first incomplete phase
-  const phaseOrder = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+  const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
   for (const phase of phaseOrder) {
     const status = state.stepStatuses[phase as keyof typeof state.stepStatuses];
     if (!status || status === 'pending') {
@@ -1149,6 +1149,8 @@ export class NodeDetailPanel {
           baseCommit: state.baseCommit,
           logFilePath,
           workUsedHtml: workSpecHtml,
+          setupUsedHtml: (plan.spec?.worktreeInit && plan.spec.worktreeInit.length > 0)
+            ? plan.spec.worktreeInit.map(spec => formatWorkSpecHtml(spec, escapeHtml)).join('') : undefined,
           prechecksUsedHtml: prechecksHtml,
           postchecksUsedHtml: postchecksHtml,
           logs,
@@ -1208,6 +1210,11 @@ export class NodeDetailPanel {
           workUsedHtml = formatWorkSpecHtml(fallbackWork, escapeHtml);
         }
       }
+      // Resolve setup (worktreeInit) — plan-level, not per-attempt
+      let setupUsedHtml: string | undefined;
+      if (plan.spec?.worktreeInit && plan.spec.worktreeInit.length > 0) {
+        setupUsedHtml = plan.spec.worktreeInit.map(spec => formatWorkSpecHtml(spec, escapeHtml)).join('');
+      }
       // Resolve prechecks — try ref first, then node inline, then disk via definition
       let prechecksUsedHtml = resolveSpecFromRef(attempt.prechecksRef, storagePath, plan.id, escapeHtml);
       if (!prechecksUsedHtml && (attempt.status === 'running' || !attempt.prechecksRef)) {
@@ -1243,6 +1250,7 @@ export class NodeDetailPanel {
         baseCommit: attempt.baseCommit || (attempt.status === 'running' ? state.baseCommit : undefined),
         logFilePath: resolvedLogPath || (attempt.status === 'running' ? currentLogFilePath : undefined),
         workUsedHtml,
+        setupUsedHtml,
         prechecksUsedHtml,
         postchecksUsedHtml,
         // Running attempts get live streaming via LOG_UPDATE, completed get static logs
@@ -1416,9 +1424,6 @@ export class NodeDetailPanel {
       ? this._buildWorkSummaryHtml(state.workSummary, state.aggregatedWorkSummary, isLeaf)
       : '';
     
-    // Get log file path for this node (use current attempt number)
-    const logFilePath = this._planRunner.getNodeLogFilePath(this._planId, this._nodeId, state.attempts || 1);
-
     // Attempt history is rendered entirely by the CSR AttemptCard control.
     // Initial data is pushed via _sendAttemptUpdate() after HTML rebuild.
 
@@ -1514,6 +1519,7 @@ export class NodeDetailPanel {
     
     const result: Record<string, string> = {
       'merge-fi': 'pending',
+      setup: 'pending',
       prechecks: 'pending',
       work: 'pending',
       commit: 'pending',
@@ -1617,7 +1623,7 @@ export class NodeDetailPanel {
   private _getInitialPhase(phaseStatus: Record<string, string>, nodeStatus: string): string {
     // If node is running, show the currently running phase
     if (nodeStatus === 'running') {
-      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phases = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
       for (const phase of phases) {
         if (phaseStatus[phase] === 'running') {
           return phase;
@@ -1629,7 +1635,7 @@ export class NodeDetailPanel {
     
     // If node failed, show the failed phase
     if (nodeStatus === 'failed') {
-      const phases = ['merge-fi', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
+      const phases = ['merge-fi', 'setup', 'prechecks', 'work', 'commit', 'postchecks', 'merge-ri'];
       for (const phase of phases) {
         if (phaseStatus[phase] === 'failed') {
           return phase;

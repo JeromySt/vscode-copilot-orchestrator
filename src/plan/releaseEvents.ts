@@ -13,6 +13,7 @@ import type {
   ReleaseStatus,
   ReleaseProgress,
   PRMonitorCycle,
+  PRActionTaken,
 } from './types/release';
 
 /**
@@ -56,6 +57,21 @@ export interface ReleaseEvents {
 
   /** Emitted when a preparation task outputs a log line */
   'release:taskOutput': (releaseId: string, taskId: string, line: string) => void;
+
+  /** Emitted when an autonomous action is taken on a PR */
+  'release:actionTaken': (releaseId: string, action: PRActionTaken & { timestamp?: number }) => void;
+
+  /** Emitted when findings are being processed by the AI fixer */
+  'release:findingsProcessing': (releaseId: string, findingIds: string[], status: 'queued' | 'processing' | 'started' | 'completed' | 'failed') => void;
+
+  /** Emitted when findings have been resolved */
+  'release:findingsResolved': (releaseId: string, findingIds: string[], hasCommit: boolean) => void;
+
+  /** Emitted when PR monitoring stops */
+  'release:monitoringStopped': (releaseId: string, cycleCount: number) => void;
+
+  /** Emitted when the polling interval changes */
+  'release:pollIntervalChanged': (releaseId: string, newIntervalTicks: number) => void;
 }
 
 /**
@@ -160,5 +176,40 @@ export class ReleaseEventEmitter extends EventEmitter {
    */
   emitReleaseTaskOutput(releaseId: string, taskId: string, line: string): void {
     this.emit('release:taskOutput', releaseId, taskId, line);
+  }
+
+  /**
+   * Emit a release:actionTaken event.
+   */
+  emitReleaseActionTaken(releaseId: string, action: PRActionTaken & { timestamp?: number }): void {
+    this.emit('release:actionTaken', releaseId, action);
+  }
+
+  /**
+   * Emit a release:findingsProcessing event.
+   */
+  emitFindingsProcessing(releaseId: string, findingIds: string[], status: 'queued' | 'processing' | 'started' | 'completed' | 'failed'): void {
+    this.emit('release:findingsProcessing', releaseId, findingIds, status);
+  }
+
+  /**
+   * Emit a release:findingsResolved event.
+   */
+  emitFindingsResolved(releaseId: string, findingIds: string[], hasCommit: boolean): void {
+    this.emit('release:findingsResolved', releaseId, findingIds, hasCommit);
+  }
+
+  /**
+   * Emit a release:monitoringStopped event.
+   */
+  emitMonitoringStopped(releaseId: string, cycleCount: number): void {
+    this.emit('release:monitoringStopped', releaseId, cycleCount);
+  }
+
+  /**
+   * Emit a release:pollIntervalChanged event.
+   */
+  emitPollIntervalChanged(releaseId: string, newIntervalTicks: number): void {
+    this.emit('release:pollIntervalChanged', releaseId, newIntervalTicks);
   }
 }

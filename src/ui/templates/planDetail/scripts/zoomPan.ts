@@ -73,9 +73,11 @@ export function renderZoomPan(): string {
       updateZoom();
     }
     
-    // Mouse wheel zoom (no modifier needed when over diagram)
+    // Mouse wheel zoom — only when Ctrl (or Cmd on macOS) is held.
+    // Without the modifier, the wheel scrolls the page/diagram normally.
     const diagramEl = document.getElementById('mermaid-diagram');
     diagramEl?.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) { return; }
       e.preventDefault();
       if (e.deltaY < 0) {
         zoomIn();

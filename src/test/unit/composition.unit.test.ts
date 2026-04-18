@@ -398,7 +398,7 @@ suite('createReleaseManager', () => {
     const mockGit: any = {};
     const mockCopilot: any = {};
     const mockIsolatedRepos: any = {};
-    const mockPRMonitor: any = {};
+    const mockPRMonitor: any = { on: () => {} };
     const mockPRServiceFactory: any = {};
     const mockStore: any = {};
     const mockProviderDetector: any = {};

@@ -23,10 +23,10 @@ import {
 
 suite('executionCardTemplate', () => {
   suite('phaseTabsHtml', () => {
-    test('renders six step-icon spans', () => {
+    test('renders seven step-icon spans', () => {
       const html = phaseTabsHtml({}, false);
       const matches = html.match(/<span class="step-icon/g);
-      assert.strictEqual(matches?.length, 6, 'Should produce 6 step-icon spans');
+      assert.strictEqual(matches?.length, 7, 'Should produce 7 step-icon spans');
     });
 
     test('all pending icons when no statuses given', () => {
@@ -266,10 +266,10 @@ suite('executionCardTemplate', () => {
         assert.ok(html.includes('attempt-error-section'), 'Should have error section');
       });
 
-      test('renders six step icons', () => {
+      test('renders seven step icons', () => {
         const html = executionCardHtml({ ...minimalData, isLive: true });
         const matches = html.match(/<span class="step-icon/g);
-        assert.strictEqual(matches?.length, 6, 'Should render 6 step icons');
+        assert.strictEqual(matches?.length, 7, 'Should render 7 step icons');
       });
     });
 
@@ -342,35 +342,35 @@ suite('executionCardTemplate', () => {
     });
 
     test('extracts prechecks section', () => {
-      const log = 'header\nPRECHECKS START\nsome check output\nPRECHECKS END\nfooter';
+      const log = 'header\nPRECHECKS SECTION\nsome check output\nPRECHECKS SECTION\nfooter';
       const result = splitAttemptLogs(log);
       assert.ok('prechecks' in result, 'Should extract prechecks key');
-      assert.ok(result['prechecks'].includes('PRECHECKS'), 'Should include marker text');
+      assert.ok(result['prechecks'].includes('PRECHECKS SECTION'), 'Should include marker text');
     });
 
     test('extracts work section', () => {
-      const log = 'start\nWORK BEGIN\nwork output\nWORK DONE\nend';
+      const log = 'start\nWORK SECTION\nwork output\nWORK SECTION\nend';
       const result = splitAttemptLogs(log);
       assert.ok('work' in result, 'Should extract work key');
     });
 
     test('extracts forward integration section', () => {
-      const log = 'FORWARD INTEGRATION START\nmerge output\nFORWARD INTEGRATION END\nrest';
+      const log = 'MERGE-FI SECTION\nmerge output\nMERGE-FI SECTION\nrest';
       const result = splitAttemptLogs(log);
       assert.ok('merge-fi' in result, 'Should extract merge-fi key');
     });
 
     test('extracts reverse integration section', () => {
-      const log = 'before\nREVERSE INTEGRATION START\nri output\nREVERSE INTEGRATION END\nafter';
+      const log = 'before\nMERGE-RI SECTION\nri output\nMERGE-RI SECTION\nafter';
       const result = splitAttemptLogs(log);
       assert.ok('merge-ri' in result, 'Should extract merge-ri key');
     });
 
     test('uses content from marker to end when no closing marker', () => {
-      const log = 'POSTCHECKS: running tests\ntest output line 1\ntest output line 2';
+      const log = 'POSTCHECKS SECTION\ntest output line 1\ntest output line 2';
       const result = splitAttemptLogs(log);
       assert.ok('postchecks' in result, 'Should extract postchecks key');
-      assert.ok(result['postchecks'].startsWith('POSTCHECKS'), 'Should start at marker');
+      assert.ok(result['postchecks'].startsWith('POSTCHECKS SECTION'), 'Should start at marker');
     });
 
     test('handles empty string input', () => {

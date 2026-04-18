@@ -172,7 +172,8 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
       const env = c.resolve<import('./interfaces').IEnvironment>(Tokens.IEnvironment);
       const config = c.resolve<import('./interfaces').IConfigProvider>(Tokens.IConfigProvider);
       const managedFactory = c.resolve<import('./interfaces/IManagedProcessFactory').IManagedProcessFactory>(Tokens.IManagedProcessFactory);
-      return new CopilotCliRunner(undefined, spawner, env, config, managedFactory);
+      const fileSystem = c.resolve<import('./interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
+      return new CopilotCliRunner(undefined, spawner, env, config, managedFactory, fileSystem);
     },
   );
 

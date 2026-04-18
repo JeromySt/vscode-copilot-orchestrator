@@ -92,6 +92,7 @@ export function metricsSummaryHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
   let phaseBreakdownHtml = '';
   if (phaseMetrics && Object.keys(phaseMetrics).length > 0) {
     const phaseLabels: Record<string, string> = {
+      'setup': '🔧 Setup',
       'prechecks': '🔍 Prechecks',
       'merge-fi': '↙↘ Merge FI',
       'work': '⚙ Work',
@@ -99,7 +100,7 @@ export function metricsSummaryHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
       'postchecks': '✅ Postchecks',
       'merge-ri': '↗↙ Merge RI',
     };
-    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
+    const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
 
     const phaseRows = phaseOrder
       .filter(phase => phaseMetrics[phase])
@@ -181,6 +182,7 @@ export function attemptMetricsHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
   let phaseBreakdownHtml = '';
   if (phaseMetrics && Object.keys(phaseMetrics).length > 1) {
     const phaseLabels: Record<string, string> = {
+      'setup': '🔧 Setup',
       'prechecks': '🔍 Prechecks',
       'merge-fi': '↙↘ Merge FI',
       'work': '⚙ Work',
@@ -188,7 +190,7 @@ export function attemptMetricsHtml(metrics: MetricsData, phaseMetrics?: PhaseMet
       'postchecks': '✅ Postchecks',
       'merge-ri': '↗↙ Merge RI',
     };
-    const phaseOrder = ['merge-fi', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
+    const phaseOrder = ['merge-fi', 'setup', 'prechecks', 'work', 'postchecks', 'commit', 'merge-ri'];
 
     const phaseRows = phaseOrder
       .filter(phase => phaseMetrics[phase])

@@ -56,8 +56,8 @@ export interface IGitBranches {
 export interface IGitWorktrees {
   create(options: WorktreeCreateOptions): Promise<void>;
   createWithTiming(options: WorktreeCreateOptions): Promise<CreateTiming>;
-  createDetachedWithTiming(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[]): Promise<CreateTiming & { baseCommit: string }>;
-  createOrReuseDetached(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[]): Promise<CreateTiming & { baseCommit: string; reused: boolean }>;
+  createDetachedWithTiming(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[], skipDefaultSymlinks?: boolean): Promise<CreateTiming & { baseCommit: string }>;
+  createOrReuseDetached(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[], skipDefaultSymlinks?: boolean): Promise<CreateTiming & { baseCommit: string; reused: boolean }>;
   remove(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void>;
   removeSafe(repoPath: string, worktreePath: string, options?: { force?: boolean; log?: GitLogger }): Promise<boolean>;
   isValid(worktreePath: string): Promise<boolean>;

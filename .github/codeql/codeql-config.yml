@@ -1,0 +1,21 @@
+name: "vscode-copilot-orchestrator CodeQL Config"
+
+# Run the security-extended + security-and-quality query suites.
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+
+# Paths excluded from analysis.
+# - out/**, node_modules/**: build artifacts and third-party code.
+# - src/test/**: test files use intentional substring/regex patterns
+#   (e.g. asserting that a CLI command string contains a known URL)
+#   that would otherwise trip js/incomplete-url-substring-sanitization
+#   and similar rules. Test code does not ship to end users.
+# - resources/**, media/**, docs/**: non-code assets.
+paths-ignore:
+  - out/**
+  - node_modules/**
+  - src/test/**
+  - resources/**
+  - media/**
+  - docs/**

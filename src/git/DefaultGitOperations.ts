@@ -113,12 +113,12 @@ class DefaultGitWorktrees implements IGitWorktrees {
     return worktrees.createWithTiming(options);
   }
 
-  async createDetachedWithTiming(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[]): Promise<CreateTiming & { baseCommit: string }> {
-    return worktrees.createDetachedWithTiming(repoPath, worktreePath, commitish, log, additionalSymlinkDirs);
+  async createDetachedWithTiming(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[], skipDefaultSymlinks?: boolean): Promise<CreateTiming & { baseCommit: string }> {
+    return worktrees.createDetachedWithTiming(repoPath, worktreePath, commitish, log, additionalSymlinkDirs, skipDefaultSymlinks);
   }
 
-  async createOrReuseDetached(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[]): Promise<CreateTiming & { baseCommit: string; reused: boolean }> {
-    return worktrees.createOrReuseDetached(repoPath, worktreePath, commitish, log, additionalSymlinkDirs);
+  async createOrReuseDetached(repoPath: string, worktreePath: string, commitish: string, log?: GitLogger, additionalSymlinkDirs?: string[], skipDefaultSymlinks?: boolean): Promise<CreateTiming & { baseCommit: string; reused: boolean }> {
+    return worktrees.createOrReuseDetached(repoPath, worktreePath, commitish, log, additionalSymlinkDirs, skipDefaultSymlinks);
   }
 
   async remove(worktreePath: string, repoPath: string, log?: GitLogger): Promise<void> {
