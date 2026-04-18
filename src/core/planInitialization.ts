@@ -344,7 +344,8 @@ export function initializePlansView(
   const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager, releaseManager);
   
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
+    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView),
+    plansView,
   );
 
   // Initialize TreeView for badge functionality - AFTER plan recovery is complete
@@ -383,7 +384,8 @@ export function initializePlansViewWithReleaseManager(
   const plansView = new plansViewProvider(context, planRunner, effectivePulse, prLifecycleManager, releaseManager);
   
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView)
+    vscode.window.registerWebviewViewProvider('orchestrator.plansView', plansView),
+    plansView,
   );
 
   // Initialize TreeView for badge functionality - AFTER plan recovery is complete

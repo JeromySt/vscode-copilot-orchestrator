@@ -17,6 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { CopilotCliLogger } from './copilotCliRunner';
+import type { IFileSystem } from '../interfaces/IFileSystem';
 
 const HOOKS_DIR_REL = path.join('.github', 'hooks');
 const HOOKS_CONFIG_FILE = 'orchestrator-hooks.json';
@@ -24,6 +25,27 @@ const PS1_SCRIPT = 'orchestrator-pressure-gate.ps1';
 const SH_SCRIPT = 'orchestrator-pressure-gate.sh';
 const POST_PS1_SCRIPT = 'orchestrator-post-tool.ps1';
 const POST_SH_SCRIPT = 'orchestrator-post-tool.sh';
+
+/**
+ * Minimal sync FS surface used by hookInstaller. Production wires the
+ * orchestrator's IFileSystem (see composition.ts → CopilotCliRunner). When no
+ * filesystem is supplied we fall back to a thin direct-fs adapter so the
+ * function remains usable from contexts that don't have DI plumbed (e.g.
+ * legacy unit tests, ad-hoc scripts).
+ */
+function directFsAdapter(): Pick<IFileSystem,
+    'mkdirSync' | 'writeFileSync' | 'existsSync' | 'unlinkSync' |
+    'readdirSync' | 'rmdirSync' | 'chmodSync'> {
+    return {
+        mkdirSync: (p, opts) => { fs.mkdirSync(p, opts); },
+        writeFileSync: (p, content) => { fs.writeFileSync(p, content, { encoding: 'utf8' }); },
+        existsSync: (p) => fs.existsSync(p),
+        unlinkSync: (p) => { fs.unlinkSync(p); },
+        readdirSync: (p) => fs.readdirSync(p) as string[],
+        rmdirSync: (p) => { fs.rmdirSync(p); },
+        chmodSync: (p, mode) => { try { fs.chmodSync(p, mode); } catch { /* Windows: no-op */ } },
+    };
+}
 
 /**
  * Resolve a fixed hook-file name inside the worktree's `.github/hooks` dir
@@ -54,18 +76,24 @@ function safeHookPath(hooksDir: string, name: string): string | undefined {
  * filename constants and validated to lie within `<cwd>/.github/hooks` via
  * `safeHookPath()` — this satisfies CodeQL's `js/insecure-temporary-file`
  * rule even when callers pass tmpdir-derived paths in unit tests.
+ *
+ * Filesystem access goes through the injected `IFileSystem` adapter so the
+ * function is testable without touching the real disk and consistent with
+ * the rest of the codebase's DI boundaries.
  */
 export function installOrchestratorHooks(
     cwd: string,
     logger?: CopilotCliLogger,
+    fileSystem?: IFileSystem,
 ): { configPath: string; scriptPaths: string[] } {
     if (!cwd || !path.isAbsolute(cwd)) {
         logger?.warn(`[hooks] Refusing to install: cwd must be an absolute path (${cwd})`);
         return { configPath: '', scriptPaths: [] };
     }
+    const fsx = fileSystem ?? directFsAdapter();
     const hooksDir = path.resolve(path.join(cwd, HOOKS_DIR_REL));
     try {
-        fs.mkdirSync(hooksDir, { recursive: true });
+        fsx.mkdirSync(hooksDir, { recursive: true });
     } catch (e) {
         logger?.warn(`[hooks] Failed to create hooks dir ${hooksDir}: ${e}`);
         return { configPath: '', scriptPaths: [] };
@@ -86,13 +114,14 @@ export function installOrchestratorHooks(
         // from a fixed filename constant and validated by safeHookPath() above to lie
         // within hooksDir = <cwd>/.github/hooks where cwd is an orchestrator-owned
         // worktree path (never user input).
-        fs.writeFileSync(ps1Path, PRESSURE_GATE_PS1, { encoding: 'utf8' });
-        fs.writeFileSync(shPath, PRESSURE_GATE_SH, { encoding: 'utf8' });
-        fs.writeFileSync(postPs1Path, POST_TOOL_PS1, { encoding: 'utf8' });
-        fs.writeFileSync(postShPath, POST_TOOL_SH, { encoding: 'utf8' });
-        // Best-effort: mark bash scripts executable on POSIX
-        try { fs.chmodSync(shPath, 0o755); } catch { /* Windows: no-op */ }
-        try { fs.chmodSync(postShPath, 0o755); } catch { /* Windows: no-op */ }
+        fsx.writeFileSync(ps1Path, PRESSURE_GATE_PS1);
+        fsx.writeFileSync(shPath, PRESSURE_GATE_SH);
+        fsx.writeFileSync(postPs1Path, POST_TOOL_PS1);
+        fsx.writeFileSync(postShPath, POST_TOOL_SH);
+        // Best-effort: mark bash scripts executable on POSIX. The IFileSystem
+        // implementation swallows EPERM on Windows.
+        fsx.chmodSync(shPath, 0o755);
+        fsx.chmodSync(postShPath, 0o755);
 
         const config = {
             version: 1,
@@ -117,7 +146,7 @@ export function installOrchestratorHooks(
                 ],
             },
         };
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { encoding: 'utf8' });
+        fsx.writeFileSync(configPath, JSON.stringify(config, null, 2));
         logger?.debug(`[hooks] Installed orchestrator hooks in ${hooksDir}`);
     } catch (e) {
         logger?.warn(`[hooks] Failed to write hook files: ${e}`);
@@ -129,23 +158,30 @@ export function installOrchestratorHooks(
 
 /**
  * Remove the orchestrator hook files (and the hooks dir if empty).
- * Best-effort; swallows all errors.
+ * Best-effort; swallows all errors. Filesystem access goes through the
+ * injected `IFileSystem` adapter; falls back to a direct-fs adapter for
+ * callers that don't have DI plumbed.
  */
-export function uninstallOrchestratorHooks(cwd: string, logger?: CopilotCliLogger): void {
+export function uninstallOrchestratorHooks(
+    cwd: string,
+    logger?: CopilotCliLogger,
+    fileSystem?: IFileSystem,
+): void {
     if (!cwd || !path.isAbsolute(cwd)) { return; }
+    const fsx = fileSystem ?? directFsAdapter();
     const hooksDir = path.resolve(path.join(cwd, HOOKS_DIR_REL));
     for (const name of [HOOKS_CONFIG_FILE, PS1_SCRIPT, SH_SCRIPT, POST_PS1_SCRIPT, POST_SH_SCRIPT]) {
         const p = safeHookPath(hooksDir, name);
         if (!p) { continue; }
         try {
-            if (fs.existsSync(p)) { fs.unlinkSync(p); }
+            if (fsx.existsSync(p)) { fsx.unlinkSync(p); }
         } catch (e) {
             logger?.debug(`[hooks] Failed to remove ${p}: ${e}`);
         }
     }
     try {
-        const entries = fs.readdirSync(hooksDir);
-        if (entries.length === 0) { fs.rmdirSync(hooksDir); }
+        const entries = fsx.readdirSync(hooksDir);
+        if (entries.length === 0) { fsx.rmdirSync(hooksDir); }
     } catch { /* ignore */ }
 }
 

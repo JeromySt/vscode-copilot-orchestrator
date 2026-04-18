@@ -132,6 +132,22 @@ export class DefaultFileSystem implements IFileSystem {
     return fs.promises.readdir(dirPath) as Promise<string[]>;
   }
 
+  readdirSync(dirPath: string): string[] {
+    return fs.readdirSync(dirPath) as string[];
+  }
+
+  rmdirSync(dirPath: string): void {
+    fs.rmdirSync(dirPath);
+  }
+
+  chmodSync(filePath: string, mode: number): void {
+    try {
+      fs.chmodSync(filePath, mode);
+    } catch {
+      // Best-effort: chmod is a no-op on Windows.
+    }
+  }
+
   async lstatAsync(filePath: string): Promise<{ isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean }> {
     return fs.promises.lstat(filePath);
   }

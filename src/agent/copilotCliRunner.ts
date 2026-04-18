@@ -11,6 +11,7 @@ import type { IProcessSpawner, ChildProcessLike } from '../interfaces/IProcessSp
 import type { IEnvironment } from '../interfaces/IEnvironment';
 import type { IConfigProvider } from '../interfaces/IConfigProvider';
 import type { IManagedProcessFactory } from '../interfaces/IManagedProcessFactory';
+import type { IFileSystem } from '../interfaces/IFileSystem';
 import type { IManagedProcess } from '../interfaces/IManagedProcess';
 import type { StatsHandler } from './handlers/statsHandler';
 import type { SessionIdHandler } from './handlers/sessionIdHandler';
@@ -155,13 +156,15 @@ export class CopilotCliRunner {
   private environment: IEnvironment;
   private configProvider?: IConfigProvider;
   private managedFactory?: IManagedProcessFactory;
+  private fileSystem?: IFileSystem;
   
-  constructor(logger?: CopilotCliLogger, spawner?: IProcessSpawner, environment?: IEnvironment, configProvider?: IConfigProvider, managedFactory?: IManagedProcessFactory) {
+  constructor(logger?: CopilotCliLogger, spawner?: IProcessSpawner, environment?: IEnvironment, configProvider?: IConfigProvider, managedFactory?: IManagedProcessFactory, fileSystem?: IFileSystem) {
     this.logger = logger ?? noopLogger;
     this.spawner = spawner ?? getFallbackSpawner();
     this.environment = environment ?? fallbackEnvironment;
     this.configProvider = configProvider;
     this.managedFactory = managedFactory;
+    this.fileSystem = fileSystem;
   }
   
   /**
@@ -238,7 +241,7 @@ export class CopilotCliRunner {
           // an empty configPath rather than throwing. Only mark hooks as installed
           // when the hook config was actually written, otherwise checkpoint enforcement
           // is silently disabled while the runner believes it is active.
-          const hookInstallResult = installOrchestratorHooks(cwd, this.logger);
+          const hookInstallResult = installOrchestratorHooks(cwd, this.logger, this.fileSystem);
           hooksInstalled = hookInstallResult.configPath.trim().length > 0;
           if (!hooksInstalled) {
             this.logger.warn(`[${label}] Orchestrator hooks were not installed; checkpoint enforcement remains disabled.`);
@@ -327,7 +330,7 @@ export class CopilotCliRunner {
       // Cleanup orchestrator hooks (best-effort; keeps worktrees clean between
       // sessions so a resumed session doesn't see stale hook state).
       if (hooksInstalled) {
-        try { uninstallOrchestratorHooks(cwd, this.logger); } catch { /* ignore */ }
+        try { uninstallOrchestratorHooks(cwd, this.logger, this.fileSystem); } catch { /* ignore */ }
       }
     }
   }
