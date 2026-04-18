@@ -38,7 +38,10 @@ export class OutputHandlerRegistry implements IOutputHandlerRegistry {
         }
       }
     }
-    log.info('Handlers created', {
+    // Use debug level for routine successful creation to avoid drowning out
+    // actionable logs when many short-lived processes spawn. Skipped factories
+    // and errors above are still logged at info/error level.
+    log.debug('Handlers created', {
       label: context.processLabel,
       planId: context.planId ?? '(none)',
       nodeId: context.nodeId ?? '(none)',

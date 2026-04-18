@@ -23,7 +23,9 @@ const path = require('path');
 const fs = require('fs');
 
 const tmpDir = path.join(process.cwd(), '.orchestrator', 'tmp');
-const tmpFile = path.join(tmpDir, 'test-unit-output.txt');
+// Include PID + timestamp so concurrent unit-test runs in the same workspace
+// don't contend on a single file (e.g. parallel CI shards or local dev).
+const tmpFile = path.join(tmpDir, `test-unit-output-${process.pid}-${Date.now()}.txt`);
 
 // Ensure temp directory exists
 try {
