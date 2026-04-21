@@ -18,6 +18,7 @@
     <ProjectReference Include="..\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Plan.Store\AiOrchestrator.Plan.Store.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Time\AiOrchestrator.Time.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Mcp\AiOrchestrator.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>
