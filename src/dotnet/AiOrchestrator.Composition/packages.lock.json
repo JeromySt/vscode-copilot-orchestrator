@@ -86,6 +86,16 @@
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )"
         }
       },
+      "aiorchestrator.worktreelease": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Options": "[9.0.4, )"
+        }
+      },
       "LibGit2Sharp": {
         "type": "CentralTransitive",
         "requested": "[0.30.0, )",
