@@ -10,7 +10,7 @@ namespace AiOrchestrator.Abstractions.Credentials;
 /// </summary>
 public sealed record Credential : IDisposable
 {
-    private bool _disposed;
+    private bool disposed;
 
     /// <summary>Gets the username associated with this credential.</summary>
     public required string Username { get; init; }
@@ -24,7 +24,7 @@ public sealed record Credential : IDisposable
     /// </summary>
     public void Dispose()
     {
-        _disposed = true;
+        this.disposed = true;
         GC.SuppressFinalize(this);
     }
 
@@ -32,7 +32,7 @@ public sealed record Credential : IDisposable
     /// <exception cref="ObjectDisposedException">The credential has been disposed.</exception>
     public void ThrowIfDisposed()
     {
-        if (_disposed)
+        if (this.disposed)
         {
             throw new ObjectDisposedException(nameof(Credential));
         }

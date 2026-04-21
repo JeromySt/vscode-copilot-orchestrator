@@ -13,5 +13,8 @@
 
     <!-- Analyzers -->
     <PackageVersion Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="9.0.0" />
+
+    <!-- Shared versions for test packages that reference framework types -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
   </ItemGroup>
 </Project>

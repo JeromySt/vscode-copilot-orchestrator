@@ -10,10 +10,11 @@ namespace AiOrchestrator.Models.Paths;
 /// <summary>Represents a path relative to the repository root, which may not traverse up with '..'.</summary>
 public readonly record struct RepoRelativePath
 {
-    /// <summary>Gets the raw path value.</summary>
-    public string Value { get; }
-
-    /// <summary>Initializes a new repo-relative path, rejecting parent directory traversal.</summary>
+    /// <summary>Initializes a new instance of the <see cref="RepoRelativePath"/> struct.</summary>
+    /// <param name="value">The repo-relative path value to wrap.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="value"/> is null, empty, rooted, or contains '..' segments.
+    /// </exception>
     public RepoRelativePath(string value)
     {
         if (string.IsNullOrEmpty(value))
@@ -36,9 +37,12 @@ public readonly record struct RepoRelativePath
             }
         }
 
-        Value = value;
+        this.Value = value;
     }
 
+    /// <summary>Gets the raw path value.</summary>
+    public string Value { get; }
+
     /// <inheritdoc/>
-    public override string ToString() => Value;
+    public override string ToString() => this.Value;
 }

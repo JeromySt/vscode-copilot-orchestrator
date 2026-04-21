@@ -49,7 +49,7 @@ $analyzerErrors = Select-String -Path $logFile -Pattern '\bOE0\d{4}\b' -ErrorAct
 
 if ($analyzerErrors) {
     Write-Host ""
-    Write-Host "Analyzer errors found in $Project:" -ForegroundColor Red
+    Write-Host "Analyzer errors found in ${Project}:" -ForegroundColor Red
     $analyzerErrors | ForEach-Object { Write-Host "  $($_.Line.Trim())" -ForegroundColor Red }
     exit 1
 }

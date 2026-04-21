@@ -10,10 +10,11 @@ namespace AiOrchestrator.Models.Paths;
 /// <summary>Represents a relative filesystem path that cannot be rooted.</summary>
 public readonly record struct RelativePath
 {
-    /// <summary>Gets the raw path value.</summary>
-    public string Value { get; }
-
-    /// <summary>Initializes a new relative path, throwing if rooted.</summary>
+    /// <summary>Initializes a new instance of the <see cref="RelativePath"/> struct.</summary>
+    /// <param name="value">The relative path value to wrap.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="value"/> is null, empty, or is a rooted path.
+    /// </exception>
     public RelativePath(string value)
     {
         if (string.IsNullOrEmpty(value))
@@ -26,9 +27,12 @@ public readonly record struct RelativePath
             throw new ArgumentException($"RelativePath must not be rooted. Got: '{value}'", nameof(value));
         }
 
-        Value = value;
+        this.Value = value;
     }
 
+    /// <summary>Gets the raw path value.</summary>
+    public string Value { get; }
+
     /// <inheritdoc/>
-    public override string ToString() => Value;
+    public override string ToString() => this.Value;
 }

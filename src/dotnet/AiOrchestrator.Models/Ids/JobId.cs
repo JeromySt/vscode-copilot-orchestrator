@@ -12,9 +12,13 @@ public readonly record struct JobId(Guid Value)
     private const string Prefix = "job_";
 
     /// <summary>Creates a new random job identifier.</summary>
+    /// <returns>A new <see cref="JobId"/> with a randomly generated value.</returns>
     public static JobId New() => new(Guid.NewGuid());
 
     /// <summary>Parses a job identifier from its string representation.</summary>
+    /// <param name="s">The string to parse, expected in the format <c>job_&lt;guid&gt;</c>.</param>
+    /// <returns>The parsed <see cref="JobId"/>.</returns>
+    /// <exception cref="FormatException">Thrown when <paramref name="s"/> does not match the expected format.</exception>
     public static JobId Parse(string s)
     {
         if (!TryParse(s, out var id))
@@ -26,6 +30,9 @@ public readonly record struct JobId(Guid Value)
     }
 
     /// <summary>Tries to parse a job identifier from its string representation.</summary>
+    /// <param name="s">The string to parse.</param>
+    /// <param name="id">When successful, contains the parsed <see cref="JobId"/>; otherwise the default value.</param>
+    /// <returns><see langword="true"/> if parsing succeeded; otherwise <see langword="false"/>.</returns>
     public static bool TryParse(string s, out JobId id)
     {
         id = default;
@@ -44,5 +51,5 @@ public readonly record struct JobId(Guid Value)
     }
 
     /// <inheritdoc/>
-    public override string ToString() => $"{Prefix}{Value:N}";
+    public override string ToString() => $"{Prefix}{this.Value:N}";
 }
