@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>AiOrchestrator.Composition</name>
+    </assembly>
+    <members>
+        <member name="T:AiOrchestrator.Composition.CompositionPlaceholder">
+            <summary>
+            Placeholder class that ensures the Composition project compiles.
+            Subsequent jobs add partial extension methods named <c>CompositionRoot.Add&lt;X&gt;(this IServiceCollection)</c>.
+            </summary>
+        </member>
+    </members>
+</doc>

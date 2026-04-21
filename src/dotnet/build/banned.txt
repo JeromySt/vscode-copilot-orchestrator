@@ -1,0 +1,7 @@
+M:System.DateTime.get_UtcNow;Use IClock.UtcNow
+M:System.DateTime.get_Now;Use IClock.UtcNow
+M:System.Environment.get_TickCount;Use IClock.MonotonicMilliseconds
+M:System.Threading.Thread.Sleep(System.Int32);Use IDelayProvider.Delay
+M:System.Diagnostics.Process.Start;Use IProcessSpawner
+M:System.IO.File.ReadAllText(System.String);Use IFileSystem.ReadAllTextAsync
+M:System.IO.File.WriteAllText(System.String,System.String);Use IFileSystem.WriteAllTextAsync
