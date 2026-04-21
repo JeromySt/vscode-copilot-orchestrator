@@ -1,0 +1,8 @@
+// <copyright file="PublicAPI.Unshipped.txt" company="AiOrchestrator contributors">
+// Copyright (c) AiOrchestrator contributors. All rights reserved.
+// </copyright>
+
+AiOrchestrator.PathValidator.Paths.DefaultPathValidator
+AiOrchestrator.PathValidator.Paths.DefaultPathValidator.DefaultPathValidator(System.Collections.Generic.IEnumerable<string>!) -> void
+AiOrchestrator.PathValidator.Paths.DefaultPathValidator.AssertSafe(AiOrchestrator.Models.Paths.AbsolutePath, AiOrchestrator.Models.Paths.AbsolutePath) -> void
+AiOrchestrator.PathValidator.Paths.DefaultPathValidator.OpenReadUnderRootAsync(AiOrchestrator.Models.Paths.AbsolutePath, AiOrchestrator.Models.Paths.RelativePath, System.Threading.CancellationToken) -> System.Threading.Tasks.ValueTask<System.IO.Stream!>!

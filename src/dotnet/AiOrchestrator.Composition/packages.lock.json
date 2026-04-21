@@ -29,6 +29,16 @@
           "StyleCop.Analyzers.Unstable": "1.2.0.556"
         }
       },
+      "LibGit2Sharp.NativeBinaries": {
+        "type": "Transitive",
+        "resolved": "2.0.322",
+        "contentHash": "EWQaEevzc8uS1ZGS6T83jqUPBY//2WUSCHwbZHBoHOjlfSehqr30nm/VAhJPzjam/69sv7nlLKVcho9t2XuR/Q=="
+      },
+      "Microsoft.Extensions.Primitives": {
+        "type": "Transitive",
+        "resolved": "9.0.4",
+        "contentHash": "SPFyMjyku1nqTFFJ928JAMd0QnRe4xjE7KeKnZMWXf3xk+6e0WiOZAluYtLdbJUXtsl2cCRSi8cBquJ408k8RA=="
+      },
       "StyleCop.Analyzers.Unstable": {
         "type": "Transitive",
         "resolved": "1.2.0.556",
@@ -40,8 +50,33 @@
           "AiOrchestrator.Models": "[1.0.0, )"
         }
       },
+      "aiorchestrator.filesystem": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.PathValidator": "[1.0.0, )"
+        }
+      },
+      "aiorchestrator.git": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "LibGit2Sharp": "[0.30.0, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Options": "[9.0.4, )"
+        }
+      },
       "aiorchestrator.models": {
         "type": "Project"
+      },
+      "aiorchestrator.pathvalidator": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )"
+        }
       },
       "aiorchestrator.process": {
         "type": "Project",
@@ -51,6 +86,15 @@
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )"
         }
       },
+      "LibGit2Sharp": {
+        "type": "CentralTransitive",
+        "requested": "[0.30.0, )",
+        "resolved": "0.30.0",
+        "contentHash": "1cBg/7nz6q+yzvComhqQaTS4nbXloLp/x29ZgY/Rr82ohpkuaWT8ZYzsPLFvs1zmCh/4xQbVt5sQxazGblgRig==",
+        "dependencies": {
+          "LibGit2Sharp.NativeBinaries": "[2.0.322]"
+        }
+      },
       "Microsoft.Extensions.Logging.Abstractions": {
         "type": "CentralTransitive",
         "requested": "[9.0.4, )",
@@ -58,6 +102,16 @@
         "contentHash": "0MXlimU4Dud6t+iNi5NEz3dO2w1HXdhoOLaYFuLPCjAsvlPQGwOT6V2KZRMLEhCAm/stSZt1AUv0XmDdkjvtbw==",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.4"
+        }
+      },
+      "Microsoft.Extensions.Options": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.4, )",
+        "resolved": "9.0.4",
+        "contentHash": "fiFI2+58kicqVZyt/6obqoFwHiab7LC4FkQ3mmiBJ28Yy4fAvy2+v9MRnSvvlOO8chTOjKsdafFl/K9veCPo5g==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.4",
+          "Microsoft.Extensions.Primitives": "9.0.4"
         }
       }
     }

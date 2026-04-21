@@ -22,9 +22,9 @@ public static partial class CompositionRoot
     /// <returns>The same <paramref name="services"/> instance for chaining.</returns>
     public static IServiceCollection AddProcess(this IServiceCollection services)
     {
-        services.AddSingleton<IProcessLifecycle, CrashDumpCollector>();
-        services.AddSingleton<IProcessSpawner, ProcessSpawner>();
-        services.AddSingleton<IPtyAllocator>(static _ =>
+        _ = services.AddSingleton<IProcessLifecycle, CrashDumpCollector>();
+        _ = services.AddSingleton<IProcessSpawner, ProcessSpawner>();
+        _ = services.AddSingleton<IPtyAllocator>(static _ =>
             System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
                 System.Runtime.InteropServices.OSPlatform.Windows)
                 ? new ConPtyAllocatorWindows()

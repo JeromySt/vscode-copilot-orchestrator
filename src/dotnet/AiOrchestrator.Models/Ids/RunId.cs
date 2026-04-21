@@ -2,6 +2,8 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+
 namespace AiOrchestrator.Models.Ids;
 
 /// <summary>Strongly-typed identifier for a run. Prefix: <c>run_</c>.</summary>
