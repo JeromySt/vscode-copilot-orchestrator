@@ -2,6 +2,8 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+
 namespace AiOrchestrator.Models.Ids;
 
 /// <summary>A validated 40-character hexadecimal Git commit SHA.</summary>
