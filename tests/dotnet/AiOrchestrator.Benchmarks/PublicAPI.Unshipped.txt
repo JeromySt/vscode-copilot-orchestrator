@@ -1,0 +1,35 @@
+#nullable enable
+AiOrchestrator.Benchmarks.BenchmarksProgram
+AiOrchestrator.Benchmarks.BenchmarksProgram.BenchmarksProgram() -> void
+static AiOrchestrator.Benchmarks.BenchmarksProgram.Main(string![]! args) -> int
+AiOrchestrator.Benchmarks.SloTarget
+AiOrchestrator.Benchmarks.SloTarget.BenchmarkId.get -> string!
+AiOrchestrator.Benchmarks.SloTarget.BenchmarkId.init -> void
+AiOrchestrator.Benchmarks.SloTarget.P50.get -> System.TimeSpan
+AiOrchestrator.Benchmarks.SloTarget.P50.init -> void
+AiOrchestrator.Benchmarks.SloTarget.P99.get -> System.TimeSpan
+AiOrchestrator.Benchmarks.SloTarget.P99.init -> void
+AiOrchestrator.Benchmarks.SloTarget.MaxAllocatedBytes.get -> long?
+AiOrchestrator.Benchmarks.SloTarget.MaxAllocatedBytes.init -> void
+AiOrchestrator.Benchmarks.SloTarget.SloTarget() -> void
+AiOrchestrator.Benchmarks.RegressionReport
+AiOrchestrator.Benchmarks.RegressionReport.RegressionReport() -> void
+AiOrchestrator.Benchmarks.RegressionReport.Regressions.get -> System.Collections.Immutable.ImmutableArray<AiOrchestrator.Benchmarks.RegressionFinding!>
+AiOrchestrator.Benchmarks.RegressionReport.Regressions.init -> void
+AiOrchestrator.Benchmarks.RegressionReport.Ok.get -> bool
+AiOrchestrator.Benchmarks.RegressionFinding
+AiOrchestrator.Benchmarks.RegressionFinding.RegressionFinding() -> void
+AiOrchestrator.Benchmarks.RegressionFinding.BenchmarkId.get -> string!
+AiOrchestrator.Benchmarks.RegressionFinding.BenchmarkId.init -> void
+AiOrchestrator.Benchmarks.RegressionFinding.BaselineP99.get -> System.TimeSpan
+AiOrchestrator.Benchmarks.RegressionFinding.BaselineP99.init -> void
+AiOrchestrator.Benchmarks.RegressionFinding.CurrentP99.get -> System.TimeSpan
+AiOrchestrator.Benchmarks.RegressionFinding.CurrentP99.init -> void
+AiOrchestrator.Benchmarks.RegressionFinding.DeltaPercent.get -> double
+AiOrchestrator.Benchmarks.RegressionFinding.DeltaPercent.init -> void
+AiOrchestrator.Benchmarks.RegressionFinding.Kind.get -> string!
+AiOrchestrator.Benchmarks.RegressionFinding.Kind.init -> void
+AiOrchestrator.Benchmarks.RegressionFinding.BaselineAllocatedBytes.get -> long
+AiOrchestrator.Benchmarks.RegressionFinding.BaselineAllocatedBytes.init -> void
+AiOrchestrator.Benchmarks.RegressionFinding.CurrentAllocatedBytes.get -> long
+AiOrchestrator.Benchmarks.RegressionFinding.CurrentAllocatedBytes.init -> void

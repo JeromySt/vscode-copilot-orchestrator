@@ -34,8 +34,13 @@ $repoRoot   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $projectDir = Join-Path $repoRoot 'src' 'dotnet' $Project
 
 if (-not (Test-Path $projectDir)) {
-    Write-Error "Project directory not found: $projectDir"
-    exit 1
+    $altDir = Join-Path $repoRoot 'tests' 'dotnet' "AiOrchestrator.$Project"
+    if (Test-Path $altDir) {
+        $projectDir = $altDir
+    } else {
+        Write-Error "Project directory not found: $projectDir (also tried $altDir)"
+        exit 1
+    }
 }
 
 $unshippedFile = Join-Path $projectDir 'PublicAPI.Unshipped.txt'
