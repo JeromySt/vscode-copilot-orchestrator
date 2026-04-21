@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Models</AssemblyName>
+    <RootNamespace>AiOrchestrator.Models</RootNamespace>
+  </PropertyGroup>
+
+</Project>
