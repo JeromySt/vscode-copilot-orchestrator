@@ -1,0 +1,19 @@
+{
+  "name": "ai-orchestrator-bindings",
+  "version": "0.1.0",
+  "description": "N-API bindings exposing the AiOrchestrator .NET API to Node.js callers.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "build": "tsc --noEmit src/index.ts",
+    "test": "echo \"smoke OK\""
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "ai-orchestrator-bindings-nodeside-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node-side smoke tests for the AiOrchestrator N-API bindings.",
+  "scripts": {
+    "test": "node test/smoke.test.js"
+  }
+}

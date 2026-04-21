@@ -306,11 +306,18 @@
           "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
+      "aiorchestrator.bindings.node": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Models": "[1.0.0, )"
+        }
+      },
       "aiorchestrator.composition": {
         "type": "Project",
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )",
           "AiOrchestrator.Audit": "[1.0.0, )",
+          "AiOrchestrator.Bindings.Node": "[1.0.0, )",
           "AiOrchestrator.Configuration": "[1.0.0, )",
           "AiOrchestrator.EventLog": "[1.0.0, )",
           "AiOrchestrator.Eventing": "[1.0.0, )",
