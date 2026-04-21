@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.Time\AiOrchestrator.Time.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Eventing\AiOrchestrator.Eventing.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.EventLog\AiOrchestrator.EventLog.csproj" />
   </ItemGroup>
 
 </Project>
