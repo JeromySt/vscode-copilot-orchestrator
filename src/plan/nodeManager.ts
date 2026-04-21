@@ -409,7 +409,10 @@ export class NodeManager {
       if (hasNewWork) delete nodeState.autoHealAttempted['work'];
       if (hasNewPrechecks) delete nodeState.autoHealAttempted['prechecks'];
       if (hasNewPostchecks) delete nodeState.autoHealAttempted['postchecks'];
-      if (options?.clearWorktree) delete nodeState.autoHealAttempted['setup'];
+      if (options?.clearWorktree) {
+        delete nodeState.autoHealAttempted['setup'];
+        delete nodeState.autoHealAttempted['merge-fi'];
+      }
     }
 
     if (shouldResetPhases) {

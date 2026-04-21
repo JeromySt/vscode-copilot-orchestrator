@@ -299,7 +299,7 @@ export interface NodeExecutionState {
    * Each value is the number of heal attempts for that phase.
    * Backwards-compatible: `true` is treated as 1 when reading.
    */
-  autoHealAttempted?: Partial<Record<'setup' | 'prechecks' | 'work' | 'postchecks', boolean | number>>;
+  autoHealAttempted?: Partial<Record<'setup' | 'merge-fi' | 'prechecks' | 'work' | 'postchecks', boolean | number>>;
   
   /**
    * Details about the last execution attempt (for retry context).

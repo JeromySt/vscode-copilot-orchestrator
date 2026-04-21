@@ -292,8 +292,9 @@ export async function merge(options: MergeOptions): Promise<MergeResult> {
     return { success: true, hasConflicts: false, conflictFiles: [] };
   }
   
-  // Check if it's a conflict
-  if (result.stderr.includes('CONFLICT') || result.stdout.includes('CONFLICT')) {
+  // Check if it's a conflict (including pre-existing unmerged files blocking the merge)
+  const combinedOutput = `${result.stdout}\n${result.stderr}`;
+  if (combinedOutput.includes('CONFLICT') || combinedOutput.includes('unmerged files')) {
     const conflicts = await listConflicts(cwd);
     log?.(`[merge] ⚠ Merge conflicts in ${conflicts.length} file(s)`);
     return { 

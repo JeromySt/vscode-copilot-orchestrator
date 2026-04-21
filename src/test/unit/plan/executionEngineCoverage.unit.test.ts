@@ -492,7 +492,7 @@ suite('JobExecutionEngine - Coverage', () => {
       assert.strictEqual(executeStub.callCount, 1);
     });
 
-    test('non-healable phase (merge-fi) does not trigger auto-heal', async () => {
+    test('infrastructure phase (merge-fi) triggers auto-heal as non-agent work', async () => {
       const dir = makeTmpDir();
       const plan = createTestPlan();
       const node = plan.jobs.get('node-1')! as JobNode;
@@ -513,7 +513,8 @@ suite('JobExecutionEngine - Coverage', () => {
       await engine.executeJobNode(plan, sm, node);
 
       assert.strictEqual(plan.nodeStates.get('node-1')!.status, 'failed');
-      assert.strictEqual(executeStub.callCount, 1);
+      // merge-fi is now healable — engine retries up to MAX_AUTO_HEAL_PER_PHASE+1 times
+      assert.ok(executeStub.callCount > 1, `Expected auto-heal retries, got ${executeStub.callCount} call(s)`);
     });
   });
 

@@ -146,7 +146,7 @@ export async function runAgent(
   const COMPLEXITY_FILE_COUNT = 6;
   const isExplicitlyTuned = !!spec.model || !!spec.modelTier;
   if (!isExplicitlyTuned && spec.instructions) {
-    const instrBytes = spec.instructions.length;
+    const instrBytes = Buffer.byteLength(spec.instructions, 'utf8');
     // Count "Files to create / modify" entries — heuristic: lines that look like
     // path-ish entries (contain '/' and end with file extension) inside the
     // instructions. Cheap and false-positive tolerant.

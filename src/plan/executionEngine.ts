@@ -615,7 +615,7 @@ export class JobExecutionEngine {
           // and resuming from that phase. Earlier phases that passed are
           // skipped; later phases (including commit) run normally.
           const failedPhase = result.failedPhase || 'work';
-          const isHealablePhase = ['setup', 'prechecks', 'work', 'postchecks'].includes(failedPhase);
+          const isHealablePhase = ['setup', 'merge-fi', 'prechecks', 'work', 'postchecks'].includes(failedPhase);
           // Resolve the failed phase's work spec.
           // PRIORITY: result.failedWorkSpec — set by phase executors when they have the
           // exact spec in hand (notably setup, where the failing spec is a worktreeInit
@@ -669,8 +669,12 @@ export class JobExecutionEngine {
             nodeState.resumeFromPhase = result.overrideResumeFromPhase;
           }
           
+          // Track heal budget under the phase that will actually be re-executed.
+          // When overrideResumeFromPhase is set (e.g. commit→work), track under the
+          // override target so the budget is correctly consumed and reset.
+          const healBudgetPhase = (result.overrideResumeFromPhase ?? failedPhase) as 'setup' | 'merge-fi' | 'prechecks' | 'work' | 'postchecks';
           const healCount = (() => {
-            const v = nodeState.autoHealAttempted?.[failedPhase as 'setup' | 'prechecks' | 'work' | 'postchecks'];
+            const v = nodeState.autoHealAttempted?.[healBudgetPhase];
             if (v === true) {return 1;} // backward compat
             return typeof v === 'number' ? v : 0;
           })();
@@ -683,8 +687,10 @@ export class JobExecutionEngine {
           // 2. Agent work that was externally killed (retry same agent)
           // 3. NOT blocked by phase-level noAutoHeal
           // 4. Under per-phase heal budget
+          // Infrastructure phases (merge-fi) have no work spec — they are always eligible for auto-heal
+          const isInfrastructurePhase = failedPhase === 'merge-fi';
           const shouldAttemptAutoRetry = isHealablePhase && autoHealEnabled && !phaseAlreadyHealed && !phaseNoAutoHeal &&
-            (isNonAgentWork || (isAgentWork && wasExternallyKilled));
+            (isInfrastructurePhase || isNonAgentWork || (isAgentWork && wasExternallyKilled));
           
           this.log.info(`Auto-retry shouldAttempt=${shouldAttemptAutoRetry}: isHealablePhase=${isHealablePhase}, autoHealEnabled=${autoHealEnabled}, phaseAlreadyHealed=${phaseAlreadyHealed}, phaseNoAutoHeal=${phaseNoAutoHeal}, isNonAgentWork=${isNonAgentWork}, isAgentWork=${isAgentWork}`, {
             planId: plan.id,
@@ -699,7 +705,7 @@ export class JobExecutionEngine {
             while (currentHealCount < MAX_AUTO_HEAL_PER_PHASE) {
               currentHealCount++;
               if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-              nodeState.autoHealAttempted[failedPhase as 'setup' | 'prechecks' | 'work' | 'postchecks'] = currentHealCount;
+              nodeState.autoHealAttempted[healBudgetPhase] = currentHealCount;
             
             if (isAgentWork && wasExternallyKilled) {
               // Agent was interrupted - retry with same spec (don't swap to different agent spec)

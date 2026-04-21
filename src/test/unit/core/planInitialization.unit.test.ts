@@ -881,14 +881,19 @@ suite('initializePlanRunner', () => {
       registry.setCheckpointManager(undefined as any);
     });
 
+    // Per-suite real workspace dir so PlanPersistence's mkdirSync('.orchestrator') succeeds
+    // on POSIX CI runners (where '/test/workspace' is not writable).
+    let tmpWorkspace: string;
+
+    setup(() => {
+      tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-init-test-'));
+    });
+
     teardown(() => {
       registry.setCheckpointManager(undefined as any);
       vscode.workspace.workspaceFolders = undefined;
+      try { fs.rmSync(tmpWorkspace, { recursive: true, force: true }); } catch { /* best-effort */ }
     });
-
-    // Per-suite real workspace dir so PlanPersistence's mkdirSync('.orchestrator') succeeds
-    // on POSIX CI runners (where '/test/workspace' is not writable).
-    const tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-init-test-'));
 
     async function runWithEnabled(enabled: boolean): Promise<{ planRunner?: any; initError?: unknown }> {
       const { initializePlanRunner } = require('../../../core/planInitialization');
@@ -924,8 +929,17 @@ suite('initializePlanRunner', () => {
       };
       container.registerSingleton(Tokens.IConfigProvider, () => stubProvider);
 
+      const git = container.resolve(Tokens.IGitOperations) ?? {
+        repository: { isRepo: async () => true },
+        merge: {},
+        worktree: {},
+      };
+      const debouncer = container.resolve(Tokens.IGitignoreDebouncer) ?? {
+        ensureEntries: async () => {},
+      };
+
       try {
-        const result = await initializePlanRunner(mockContext, container);
+        const result = await initializePlanRunner(mockContext, container, git, debouncer);
         return result;
       } catch (err) {
         // Surface init errors so tests don't silently pass on early-bail.
