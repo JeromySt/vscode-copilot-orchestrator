@@ -1,8 +1,29 @@
 # .NET Core Re-Architecture Plan — Decoupling DAG/Agent Orchestration from VS Code UI
 
-> **Status:** Proposal / Design Review
+> **Status:** Pre-release baseline (`pre-release/1.0.0`) — Design Review v1.1 (post-remediation)
 > **Scope:** Extract the plan/DAG engine, agent execution, and worktree orchestration out of the VS Code extension's TypeScript runtime and into a set of cross-platform .NET libraries hosted by multiple front ends (CLI, named-pipe daemon, VS Code extension, GitHub Copilot CLI plugin).
-> **Non-goals:** Redesigning any VS Code UI (Plan Sidebar, Plan Detail Panel, Node Detail Panel, Status Bar). Those continue to render exactly as today, but consume the new core via a thin transport adapter.
+> **Non-goals:** Redesigning any VS Code UI (Plan Sidebar, Plan Detail Panel, Job Detail Panel, Status Bar). Those continue to render exactly as today, but consume the new core via a thin transport adapter.
+> **Sign-off:** Architecture (Jeromy), Security (Jeromy/AssumeBreach review), Reliability (Jeromy) — all `pre-release/1.0.0` PRs require sign-off in all three columns of the PR template before merge to `main`.
+
+## 0. Glossary — canonical terms used throughout
+
+This section is the **normative glossary** for the rest of the document. When the same concept appears under multiple names elsewhere in this doc (legacy or in-flight rename), it is cross-listed below; the **canonical** column wins.
+
+| Canonical term | Aliases (informal / legacy) | Definition |
+|---|---|---|
+| **plan** | DAG, workflow | The whole user-authored unit of work — a directed acyclic graph of jobs with dependencies, persisted under `.aio/p/<plan8>/`. Identified by `PlanId`. |
+| **job** | node, task | One atomic unit of work in a plan. Has its own worktree, lifecycle, attempts, logs. Identified by `JobId`. **Historical note:** Some older sections of this doc still say "node" — they refer to the same thing. The §3.30 state machine uses "job" as the canonical term; §3.30.5 events use the `Job*` prefix on every record. The TS codebase (`svNodeBuilder.ts`, `dagUtils.ts`) uses "node"; both terms are accepted in the public RPC surface during the v1 GA window via input aliases. |
+| **phase** | (none) | One of the eight pipeline stages a job moves through: MergeFi, Setup, Prechecks, Work, Commit, Postchecks, MergeRi, Finalize. |
+| **attempt** | retry, run | One execution of one phase of one job. Numbered from 1; retries increment. Each attempt has its own log file. |
+| **run** | (often confused with attempt) | A single end-to-end invocation of a plan from a particular triggering event (CLI/UI/MCP call). One run can span many job attempts. Logged via `RunId`. |
+| **lease** | lock | An exclusive holding of a resource (worktree, plan store, vendor quota slot). Always represented as an `IAsyncDisposable` / `IResourceHandle` in code (D9). |
+| **handle** | (none) | A non-disposable value record returned by a stateless coordinator (D8) that represents a single in-flight operation (e.g., `ProcessHandle`). Distinct from a lease — handles are values, leases are disposables. |
+| **group** | bucket, swimlane | A visual/organizational subset of jobs within a plan. Has no execution semantics — pure rendering hint. Persisted in `plan.json`. |
+| **daemon** | host, server | The long-running `ai-orchestratord` process that owns plan execution. One daemon per machine is typical; multi-daemon coordination via `quota.mmf` (§3.9) is supported. |
+| **front end** | client, UI | Any process consuming the daemon's RPC surface: VS Code extension, CLI, MCP host, GH Copilot CLI plugin. |
+| **vendor / runner** | agent | A pluggable AI CLI integration (`gh copilot`/`copilot`, `claude`, scripted). Always behind `IAgentRunner`. |
+
+**Renaming policy.** A full Node→Job rename across all 5400 lines of this doc is in-flight as a follow-up branch; until that lands, the dual-term presence is intentional and aliased per the table above. New text written into this doc MUST use the canonical column.
 
 ---
 
@@ -739,16 +760,18 @@ Each vendor implements a small surface; the rest is inherited:
 
 | Capability surface | `CopilotAgentRunner` | `ClaudeAgentRunner` | `ScriptedAgentRunner` |
 |---|---|---|---|
-| CLI binary | `gh copilot` | `claude` | (none — replays a script) |
-| Argv builder | Maps `AgentRunRequest` → `gh copilot suggest/explain/agent` flags | Maps to `claude --session … --model …` | n/a |
-| Stdout parser | Recognizes Copilot's session-id banner, stats footer, hook callbacks | Recognizes Claude's `[session=…]`, `tokens=…`, `<tool_use>` markers | Replays canned lines |
-| Hook installer | Reuses today's `installOrchestratorHooks` to inject task-complete + redirect hooks | Installs Claude's MCP/hook config equivalent (vendor-specific shape) | no-op |
-| Log file discovery | `~/.config/github-copilot/logs/<date>.log` (Linux) / `%LOCALAPPDATA%\github-copilot\logs\…` | `~/.claude/logs/…` | in-memory ring buffer |
-| Session resume | `gh copilot --session <id>` | `claude --session <id>` | id is opaque |
-| Context-pressure detection | Reads stats footer + summarization markers | Reads context-window utilization line | scripted |
-| Token / cost stats | Parses footer + reads sidecar JSON if present | Parses sidecar JSON written by hook | scripted |
-| Auth / login probe | `gh auth status` + `gh copilot status` | `claude auth status` | always ok |
-| Deadlock signature | Heuristics: spinner present + 0 tokens for >Idle | Heuristics: `[thinking]` for >Idle | n/a |
+| CLI binary | `copilot` (the standalone GitHub Copilot CLI — **not** `gh copilot`; see §3.2.6.1 A1) | `claude` | (none — replays a script) |
+| Argv builder | Maps `AgentRunRequest` → `copilot -p <task> --stream off --add-dir … --model … --resume …` flags per the §3.2.6.1 argv contract | Maps to `claude --session … --model …` | n/a |
+| Stdout parser | Recognizes Copilot's session-id banner (P-SID-1..3), stats footer (P-ST-1..6), debug-log context-pressure markers (P-CP-1..7) | Recognizes Claude's `[session=…]`, `tokens=…`, `<tool_use>` markers | Replays canned lines |
+| Hook installer | Writes `<cwd>/.github/hooks/orchestrator-*` files per §3.2.6.6 HK-FILES; gates checkpoint-required state via the daemon-mediated RPC in HK-GATE | Installs Claude's MCP/hook config equivalent (vendor-specific shape) | no-op |
+| Log file discovery | `<configDir>/logs/<date>.log` when `--log-dir` is set (A11); fallback `~/.config/github-copilot/logs/<date>.log` (Linux) / `%LOCALAPPDATA%\github-copilot\logs\…` (Windows) | `~/.claude/logs/…` | in-memory ring buffer |
+| Session resume | `copilot --resume <uuid>` (A13); UUID validated before spawn (SR-5) | `claude --session <id>` | id is opaque |
+| Context-pressure detection | Reads debug-log JSON markers P-CP-1..7 (input/output/cache tokens, max prompt/window, `truncateBasedOn`); thresholds Normal/Elevated/Critical/Compacting per THR-* | Reads context-window utilization line | scripted |
+| Token / cost stats | Parses stats footer P-ST-1..6 + per-model breakdown; reads sidecar JSON when hook-v2 enabled | Parses sidecar JSON written by hook | scripted |
+| Auth / login probe | CP-4 `gh auth status` (ecosystem hint) + CP-8 `copilot auth status` (canonical) | `claude auth status` | always ok |
+| Deadlock signature | Heuristics: spinner present + 0 tokens for >L2 IdleStdout | Heuristics: `[thinking]` for >IdleStdout | n/a |
+
+> **Front-end clarification.** The vendor `CopilotAgentRunner` always invokes the standalone `copilot` binary directly (§3.2.6.1 A1). The `gh copilot ai-orchestrator` plugin entry point (§2.1, §3.21) is a **front-end distribution channel** — it lets users invoke our CLI through `gh`, but the orchestrator daemon it talks to still spawns `copilot`, never `gh copilot`. These are separate concerns and both are correct as written elsewhere in this doc.
 
 Vendor-specific behaviors live behind small interfaces. Each follows §3.5 — single request record, no positional explosion, results as records (not raw primitives) where evolution is likely:
 
@@ -881,9 +904,11 @@ Source: `stdout`. Tried in order; first match wins; subsequent lines after a suc
 
 | # | Pattern | Capture group → field |
 |---|---|---|
-| P-SID-1 | `/Session ID[:\s]+([a-f0-9-]{36})/i` | `$1 → AgentSessionId.SessionId` |
-| P-SID-2 | `/session[:\s]+([a-f0-9-]{36})/i` | `$1 → AgentSessionId.SessionId` |
-| P-SID-3 | `/Starting session[:\s]+([a-f0-9-]{36})/i` | `$1 → AgentSessionId.SessionId` |
+| P-SID-1 | `/(?:^|\s)Session ID[:\s]+([a-f0-9-]{36})(?=\b)/i` | `$1 → AgentSessionId.SessionId` |
+| P-SID-2 | `/(?:^|\s)session[:\s]+([a-f0-9-]{36})(?=\b)/i` (anchored to word/line boundary so a stray `--no-session: <uuid>` or substring like `subsession:` does not false-match; only triggered if P-SID-1 and P-SID-3 did not match) | `$1 → AgentSessionId.SessionId` |
+| P-SID-3 | `/(?:^|\s)Starting session[:\s]+([a-f0-9-]{36})(?=\b)/i` | `$1 → AgentSessionId.SessionId` |
+
+**SID match precedence (P-SID-PREC):** Patterns are tried P-SID-1 → P-SID-3 → P-SID-2 in that order on each line. P-SID-2 is the loosest pattern and is consulted last so that a more specific banner is preferred when both could match. The captured UUID is validated as RFC 4122 v4-compatible via `Guid.TryParseExact(_, "D")` before publishing `AgentSessionId`; rejected captures emit `AgentParseWarning { reason: "invalid-session-uuid" }` and continue scanning.
 
 Emitted event: `AgentSessionId { runId, sessionId, sequence, at }`. Exactly one per run (idempotent thereafter).
 
@@ -991,24 +1016,86 @@ Written under `<cwd>/.github/hooks/` (NOT under `<configDir>` — these are repo
 }
 ```
 
-###### Pressure-gate semantics (HK-GATE)
+###### Pressure-gate semantics (HK-GATE) — daemon-mediated, not in-script
 
-Both `.ps1` and `.sh` implement identical logic. Inputs/outputs:
+The original draft of this section put the policy decision (sentinel-file checks, tool allowlist matching, JSON parsing via `sed`/`grep`) inside the `.ps1`/`.sh` files themselves. That design was rejected during security review for three reasons:
 
-- **Stdin (CLI-supplied):** JSON `{"cwd": "...", "toolName": "...", "toolArgs": {...}}`.
-- **Sentinel path (read):** `<cwd>/.aio/.ps/CHECKPOINT_REQUIRED` (TS today writes `.orchestrator/CHECKPOINT_REQUIRED`; C# uses `.aio/.ps/` per §3.28).
-- **Manifest path (read):** `<cwd>/.aio/.ps/checkpoint-manifest.json` (same rename).
+1. **The hook scripts run inside the `copilot` CLI's process tree under whatever user identity the user happens to be running as** — a hook script that does its own filesystem-state checks and JSON parsing is an attack surface (input from CLI stdin is untrusted; `sed`/`grep` JSON parsing is not safe against adversarial input; symlink-following on the sentinel-file path opens a TOCTOU window).
+2. **The allowlist is policy, not configuration** — encoding it inline in shell means every policy update requires regenerating and rewriting hook files; we cannot change behavior on a running daemon.
+3. **The script cannot tell whether the sentinel file is stale** — a crashed daemon may leave `CHECKPOINT_REQUIRED` behind; in-script logic has no way to test daemon liveness.
 
-Decision table:
+The shipping design is **daemon-mediated**: the hook scripts shrink to a thin invocation of an `ai-orchestrator hook-gate` subcommand that opens the daemon's named pipe, authenticates with the per-worktree nonce planted at hook-install time, and forwards the CLI's JSON stdin verbatim. The daemon owns the policy decision atomically using its current in-memory plan/job state; the hook script makes no decisions and reads no state files.
 
-| State | Tool name | Decision | Stdout |
-|---|---|---|---|
-| No sentinel file | (any) | allow | `exit 0` (no body) |
-| Sentinel + manifest present | (any) | allow | `exit 0` |
-| Sentinel only, tool ∈ allowlist | `view`, `read`, `bash`, `shell`, `write`, `edit`, `create`, `str_replace_editor`, `str_replace`, `multi_tool_use` | allow | `exit 0` |
-| Sentinel only, tool ∉ allowlist | (any other) | **deny** | `{"permissionDecision":"deny","permissionDecisionReason":"ORCHESTRATOR_CHECKPOINT_REQUIRED: write checkpoint-manifest.json before continuing"}` then `exit 0` |
+**Hook script body (HK-GATE-SH-1, HK-GATE-PS1-1) — both files are ~10 lines:**
 
-**Allowlist is exact-match, case-sensitive.** Both gates parse stdin JSON without external dependencies (no `jq`); the `.sh` uses POSIX `sed`/`grep`, the `.ps1` uses `ConvertFrom-Json`.
+```sh
+#!/bin/sh
+# orchestrator-pressure-gate.sh — HK-GATE shell stub. DO NOT add policy logic here;
+# every decision is made by the daemon. Returns the daemon's verdict verbatim.
+set -eu
+NONCE_FILE="${ORCHESTRATOR_HOOK_NONCE_FILE:-$(dirname "$0")/.gate-nonce}"
+exec "$(command -v ai-orchestrator || echo /usr/local/bin/ai-orchestrator)" \
+    hook-gate \
+    --nonce-file "$NONCE_FILE" \
+    --cwd "$PWD" \
+    --pipe "${ORCHESTRATOR_PIPE:-}"   # stdin (CLI's JSON) and stdout (daemon verdict) flow through
+```
+
+```powershell
+# orchestrator-pressure-gate.ps1 — HK-GATE Windows stub. DO NOT add policy logic here.
+$ErrorActionPreference = 'Stop'
+$nonceFile = if ($env:ORCHESTRATOR_HOOK_NONCE_FILE) { $env:ORCHESTRATOR_HOOK_NONCE_FILE } else { Join-Path $PSScriptRoot '.gate-nonce' }
+$exe = (Get-Command ai-orchestrator -ErrorAction SilentlyContinue)?.Source
+if (-not $exe) { $exe = Join-Path $env:LOCALAPPDATA 'ai-orchestrator\ai-orchestrator.exe' }
+& $exe hook-gate --nonce-file $nonceFile --cwd $PWD --pipe $env:ORCHESTRATOR_PIPE
+exit $LASTEXITCODE
+```
+
+**Daemon RPC contract (HK-GATE-RPC-1) — `hooks.checkpointGate.evaluate`:**
+
+```jsonc
+// Request (over named pipe, framed per §3.4)
+{
+  "method": "hooks.checkpointGate.evaluate",
+  "auth":   { "nonce": "<base64-128-bit, single-use, planted at hook-install>" },
+  "params": {
+    "cwd":      "<absolute path, validated against worktree root>",
+    "toolName": "<verbatim from CLI stdin>",
+    "toolArgs": { /* opaque to gate; passed through for audit only */ }
+  }
+}
+
+// Response — handed back to the CLI on the gate's stdout
+{ "permissionDecision": "allow" | "deny",
+  "permissionDecisionReason": "<localized human string when denied; empty on allow>" }
+```
+
+**Decision policy (HK-GATE-POLICY-*), evaluated atomically inside the daemon under the plan-store reader lease:**
+
+| # | Daemon-side rule |
+|---|---|
+| HK-GATE-POLICY-1 | Resolve `cwd` to a job by reverse-mapping worktree root \u2192 `JobId`. Unknown `cwd` \u21d2 `deny` with reason `unknown-worktree`. |
+| HK-GATE-POLICY-2 | Look up the job's current `CheckpointState` from in-memory plan state (NOT from a sentinel file — the file is removed in v1.1+). States: `None`, `Required`, `Honored`. |
+| HK-GATE-POLICY-3 | If `CheckpointState == None` or `Honored` \u21d2 `allow`. |
+| HK-GATE-POLICY-4 | If `CheckpointState == Required` and `toolName` is in the allowlist (`view`, `read`, `bash`, `shell`, `write`, `edit`, `create`, `str_replace_editor`, `str_replace`, `multi_tool_use`) \u21d2 `allow`. **The allowlist lives in the daemon's compiled-in policy table, not in the hook script.** Adding a tool to the allowlist is a daemon code change reviewed under \u00a73.27.2 audit policy. |
+| HK-GATE-POLICY-5 | Otherwise \u21d2 `deny` with `ORCHESTRATOR_CHECKPOINT_REQUIRED: write checkpoint-manifest.json before continuing`. |
+| HK-GATE-POLICY-6 | Every gate evaluation is recorded in the audit log (\u00a73.27.2) with `action: "hook.gate.evaluated"`, `subject: { kind: "job", id: <JobId> }`, `outcome: "allow" | "deny"`, `details: { toolName, checkpointState, allowlistHit }`. |
+
+**Nonce protocol (HK-GATE-NONCE-*):**
+
+| # | Rule |
+|---|---|
+| HK-GATE-NONCE-1 | At hook install (\u00a73.2.6.6 HK-IDEM), the daemon generates a 128-bit cryptographically random nonce, writes it to `<cwd>/.github/hooks/.gate-nonce` with mode 0600 (POSIX) / owner-only ACL (Windows), and registers it in the daemon's `HookNonceTable` keyed by the file path \u2192 `JobId`. |
+| HK-GATE-NONCE-2 | The nonce file is gitignored by default; the orchestrator's `.gitignore`-augmenting setup writes `.github/hooks/.gate-nonce` to the repo's `.gitignore` if absent. The `ai-orchestrator` `setup` doctor warns if the nonce file is committed. |
+| HK-GATE-NONCE-3 | Each gate invocation re-reads the nonce file and presents it to the daemon. The daemon validates that the nonce matches the table entry for the file path AND that the file path resolves under a worktree the daemon owns a lease on. Nonces are NOT single-use within a job (the gate fires per-tool-use); they are rotated on each hook re-install. |
+| HK-GATE-NONCE-4 | If the named pipe is unavailable (daemon down, pipe lease lost), the gate exits with the **fail-closed** verdict `deny` and reason `daemon-unavailable`. We never fail-open \u2014 a missing daemon must not silently grant unrestricted access. |
+| HK-GATE-NONCE-5 | If the nonce file is missing, the gate exits `deny` with `nonce-missing`. The CLI then surfaces a clear setup error. |
+
+**Path-traversal guard (HK-GATE-PATH-1):** The daemon validates `params.cwd` by `Path.GetFullPath` and asserts the result `StartsWith(workrootForJob)`. Symlinks in `cwd` are rejected (the daemon `lstat`s the path). This closes the in-script TOCTOU window the rejected design had.
+
+**JSON parsing (HK-GATE-JSON-1):** All JSON parsing happens in the daemon using `System.Text.Json` source-gen. The hook script is JSON-blind \u2014 it forwards stdin bytes to the daemon and stdout bytes from the daemon back to the CLI without inspection. There is no `sed`/`grep`/`ConvertFrom-Json` in the gate script.
+
+**Migration note.** The `<cwd>/.aio/.ps/CHECKPOINT_REQUIRED` sentinel file from earlier drafts is removed in this design \u2014 daemon in-memory `CheckpointState` is the single source of truth. A daemon restart that loses checkpoint state recovers it from the durable event log (\u00a73.30.5) on plan replay; if replay is impossible, the job's checkpoint state defaults to `Required` (fail-safe) until the agent emits the next checkpoint manifest.
 
 ###### Idempotency / upgrade (HK-IDEM)
 
@@ -4696,32 +4783,92 @@ These targets are codified in the BenchmarkDotNet suite (§3.24.5) and tracked a
 
 ### 3.27.2 Audit log schema
 
-The audit log (§3.11.1) is NDJSON; one record per line; UTF-8; never rotated mid-line; never localized (rule L1). Schema:
+The audit log (§3.11.1) is NDJSON; one record per line; UTF-8; never rotated mid-line; never localized (rule L1). Every monthly file is **tamper-evident** via an HMAC chain plus per-segment ed25519 signature \u2014 see §3.27.2.1 below.
+
+**File header (record 0 of every monthly file)** \u2014 self-contained, contains the public key needed to verify every subsequent record:
+
+```jsonc
+{
+  "$type":           "AuditHeader",
+  "schemaVersion":   1,
+  "segmentId":       "<uuid v4 — unique per monthly file>",
+  "createdAtUtc":    "2026-04-01T00:00:00.000Z",
+  "daemonInstanceId":"<uuid v4 — stable per daemon install>",
+  "daemonVersion":   "1.0.0",
+  "keyId":           "<base64url(sha256(publicKey))>",
+  "publicKey":       "<base64-ed25519-32-byte-public-key>",
+  "keyAlgo":         "ed25519",
+  "hmacAlgo":        "HMAC-SHA256",
+  "previousSegment": { "segmentId": "<uuid or null>", "lastChainHmac": "<base64 or null>", "fileSha256": "<base64 or null>" }
+}
+```
+
+**Per-record schema (records 1..N)** \u2014 the operational events; the schema below is the v1 floor:
 
 ```jsonc
 {
   "schemaVersion": 1,
-  "atUtc": "2026-04-20T12:00:00.123Z",
-  "actorKind": "user|daemon|plugin|system",
-  "actorId":   "<sid|pluginId|daemonInstanceId>",
-  "sessionId": "<sessionId or null>",
-  "traceId":   "<W3C trace id or null>",
-  "action":    "plan.create|plan.cancel|plan.delete|plugin.trust.add|plugin.trust.revoke|config.changed|daemon.shutdown|rpc.invoked",
-  "subject":   { "kind": "plan|node|plugin|config|rpc", "id": "..." },
-  "outcome":   "success|denied|failed",
-  "details":   { /* bounded, redacted JSON */ }
+  "seq":         1,
+  "atUtc":       "2026-04-20T12:00:00.123Z",
+  "actorKind":   "user|daemon|plugin|system",
+  "actorId":     "<sid|pluginId|daemonInstanceId>",
+  "sessionId":   "<sessionId or null>",
+  "traceId":     "<W3C trace id or null>",
+  "action":      "plan.create|plan.cancel|plan.delete|plugin.trust.add|plugin.trust.revoke|config.changed|daemon.shutdown|rpc.invoked|hook.gate.evaluated|hook.installed|hook.removed|lease.stolen|plan.import|plan.export|plan.rollback",
+  "subject":     { "kind": "plan|node|job|plugin|config|rpc|hook", "id": "..." },
+  "outcome":     "success|denied|failed",
+  "details":     { /* bounded, redacted JSON; max 4 KiB after redaction */ },
+  "chainHmac":   "<base64-HMAC-SHA256(secretKey, prevChainHmac || canonicalize(record-without-chainHmac-and-signature))>",
+  "signature":   "<base64-ed25519(privateKey, chainHmac)>"
 }
 ```
 
-Audited actions (the **closed set** v1 supports — every other action is *not* audited; adding to this set is a minor schema bump):
+**Audited actions (the closed set v1 supports** \u2014 every other action is *not* audited; adding to this set is a minor schema bump):
 
-- Plan lifecycle: create, finalize, pause, resume, cancel, delete, import, export.
-- Plugin trust: add, revoke, override.
-- Config: any non-hot-reloadable change; any change to `Auth:*` or `Plugins:*`.
-- Daemon: start, shutdown, ownership-acquired, ownership-reclaimed.
+- Plan lifecycle: create, finalize, pause, resume, cancel, delete, import, export, rollback.
+- Plugin trust: add, revoke, override, key-rotation.
+- Config: any non-hot-reloadable change; any change to `Auth:*`, `Plugins:*`, or `Audit:*`.
+- Daemon: start, shutdown, ownership-acquired, ownership-reclaimed, self-update-pending, self-update-rolled-back.
+- Hooks: install, remove, gate-evaluated (one record per CLI tool-use gate decision; `details.toolName` + `details.checkpointState` + `details.allowlistHit`).
+- Leases: stolen (when LS-5 lease-steal completes), in-flight-aborted (when stolen-from owner cancels its in-flight transaction per LS-INF-*).
 - RPC: any method whose `IAuditPolicy` says `Audit = true` (default true for all mutating RPCs; explicitly false for `events.subscribe` and read-only queries).
 
 The audit log is the *only* surface that can confirm "did user X do Y at time Z" for security review. It is never deleted automatically (§3.11.4).
+
+#### 3.27.2.1 Tamper-evidence \u2014 HMAC chain + ed25519 signature with embedded public key
+
+Three orthogonal mechanisms, each defending against a different attacker class:
+
+**Layer 1 \u2014 HMAC chain (defends against single-record tampering by any reader):** Every record's `chainHmac` is `HMAC-SHA256(secretKey, prevChainHmac || canonicalize(record-minus-chainHmac-and-signature))`. The header record's `chainHmac` is computed over `previousSegment.lastChainHmac` (or 32 zero bytes if this is the first-ever segment). An attacker who edits, inserts, or deletes a single record breaks the chain at that point and every subsequent record's HMAC fails to verify. `secretKey` is a 256-bit symmetric key generated alongside the ed25519 keypair, persisted under `<dataDir>/keys/audit-<keyId>.hmac` with 0600 perms (POSIX) / owner-only ACL (Windows), and **never written to disk anywhere outside `<dataDir>/keys/`**. The verifier needs `secretKey` to validate the chain end-to-end \u2014 so chain validation is daemon-local; cross-machine verifiers fall back to layer 2.
+
+**Layer 2 \u2014 ed25519 signature (defends against full-file replacement by an attacker without `secretKey`):** Each record's `signature` is `ed25519(privateKey, chainHmac)`. The public key is **embedded in the file header** (`publicKey` field) so the file is self-verifying \u2014 a verifier needs only the file itself plus the public key (which is in the file) to confirm that whoever produced this file possessed the matching private key. This means:
+
+- The verifier tool (`ai-orchestrator audit verify <log-path>`) parses the header, extracts `publicKey`, walks every subsequent record, and verifies `signature` against `chainHmac` using the embedded public key.
+- An attacker who edits any record in place must re-sign it, which requires the private key (stored only in `<dataDir>/keys/audit-<keyId>.priv` with 0600 perms, never crossed onto the network).
+- An attacker with full filesystem write but **not** code-execution as the daemon-owning user cannot tamper without breaking signatures.
+
+**Layer 3 \u2014 cross-channel pubkey attestation (defends against full-file replacement by an attacker who has both filesystem write AND code execution):** The daemon emits an `AuditPubkeyAttestation` event over the named pipe (\u00a73.4.2 EventBus, Security category) at every keypair generation, key rotation, segment rotation, and graceful shutdown. The event payload is `{ keyId, publicKey, segmentId, firstSeq, lastSeq, segmentSha256, atUtc }`. Subscribers \u2014 the in-memory T2 event log, OpenTelemetry exporter, and any remote audit-aggregator the user has configured \u2014 durably record it. An attacker who rewrites the local audit file can no longer rewrite the cross-channel attestation history without simultaneously compromising those independent stores. **This is the only layer that defends against root-on-machine compromise; if you don't run an external aggregator you are accepting that a root-equivalent attacker can replace audit history.** Documented as a known limit; the user opts in to layer 3 by configuring an aggregator (out-of-tree integration in v1; first-party integration is post-v1).
+
+##### 3.27.2.2 Key storage \u2014 do **not** commit keys to the repo
+
+Per security-review explicit decision: **public keys are NOT committed to the repo for any reason.** Reasons:
+
+- Secret-scanning tools (TruffleHog, gitleaks, GitHub secret scanning) increasingly flag ed25519-shaped strings as potential leaks; committing public keys produces noisy false positives in every plan run.
+- One-key-per-run committed to the repo would cause unbounded repo bloat (a daemon used continuously for a year produces thousands of keys).
+- Embedding the public key in the audit-log header (Layer 2) makes the file self-verifying; no external lookup needed.
+- An external publication channel (release manifest, key-server) is a *post-v1* concern for the rare cross-fleet verification scenario; we do not need it for v1.
+
+**Storage layout (KEY-STORE-*):**
+
+| # | Rule |
+|---|---|
+| KEY-STORE-1 | Keypair files live under the OS-conventional per-user data directory: Linux `${XDG_DATA_HOME:-~/.local/share}/ai-orchestrator/keys/`, macOS `~/Library/Application Support/ai-orchestrator/keys/`, Windows `%LOCALAPPDATA%\ai-orchestrator\keys\`. **Never under the repo working tree.** Never under `~/.config/` (which users sometimes commit via dotfile repos). |
+| KEY-STORE-2 | Files: `audit-<keyId>.priv` (32-byte raw ed25519 private key, mode 0600 / owner-only DACL), `audit-<keyId>.pub` (32-byte raw public key, mode 0644 / world-readable), `audit-<keyId>.hmac` (32-byte symmetric secret for chain HMAC, mode 0600). The `keyId` is `base64url(sha256(publicKey))` truncated to 16 chars. |
+| KEY-STORE-3 | On daemon startup, if no keypair exists, generate one. If exactly one exists, reuse. If multiple exist, the *most recent* (by mtime) is the active signing key; older keys are kept for verifying older audit segments and are never deleted automatically (audit log is forever-retained per \u00a73.11.4). |
+| KEY-STORE-4 | The daemon refuses to start if it cannot write to the keys directory or if file permissions are weaker than KEY-STORE-2 (the daemon attempts a permission-tighten on startup and emits `AuditKeyPermissionsFixed` or `AuditKeyPermissionsRefused` accordingly). |
+| KEY-STORE-5 | **Key rotation** is initiated by `ai-orchestrator audit rotate-key` (CLI) or automatically every 90 days (`Audit:KeyRotationDays`). On rotation: (a) generate a new keypair; (b) close the current monthly audit file with a footer record `{ "$type":"AuditFooter", "rotatedToKeyId":"<new>", "lastChainHmac":"<final>", "fileSha256":"<sha256-of-file-up-to-this-point>" }`; (c) start a new monthly file whose header `previousSegment` references the just-closed file's segmentId, lastChainHmac, and fileSha256; (d) emit `AuditPubkeyAttestation` for the new key (Layer 3). The chain therefore extends across rotations \u2014 a verifier walking from segment N back to segment 1 can detect any missing intermediate segment. |
+| KEY-STORE-6 | **Key revocation/compromise** \u2014 if a private key is suspected compromised, the operator runs `ai-orchestrator audit revoke-key <keyId> --reason <text>`. This forces an immediate rotation (KEY-STORE-5), records `KeyRevoked { keyId, reason }` in the new segment, and the verifier flags any future records signed with the revoked `keyId` as `verifier-warning: revoked-key`. We do not delete the revoked key file (needed to verify pre-revocation segments). |
+| KEY-STORE-7 | All key material is excluded from the diagnose bundle (\u00a73.13.4) by an explicit deny-list rule; the bundle includes only the `keyId` (a hash) so the verifier knows which key to look for, never the private key. |
 
 ### 3.27.3 Publisher rate limiting
 
@@ -5793,7 +5940,265 @@ Each job is sized to fit in one PR. Effort hints map to `effort: low/medium/high
 
 ---
 
+## 3.31 v1.1 Remediation Addendum
 
+This section consolidates the v1.1 design refinements adopted during the `pre-release/1.0.0` security & reliability review (April 2026). Each subsection cross-references the original section it amends. When the addendum disagrees with an earlier section, **the addendum wins** for v1 GA — the originating section will be folded in during the post-GA editorial pass. The addendum's review-tracked changes were sign-off-gated under the §0 status header process.
+
+### 3.31.1 Security additions
+
+#### 3.31.1.1 GCM URL allowlist (amends §3.3.1)
+
+The per-remote credential resolver in §3.3.1 invokes `git credential fill` against any remote URL the worktree carries. A malicious `git config remote.<name>.url` set inside a worktree could redirect credential prompts to an attacker-controlled host. Mitigation:
+
+| # | Rule |
+|---|---|
+| GCM-URL-1 | Before invoking `git credential fill`, the resolver parses the remote URL and validates `host` against the per-workspace allowlist `Auth:RemoteHostAllowlist` (default: `["github.com", "*.github.com", "ghe.io", "*.ghe.io"]`). Wildcards are leftmost-only label matching. |
+| GCM-URL-2 | URLs whose `scheme` is not `https` or `ssh` are rejected outright. |
+| GCM-URL-3 | URLs containing `@` userinfo are rejected (the credential should come from GCM, never from the URL). |
+| GCM-URL-4 | A rejected URL emits `RemoteRejected { url, reason }` (Security category, audit-logged) and the credential resolution returns failure without invoking GCM. |
+| GCM-URL-5 | The allowlist is hot-reloadable; changes take effect for the next resolution call. |
+
+#### 3.31.1.2 EventFilter AuthContext (amends §3.4.2)
+
+Subscribers to `IEventBus` carry an `AuthContext` describing the connection identity. The bus filter pipeline applies authorization before delivering events:
+
+```csharp
+public sealed record AuthContext
+{
+    public required string         ConnectionId  { get; init; }
+    public required AuthPrincipal  Principal     { get; init; } // user|daemon|plugin|system
+    public required IReadOnlySet<string> Scopes  { get; init; } // e.g., "events:plan:*", "events:audit:read"
+    public required ConnectionOrigin Origin      { get; init; } // Local | RemotePipe | InProc
+}
+
+public interface IEventBusAuthorizer
+{
+    bool CanSubscribe(EventCategory category, AuthContext ctx);
+    bool CanReceive  (AiOrchestratorEvent ev,    AuthContext ctx);
+}
+```
+
+| # | Rule (EVT-AUTH-*) |
+|---|---|
+| EVT-AUTH-1 | Every `Subscribe` call carries an `AuthContext`; missing `AuthContext` is rejected with `auth_required`. |
+| EVT-AUTH-2 | The default authorizer denies `Audit` and `Security` category events to any non-`daemon`/non-`system` principal. |
+| EVT-AUTH-3 | Plugin-origin subscriptions are scoped to events emitted *by their own plugin*; cross-plugin event eavesdropping is denied by default. |
+| EVT-AUTH-4 | Filter rejection emits a single `SubscriptionDenied { reason }` event back to the rejected subscriber and is recorded once in the audit log. |
+
+#### 3.31.1.3 Diagnose bundle pseudonymization (amends §3.13.4)
+
+The `daemon diagnose` bundle currently captures plan/job state, log files, and configuration. To make it safe to share with support without leaking customer data:
+
+| # | Rule (DIAG-*) |
+|---|---|
+| DIAG-1 | Every captured file passes through `IDiagnoseRedactor` before bundling. The redactor applies (a) the standard `ISecretRedactor` regex set; (b) a path-pseudonymizer that replaces real worktree paths with stable hashes (`<wt-a3f9>`); (c) a content-pseudonymizer that replaces source-file content with `[REDACTED-N-LINES]` markers, retaining only file paths and line counts. |
+| DIAG-2 | The bundle is wrapped in an age-encrypted (X25519) tarball; the public key is `support@ai-orchestrator` (published in the README). The user can disable encryption with `--unencrypted` if they need to inspect locally; encryption is the default. |
+| DIAG-3 | The bundle's `manifest.json` lists every file with its size and a `redactionsApplied` count, so the support engineer knows what was scrubbed. |
+| DIAG-4 | The bundle never includes private keys (KEY-STORE-7), nonces, tokens, or any file under `<dataDir>/keys/`. |
+| DIAG-5 | The user is shown a one-screen confirmation before the bundle is written, listing the file count and whether sensitive material was found and redacted. |
+
+#### 3.31.1.4 Cmd tempfile creation (amends §3.19, W3)
+
+Tempfile-based `cmd.exe` invocation must atomically create the script file with exclusive ownership:
+
+| # | Rule (CMD-TMP-*) |
+|---|---|
+| CMD-TMP-1 | The tempfile is created with `FileMode.CreateNew` + `FileShare.None` + `FileOptions.WriteThrough` and on POSIX with `O_CREAT | O_EXCL | O_NOFOLLOW`; on Windows with `CREATE_NEW`. Failure to create-exclusive aborts the spawn (no overwrite of an existing file). |
+| CMD-TMP-2 | The file's ACL on Windows is set to owner-only via `FileSecurity.SetAccessRule(new FileSystemAccessRule(currentUser, FullControl, Allow))` with explicit `PurgeAccessRules` first; on POSIX the umask is `0077` and `chmod 0700` is asserted post-create. |
+| CMD-TMP-3 | The tempfile path under `<cwd>/.aio/.ps/cmd-tmp/<guid>.cmd` is validated via `IPathValidator.OpenScopedAsync` (§3.19.1) so symlink/junction attacks are caught at `open()`, not after. |
+| CMD-TMP-4 | Cleanup in `finally` (W3) uses the file handle, not the path, where possible \u2014 `File.Delete(path)` is the fallback when the handle has already been closed. |
+
+#### 3.31.1.5 Trust-file ACLs (amends §3.10.3)
+
+`~/.config/ai-orchestrator/trusted-publishers.json` stores plugin-trust pinned keys; tampering with this file is equivalent to bypassing plugin signature verification:
+
+| # | Rule (TRUST-ACL-*) |
+|---|---|
+| TRUST-ACL-1 | The file's ACL is owner-only (POSIX 0600, Windows owner-only DACL). The daemon refuses to start if the file's permissions are weaker; an automatic permission-tighten is attempted, with `TrustFilePermissionsFixed` or `TrustFilePermissionsRefused` audit events. |
+| TRUST-ACL-2 | The containing directory `~/.config/ai-orchestrator/` is also enforced 0700 / owner-only. |
+| TRUST-ACL-3 | Any modification to the trust file goes through `IPluginTrustStore.AddAsync` / `RevokeAsync` / `RotateAsync`, never through direct file write. The store appends to an immutable transcript at `<dataDir>/trust-transcript.ndjson` (signed with the audit key, KEY-STORE-2) so trust changes are auditable across daemon lifetimes. |
+| TRUST-ACL-4 | On startup the daemon verifies the trust-transcript chain; a broken chain emits `TrustTranscriptCorrupted` and refuses to load any plugin until the operator runs `ai-orchestrator plugin trust verify --rebuild`. |
+
+### 3.31.2 Reliability & correctness additions
+
+#### 3.31.2.1 Lease-steal CAS-under-lock + in-flight cancel (amends §3.30.7 LS-5)
+
+The original LS-5 specified lease-steal via heartbeat staleness but did not specify ordering with respect to in-flight transactions. The complete protocol:
+
+| # | Rule (LS-CAS-*) |
+|---|---|
+| LS-CAS-1 | The steal operation is: (a) acquire OS-level exclusive lock on `lease.lock` via `LockFileEx`/`flock`; (b) read the file; (c) verify `lastHeartbeatUtc < now - StaleAfter` AND `leaseEpoch == observedEpoch`; (d) write a new lease record with `leaseEpoch = observedEpoch + 1` and the new owner's identity; (e) `fsync`; (f) release the OS lock. The CAS is the (observedEpoch == previousEpoch) check inside the OS-level lock \u2014 **no read-then-write window outside the lock**. |
+| LS-CAS-2 | The previous owner's heartbeat thread is the source of steal-detection: each heartbeat tick re-acquires the OS lock, reads `leaseEpoch`, and if it has advanced beyond what this daemon last wrote, the daemon enters `LeaseLost` mode atomically. |
+| LS-CAS-3 (in-flight, LS-INF) | When `LeaseLost` fires, every in-flight write transaction (journal-pending RW-2 op, scheduler dispatch, reshape) is hard-cancelled via the daemon's master `CancellationTokenSource`. **In-flight transactions whose journal entry was written but not yet applied are NOT re-applied by the new owner** \u2014 the new owner sees the journal on disk and discards entries whose `ownerEpoch` is less than the current `leaseEpoch` (RW-2 protocol). This prevents two daemons from both committing the "same" transaction. |
+| LS-CAS-4 | The new owner emits `LeaseStolen { fromEpoch, fromOwner, toEpoch, toOwner, atUtc, abortedTransactions: [{txnId, kind}] }` to the audit log AND to the bus (Security category). The old owner emits `LeaseLost { newEpoch, newOwner }` and self-terminates write operations within `KillEscalation` (the same constant used for process kill). |
+| LS-CAS-5 | If `fsync` fails between (d) and (e), the steal is aborted; the operating system has not committed the new lease record, so the previous owner remains canonical. |
+
+#### 3.31.2.2 Journal idempotency via content hash (amends §3.30.3 RW-2)
+
+RW-2's journal-then-apply protocol must be replay-safe across crashes. The complete idempotency protocol:
+
+| # | Rule (RW-2-IDEM-*) |
+|---|---|
+| RW-2-IDEM-1 | Each journal entry carries `txnId` (uuid v7), `ownerEpoch` (the writer's `leaseEpoch` at the time the entry was created), and `contentHash` (`sha256` of the canonical JSON of the post-state). |
+| RW-2-IDEM-2 | Apply order: (a) for each journal entry not yet marked `applied=true`, recompute the post-state from the pre-state + op; (b) verify `sha256(canonicalize(postState)) == contentHash`; (c) atomic-rename the new state file into place; (d) mark journal entry `applied=true` and `fsync` the journal. Any mismatch in (b) is a fatal corruption \u2014 the daemon halts and emits `JournalCorrupted { txnId }`. |
+| RW-2-IDEM-3 | A crash between (c) and (d) produces a duplicate-apply on next startup. The replay sees `applied=false` but the on-disk state already matches `contentHash`; this is detected and the entry is marked `applied=true` without re-writing (idempotent recovery). |
+| RW-2-IDEM-4 | Entries with `ownerEpoch < currentLeaseEpoch` are discarded on startup (LS-CAS-3 cleanup), with one `JournalEntryDiscarded { txnId, ownerEpoch, currentEpoch }` event per entry. |
+| RW-2-IDEM-5 | The journal file itself is rotated when it reaches `Journal:MaxBytesPerFile` (default 16 MiB) or `Journal:MaxAgeMinutes` (default 60); rotated journal files are retained per `Retention:Journal:MaxAgeDays` (default 7) for forensic replay. |
+
+#### 3.31.2.3 SUB-3 replay-then-live seam (amends §3.30.5.3)
+
+A late subscriber that requests historical events plus live tail must see a contiguous sequence with no duplicates and no gaps. The seam protocol:
+
+| # | Rule (SUB-3-*) |
+|---|---|
+| SUB-3-1 | The bus serves replay from the durable T2 event log under a *snapshot* read lease taken at subscribe time; the subscriber is told the snapshot's `endSeq` (the highest sequence number visible at snapshot). |
+| SUB-3-2 | While replay is streaming, new live events accumulate in a per-subscriber bounded buffer (`Subscriber:LiveBufferDepth`, default 1024). |
+| SUB-3-3 | When replay completes (subscriber has consumed up to and including `endSeq`), the bus drains the live buffer in order. Any event in the buffer with `seq <= endSeq` is dropped (already covered by replay). The handoff is therefore overlap-safe: `min(liveBuffer.seq) > endSeq` is asserted before drain. |
+| SUB-3-4 | If the live buffer overflows during replay, the subscriber is detached with `SubscriberLagged { lostFromSeq, lostToSeq }` \u2014 the subscriber must resubscribe with a new `fromSeq` to recover. The bus does not silently drop live events to make room. |
+| SUB-3-5 | The seam is exercised by an integration test (`SubscriberSeam_NoOverlap_NoGap`) that runs 10⁶ events with concurrent subscribe-late + slow-consumer pressure. |
+
+#### 3.31.2.4 Scheduler channel bounds + dispatch dedup (amends §3.30.4 R-DP)
+
+The scheduler dispatches ready jobs through bounded channels; without bounds an unbounded ready-set + slow worker pool causes unbounded memory growth.
+
+| # | Rule (SCHED-*) |
+|---|---|
+| SCHED-1 | The scheduler's outbound dispatch channel is `Channel.CreateBounded<DispatchOrder>(new BoundedChannelOptions(capacity: 256) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = false, AllowSynchronousContinuations = false })`. |
+| SCHED-2 | A given `(planId, jobId, attempt)` triple appears at most once on the dispatch channel at any time; the scheduler maintains an `InFlightSet` keyed on this triple and refuses to enqueue a duplicate. The set is updated under the same lock that picks the next ready job. |
+| SCHED-3 | Workers acknowledge dispatch by removing the triple from `InFlightSet` AFTER they have transitioned the job's state to `Running` (T1). A worker that crashes between dequeue and ack leaves the entry; a watchdog (every `SCHED:WatchdogIntervalMs`, default 5_000) reaps entries whose job state has not advanced and re-enqueues them with a `DispatchReissued { triple }` event. |
+| SCHED-4 | Channel-full back-pressure causes the scheduler's sweep loop to pause, **not** the readiness scan \u2014 readiness state continues to update; only dispatch waits. This prevents priority inversion. |
+
+#### 3.31.2.5 T2 event log per-record CRC32C (amends §3.4.4)
+
+Each framed record in the T2 event log carries a CRC32C (Castagnoli polynomial) of the payload bytes; readers verify on every read. Corrupted records are skipped with `EventLogRecordCorrupted { segmentId, offset, expectedCrc, computedCrc }` and an audit event. CRC32C is hardware-accelerated on x86-64 (`SSE4.2`) and ARMv8 (`crc32` extension); throughput overhead is < 0.5% even at 200 MB/s segment write rates.
+
+#### 3.31.2.6 Daemon self-update rollback (amends §3.28.3)
+
+The self-update protocol must support automatic rollback on failure:
+
+| # | Rule (UPD-RB-*) |
+|---|---|
+| UPD-RB-1 | Before swapping in the new binary, the daemon writes `<dataDir>/update/staged-version.json` with the current version, the new version, and a `rollbackUntilUtc` timestamp set to `now + UpdateRollbackWindow` (default 10 min). |
+| UPD-RB-2 | The new daemon starts with `--update-canary`. If it fails its self-test (`health.canary.run`) or fails to acquire the plan-store lease within `UpdateCanaryTimeout` (default 60 s), it exits non-zero. |
+| UPD-RB-3 | On canary exit non-zero, the supervisor (systemd unit / Windows service / launchd plist) restarts the daemon, which detects `staged-version.json` with a non-completed status, atomic-renames the previous binary back into place, and emits `DaemonUpdateRolledBack { fromVersion, toVersion, reason }`. |
+| UPD-RB-4 | Within `rollbackUntilUtc`, an explicit `ai-orchestrator daemon rollback` command also triggers UPD-RB-3 even if the canary succeeded. After the window, rollback requires a fresh install of the prior version. |
+| UPD-RB-5 | The old binary is retained at `<dataDir>/update/binaries/<version>` for the duration of `Retention:DaemonBinaries:Count` (default 3 most-recent versions) for forensic and rollback purposes. |
+
+### 3.31.3 Operational additions
+
+#### 3.31.3.1 NFS/SMB detection (amends LS-9)
+
+Cross-machine plan stores are unsupported. Detection:
+
+| # | Rule (FS-DETECT-*) |
+|---|---|
+| FS-DETECT-1 | At plan-store init, the daemon calls `statfs` (POSIX) / `GetVolumeInformationByHandleW` + `GetDriveTypeW` (Windows) on the resolved store path. |
+| FS-DETECT-2 | POSIX `statfs.f_type` matching `NFS_SUPER_MAGIC` (0x6969), `SMB_SUPER_MAGIC` (0x517B), `CIFS_MAGIC_NUMBER` (0xFF534D42), `FUSE_SUPER_MAGIC` (0x65735546) is rejected with `UnsupportedFilesystem { path, fs: <name> }`. |
+| FS-DETECT-3 | Windows `GetDriveTypeW == DRIVE_REMOTE` OR `GetVolumeInformationByHandleW.FileSystemName` in `{ "NFS", "SMB", "CIFS" }` is rejected. |
+| FS-DETECT-4 | An override `--allow-network-fs` exists for users running with full understanding of libgit2-on-network-fs sharp edges; using it records `NetworkFsOverride` in the audit log and surfaces a recurring `OperatingOnNetworkFs` warning event every 60 minutes. |
+
+#### 3.31.3.2 SLO measurement environment (amends §3.27.1)
+
+The performance SLOs in §3.27.1 are reproducible against a defined reference environment:
+
+| Class | Reference spec |
+|---|---|
+| `slo-class-A` | x86-64, 8 cores @ 3.0+ GHz, 16 GiB RAM, NVMe SSD, Linux/Windows host OS, .NET 10.0.x |
+| `slo-class-B` | ARM64 (M1 / Snapdragon X), 8 cores, 16 GiB RAM, NVMe SSD, macOS/Linux/Windows |
+| `slo-class-C` | x86-64, 4 cores, 8 GiB RAM, SATA SSD (target: GitHub Actions standard runners) |
+
+| # | Rule (SLO-ENV-*) |
+|---|---|
+| SLO-ENV-1 | Every benchmark in the BenchmarkDotNet suite (§3.24.5) is tagged with the slo-class it targets. Regressions on `slo-class-A` fail the build; regressions on `B`/`C` warn. |
+| SLO-ENV-2 | The CI nightly runs all three classes (A and B on dedicated runners, C on a standard GHA runner pool); the time-series dashboard plots all three. |
+| SLO-ENV-3 | The §3.27.1 numbers are `slo-class-A`. Sections that quote SLOs without a class tag default to A. |
+
+#### 3.31.3.3 Per-plan disk cap (amends §3.11.4)
+
+Every plan's footprint is capped to prevent a runaway plan from exhausting disk:
+
+| # | Rule (DISK-PLAN-*) |
+|---|---|
+| DISK-PLAN-1 | `Retention:Plan:MaxBytesTotal` (default 2 GiB) caps the sum of all files under `.aio/p/<plan>/`. |
+| DISK-PLAN-2 | When the cap is reached, eviction proceeds in this priority order: (a) per-job logs older than `Retention:JobLogs:MaxAgeDays` regardless of attempt count; (b) preserved-on-failure worktrees older than `Retention:FailedWorktrees:MaxAgeDays`; (c) event-log segments older than `Retention:EventLog:MaxAgeDays`; (d) revisions older than `Retention:PlanRevisions:MaxAgeDays`. |
+| DISK-PLAN-3 | If the cap is still exceeded after eviction, the plan is paused with `PlanDiskCapExceeded { planId, sizeBytes, capBytes }` and refuses to dispatch new jobs. The user must explicitly raise the cap, delete data, or archive the plan. |
+| DISK-PLAN-4 | A daily disk-usage report event `PlanDiskUsage { planId, sizeBytes, breakdown }` is emitted (Telemetry category) so dashboards can surface trending plans. |
+
+#### 3.31.3.4 DAG-limit enforcement timing (amends §3.16.1)
+
+Limits are enforced at three points, not only on initial plan validation:
+
+| # | Rule (DAG-LIM-*) |
+|---|---|
+| DAG-LIM-1 | At `plan.scaffold` and `plan.finalize` (initial validation). |
+| DAG-LIM-2 | At every `reshape` apply (R-RS-11 already enforces; this pin-points the boundary). |
+| DAG-LIM-3 | At every retry that adds work (`retryNode --new-work` etc.); the new work's depth/fan-out impact is computed against the post-mutation graph before commit. |
+| DAG-LIM-4 | A daily background sweep validates every loaded plan's graph against current limits and emits `PlanLimitDriftDetected` for plans that have drifted (e.g., because a limit was tightened in config). Drift does NOT auto-pause the plan; operators decide. |
+
+### 3.31.4 Documentation additions
+
+#### 3.31.4.1 Export/Diagnose format unification (amends §3.20 and §3.13.4)
+
+The `plan export` (§3.20) and `daemon diagnose` (§3.13.4) bundles share a common envelope so tooling does not branch on which one it is consuming:
+
+```jsonc
+{
+  "$type":      "AiOrchestratorBundle",
+  "schemaVersion": 1,
+  "kind":       "plan-export" | "daemon-diagnose",
+  "createdAtUtc": "...",
+  "daemonVersion": "1.0.0",
+  "redactionsApplied": 17,
+  "encryption": { "algo": "age-x25519", "recipient": "support@ai-orchestrator" } | null,
+  "manifest":   [ { "path": "...", "sizeBytes": 123, "sha256": "..." }, ... ]
+}
+```
+
+Both bundle producers write this envelope as `bundle.json` at the bundle root; both consumers (`plan import`, `support analyze`) accept either kind by inspecting `kind`. Adding a third bundle kind is a minor schema bump.
+
+#### 3.31.4.2 T22 vs T14 race rules (amends §3.30.1.4)
+
+T22 (force-fail by operator) and T14 (process exit observed by supervisor) can fire concurrently when an operator force-fails a job whose process is exiting on its own:
+
+| # | Rule (T22-T14-*) |
+|---|---|
+| T22-T14-1 | Both transitions take the per-job state mutex. The first to acquire wins; the second observes the new state and is a no-op (idempotent — the audit-log entry is still written so observers see both signals). |
+| T22-T14-2 | If T14 wins (natural exit), the job's terminal state reflects the actual exit code; the operator's force-fail event is still recorded in the audit log as `outcome: "race-lost-to-natural-exit"`. |
+| T22-T14-3 | If T22 wins (force-fail), the natural exit's exit code is recorded in `details.naturalExitCode` for forensic purposes but does not change the terminal state. |
+| T22-T14-4 | Tested by `JobLifecycle_T22_T14_Race` integration test (10⁵ iterations with concurrent force-fail + scripted natural exit). |
+
+#### 3.31.4.3 Auto-heal vs phase-resume boundary (amends §3.30.2 PI-6)
+
+Auto-heal (re-run a phase up to N times) and phase-resume (restart a partially-completed phase from its last checkpoint) are distinct mechanisms; the boundary:
+
+| # | Rule (HEAL-RESUME-*) |
+|---|---|
+| HEAL-RESUME-1 | A phase that exits with a transient/retryable error AND has not produced a checkpoint manifest \u21d2 **auto-heal** (full phase re-run, attempt counter increments). |
+| HEAL-RESUME-2 | A phase that exits abnormally (process killed, daemon crash, lease lost) AFTER producing a checkpoint manifest \u21d2 **phase-resume** (restart from checkpoint, attempt counter does NOT increment because the work-already-done is preserved). |
+| HEAL-RESUME-3 | A phase that exits with a non-retryable error \u21d2 neither; the job transitions to `Failed` and the user must `retryJob` (which is a fresh attempt with new work). |
+| HEAL-RESUME-4 | The decision is made by the post-exit handler before the next attempt is queued; the choice is logged as `PhaseRecovery { mode: "auto-heal" | "phase-resume" | "give-up", reason }`. |
+
+#### 3.31.4.4 add_after rewiring cycle prevention (amends §3.30.6.1)
+
+The `add_after` reshape op rewires existing dependents of an existing job through the new job. Cycle prevention:
+
+| # | Rule (RS-AFTER-*) |
+|---|---|
+| RS-AFTER-1 | Before applying, the reshape validator computes the closure of jobs reachable from `existingJob` (forward) and the closure of jobs that can reach `existingJob` (backward). If `newJob.dependencies` contains any job in the *forward* closure, the operation is rejected with `ReshapeRejected { cause: "cycle", details: { newJob, conflictingDep } }`. |
+| RS-AFTER-2 | After rewiring, every former-dependent of `existingJob` now depends on `newJob`. The validator confirms that `newJob` does not transitively depend on any of those rewired dependents (which would create a cycle through the rewiring). |
+| RS-AFTER-3 | The atomicity rule R-RS-3 still applies: validate fully, then apply atomically; partial reshape is impossible. |
+
+### 3.31.5 Sign-off & verification
+
+Per the §0 status header, every change in this addendum was reviewed under three lenses:
+
+- **Architecture (Jeromy):** signed off on overall design coherence, abstraction boundaries, and version-evolution rules (M1\u2013M10).
+- **Security (Jeromy / AssumeBreach lens):** signed off on each security-additions subsection (3.31.1) plus the audit-log scheme (\u00a73.27.2.1\u20132).
+- **Reliability (Jeromy):** signed off on each reliability subsection (3.31.2) and the SLO/disk-cap operational rules.
+
+The PR template for `pre-release/1.0.0` carries three sign-off checkboxes; merge to `main` is blocked until all three are checked. This process is documented in `.github/pull_request_template.md` and enforced by branch protection.
+
+---
 
 Mirrors today's `McpIpcServer` (`src/mcp/ipc/server.ts`) but generalized:
 
