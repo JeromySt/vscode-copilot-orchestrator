@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Collections.Frozen;
+using System.Collections.Generic;
 
 namespace AiOrchestrator.Models;
 

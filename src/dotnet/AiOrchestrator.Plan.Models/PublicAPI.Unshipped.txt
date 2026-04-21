@@ -1,0 +1,99 @@
+﻿#nullable enable
+AiOrchestrator.Plan.Models.DefaultPlanSerializer
+AiOrchestrator.Plan.Models.DefaultPlanSerializer.DefaultPlanSerializer() -> void
+AiOrchestrator.Plan.Models.DefaultPlanSerializer.Deserialize(string! json) -> AiOrchestrator.Plan.Models.Plan?
+AiOrchestrator.Plan.Models.DefaultPlanSerializer.Serialize(AiOrchestrator.Plan.Models.Plan! plan) -> string!
+AiOrchestrator.Plan.Models.IPlanSerializer
+AiOrchestrator.Plan.Models.IPlanSerializer.Deserialize(string! json) -> AiOrchestrator.Plan.Models.Plan?
+AiOrchestrator.Plan.Models.IPlanSerializer.Serialize(AiOrchestrator.Plan.Models.Plan! plan) -> string!
+AiOrchestrator.Plan.Models.JobAttempt
+AiOrchestrator.Plan.Models.JobAttempt.AttemptNumber.get -> int
+AiOrchestrator.Plan.Models.JobAttempt.AttemptNumber.init -> void
+AiOrchestrator.Plan.Models.JobAttempt.CompletedAt.get -> System.DateTimeOffset?
+AiOrchestrator.Plan.Models.JobAttempt.CompletedAt.init -> void
+AiOrchestrator.Plan.Models.JobAttempt.ErrorMessage.get -> string?
+AiOrchestrator.Plan.Models.JobAttempt.ErrorMessage.init -> void
+AiOrchestrator.Plan.Models.JobAttempt.PhaseTimings.get -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Plan.Models.PhaseTiming!>!
+AiOrchestrator.Plan.Models.JobAttempt.PhaseTimings.init -> void
+AiOrchestrator.Plan.Models.JobAttempt.StartedAt.get -> System.DateTimeOffset
+AiOrchestrator.Plan.Models.JobAttempt.StartedAt.init -> void
+AiOrchestrator.Plan.Models.JobAttempt.Status.get -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobAttempt.Status.init -> void
+AiOrchestrator.Plan.Models.JobNode
+AiOrchestrator.Plan.Models.JobNode.Attempts.get -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Plan.Models.JobAttempt!>!
+AiOrchestrator.Plan.Models.JobNode.Attempts.init -> void
+AiOrchestrator.Plan.Models.JobNode.CompletedAt.get -> System.DateTimeOffset?
+AiOrchestrator.Plan.Models.JobNode.CompletedAt.init -> void
+AiOrchestrator.Plan.Models.JobNode.DependsOn.get -> System.Collections.Generic.IReadOnlyList<string!>!
+AiOrchestrator.Plan.Models.JobNode.DependsOn.init -> void
+AiOrchestrator.Plan.Models.JobNode.Id.get -> string!
+AiOrchestrator.Plan.Models.JobNode.Id.init -> void
+AiOrchestrator.Plan.Models.JobNode.StartedAt.get -> System.DateTimeOffset?
+AiOrchestrator.Plan.Models.JobNode.StartedAt.init -> void
+AiOrchestrator.Plan.Models.JobNode.Status.get -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobNode.Status.init -> void
+AiOrchestrator.Plan.Models.JobNode.Title.get -> string!
+AiOrchestrator.Plan.Models.JobNode.Title.init -> void
+AiOrchestrator.Plan.Models.JobNode.Transitions.get -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Plan.Models.StateTransition!>!
+AiOrchestrator.Plan.Models.JobNode.Transitions.init -> void
+AiOrchestrator.Plan.Models.JobNode.WorkSpec.get -> AiOrchestrator.Plan.Models.WorkSpec?
+AiOrchestrator.Plan.Models.JobNode.WorkSpec.init -> void
+AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Canceled = 5 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Failed = 4 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Pending = 0 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Ready = 1 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Running = 2 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Skipped = 6 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Succeeded = 3 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.PhaseTiming
+AiOrchestrator.Plan.Models.PhaseTiming.CompletedAt.get -> System.DateTimeOffset?
+AiOrchestrator.Plan.Models.PhaseTiming.CompletedAt.init -> void
+AiOrchestrator.Plan.Models.PhaseTiming.Phase.get -> string!
+AiOrchestrator.Plan.Models.PhaseTiming.Phase.init -> void
+AiOrchestrator.Plan.Models.PhaseTiming.StartedAt.get -> System.DateTimeOffset?
+AiOrchestrator.Plan.Models.PhaseTiming.StartedAt.init -> void
+AiOrchestrator.Plan.Models.Plan
+AiOrchestrator.Plan.Models.Plan.CreatedAt.get -> System.DateTimeOffset
+AiOrchestrator.Plan.Models.Plan.CreatedAt.init -> void
+AiOrchestrator.Plan.Models.Plan.Description.get -> string?
+AiOrchestrator.Plan.Models.Plan.Description.init -> void
+AiOrchestrator.Plan.Models.Plan.Id.get -> string!
+AiOrchestrator.Plan.Models.Plan.Id.init -> void
+AiOrchestrator.Plan.Models.Plan.Jobs.get -> System.Collections.Generic.IReadOnlyDictionary<string!, AiOrchestrator.Plan.Models.JobNode!>!
+AiOrchestrator.Plan.Models.Plan.Jobs.init -> void
+AiOrchestrator.Plan.Models.Plan.Name.get -> string!
+AiOrchestrator.Plan.Models.Plan.Name.init -> void
+AiOrchestrator.Plan.Models.Plan.StartedAt.get -> System.DateTimeOffset?
+AiOrchestrator.Plan.Models.Plan.StartedAt.init -> void
+AiOrchestrator.Plan.Models.Plan.Status.get -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.Plan.Status.init -> void
+AiOrchestrator.Plan.Models.PlanJson
+static AiOrchestrator.Plan.Models.PlanJson.Deserialize(string! json) -> AiOrchestrator.Plan.Models.Plan?
+static AiOrchestrator.Plan.Models.PlanJson.Serialize(AiOrchestrator.Plan.Models.Plan! plan) -> string!
+AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Canceled = 5 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Failed = 6 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Partial = 4 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Paused = 2 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Pending = 0 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Running = 1 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Succeeded = 3 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.StateTransition
+AiOrchestrator.Plan.Models.StateTransition.From.get -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.StateTransition.From.init -> void
+AiOrchestrator.Plan.Models.StateTransition.OccurredAt.get -> System.DateTimeOffset
+AiOrchestrator.Plan.Models.StateTransition.OccurredAt.init -> void
+AiOrchestrator.Plan.Models.StateTransition.Reason.get -> string?
+AiOrchestrator.Plan.Models.StateTransition.Reason.init -> void
+AiOrchestrator.Plan.Models.StateTransition.To.get -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.StateTransition.To.init -> void
+AiOrchestrator.Plan.Models.WorkSpec
+AiOrchestrator.Plan.Models.WorkSpec.AllowedFolders.get -> System.Collections.Generic.IReadOnlyList<string!>!
+AiOrchestrator.Plan.Models.WorkSpec.AllowedFolders.init -> void
+AiOrchestrator.Plan.Models.WorkSpec.AllowedUrls.get -> System.Collections.Generic.IReadOnlyList<string!>!
+AiOrchestrator.Plan.Models.WorkSpec.AllowedUrls.init -> void
+AiOrchestrator.Plan.Models.WorkSpec.CheckCommands.get -> System.Collections.Generic.IReadOnlyList<string!>!
+AiOrchestrator.Plan.Models.WorkSpec.CheckCommands.init -> void
+AiOrchestrator.Plan.Models.WorkSpec.Instructions.get -> string?
+AiOrchestrator.Plan.Models.WorkSpec.Instructions.init -> void

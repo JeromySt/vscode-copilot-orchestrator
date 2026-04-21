@@ -94,6 +94,8 @@ foreach ($package in $cobertura.coverage.packages.package) {
     foreach ($class in $package.classes.class) {
         $filename = $class.filename -replace '\\', '/'
         if ($filename -notlike "*$Project*") { continue }
+        # Exclude generated source (obj/Debug, obj/Release, .g.cs, .designer.cs).
+        if ($filename -like "*/obj/*" -or $filename -like "*.g.cs" -or $filename -like "*.designer.cs") { continue }
 
         foreach ($line in $class.lines.line) {
             $totalLines++

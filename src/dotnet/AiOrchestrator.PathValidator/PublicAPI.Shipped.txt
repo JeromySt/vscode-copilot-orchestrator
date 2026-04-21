@@ -1,0 +1,3 @@
+// <copyright file="PublicAPI.Shipped.txt" company="AiOrchestrator contributors">
+// Copyright (c) AiOrchestrator contributors. All rights reserved.
+// </copyright>
