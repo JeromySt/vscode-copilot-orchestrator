@@ -1,0 +1,28 @@
+#nullable enable
+AiOrchestrator.Bindings.Node.HandleDisposedException
+AiOrchestrator.Bindings.Node.HandleDisposedException.HandleDisposedException() -> void
+AiOrchestrator.Bindings.Node.HandleDisposedException.HandleDisposedException(string! message) -> void
+AiOrchestrator.Bindings.Node.HandleDisposedException.HandleDisposedException(string! message, System.Exception! innerException) -> void
+AiOrchestrator.Bindings.Node.HandleId
+AiOrchestrator.Bindings.Node.HandleId.HandleId() -> void
+AiOrchestrator.Bindings.Node.HandleId.HandleId(long Value) -> void
+AiOrchestrator.Bindings.Node.HandleId.Value.get -> long
+AiOrchestrator.Bindings.Node.HandleId.Value.init -> void
+AiOrchestrator.Bindings.Node.HandleScope
+AiOrchestrator.Bindings.Node.HandleScope.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Bindings.Node.HandleScope.HandleScope(AiOrchestrator.Bindings.Node.NodeBindingsHost! host) -> void
+AiOrchestrator.Bindings.Node.HandleScope.RegisterAsync<T>(T! instance, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Bindings.Node.HandleId>
+AiOrchestrator.Bindings.Node.NodeBindingsHost
+AiOrchestrator.Bindings.Node.NodeBindingsHost.CreateHandleAsync<T>(T! instance, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Bindings.Node.HandleId>
+AiOrchestrator.Bindings.Node.NodeBindingsHost.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Bindings.Node.NodeBindingsHost.DisposeHandleAsync(AiOrchestrator.Bindings.Node.HandleId handle, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Bindings.Node.NodeBindingsHost.NodeBindingsHost(System.IServiceProvider! sp) -> void
+AiOrchestrator.Bindings.Node.NodeBindingsHost.ResolveHandleAsync<T>(AiOrchestrator.Bindings.Node.HandleId handle, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<T!>
+AiOrchestrator.Bindings.Node.SharedMemoryRingBuffer
+AiOrchestrator.Bindings.Node.SharedMemoryRingBuffer.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Bindings.Node.SharedMemoryRingBuffer.ReadAsync(System.Memory<byte> buffer, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<int>
+AiOrchestrator.Bindings.Node.SharedMemoryRingBuffer.SharedMemoryRingBuffer(string! name, int capacity) -> void
+AiOrchestrator.Bindings.Node.SharedMemoryRingBuffer.WriteAsync(System.ReadOnlyMemory<byte> data, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<int>
+AiOrchestrator.Bindings.Node.Generators.DtsGenerator
+AiOrchestrator.Bindings.Node.Generators.DtsGenerator.DtsGenerator() -> void
+AiOrchestrator.Bindings.Node.Generators.DtsGenerator.Generate(System.Collections.Generic.IReadOnlyList<System.Type!>! types) -> string!

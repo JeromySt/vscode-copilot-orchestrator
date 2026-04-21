@@ -146,6 +146,12 @@
           "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
+      "aiorchestrator.bindings.node": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Models": "[1.0.0, )"
+        }
+      },
       "aiorchestrator.configuration": {
         "type": "Project",
         "dependencies": {
