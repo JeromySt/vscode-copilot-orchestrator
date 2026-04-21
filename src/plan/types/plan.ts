@@ -299,7 +299,7 @@ export interface NodeExecutionState {
    * Each value is the number of heal attempts for that phase.
    * Backwards-compatible: `true` is treated as 1 when reading.
    */
-  autoHealAttempted?: Partial<Record<'prechecks' | 'work' | 'postchecks', boolean | number>>;
+  autoHealAttempted?: Partial<Record<'setup' | 'merge-fi' | 'prechecks' | 'work' | 'postchecks', boolean | number>>;
   
   /**
    * Details about the last execution attempt (for retry context).
@@ -816,6 +816,16 @@ export interface JobExecutionResult {
   copilotSessionId?: string;
   /** Which phase failed (for retry context) */
   failedPhase?: 'prechecks' | 'work' | 'commit' | 'postchecks' | 'merge-fi' | 'merge-ri' | 'setup' | 'cleanup';
+  /**
+   * The actual WorkSpec that failed within the failed phase.
+   * Critical for the `setup` phase, where the failing spec is a `worktreeInit`
+   * entry from `plan.spec.worktreeInit` and is NOT the same as `node.work`.
+   * The auto-heal gating logic in executionEngine inspects this to decide
+   * whether to swap to an AI agent (when the failed spec is shell/process)
+   * or retry the same agent (when externally killed).
+   * Phase executors should set this whenever they have the spec in hand.
+   */
+  failedWorkSpec?: WorkSpec;
   /** Exit code from failed process */
   exitCode?: number;
   /** Agent execution metrics (token usage, duration, turns, tool calls) */

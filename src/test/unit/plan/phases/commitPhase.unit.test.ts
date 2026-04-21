@@ -196,6 +196,7 @@ suite('CommitPhaseExecutor', () => {
     const result = await executor.execute(makeCtx({ baseCommit: 'abc123' }));
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('No work evidence'));
+    assert.strictEqual(result.overrideResumeFromPhase, 'work');
   });
 
   test('AI review: legitimate no-changes succeeds', async () => {
@@ -248,6 +249,7 @@ suite('CommitPhaseExecutor', () => {
     }));
     assert.strictEqual(result.success, false);
     assert.ok(result.reviewMetrics);
+    assert.strictEqual(result.overrideResumeFromPhase, 'work');
   });
 
   test('AI review delegation failure falls through', async () => {

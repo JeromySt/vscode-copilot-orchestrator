@@ -83,11 +83,16 @@ export async function handleBulkUpdatePlanJobs(args: any, ctx: PlanHandlerContex
       if (!match) { continue; }
     }
 
-    // Skip terminal/running jobs
+    // Skip jobs whose work spec must not be mutated:
+    //  - running:   in-flight; mutating now would corrupt the active execution
+    //  - succeeded: work is already done; updating spec would be misleading
+    //  - canceled:  terminal; no future execution
+    // ALLOW failed and blocked: these are pre-execution states for retry, and
+    // updating their spec (e.g., model/effort) before retry is the primary use case.
     const state = plan.nodeStates.get(nodeId);
     if (state) {
       const status = state.status;
-      if (status === 'running' || status === 'succeeded' || status === 'failed' || status === 'blocked' || status === 'canceled') {
+      if (status === 'running' || status === 'succeeded' || status === 'canceled') {
         skipped.push({ id: jobNode.producerId ?? nodeId, reason: `status=${status}` });
         continue;
       }

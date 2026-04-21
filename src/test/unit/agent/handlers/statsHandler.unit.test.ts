@@ -494,4 +494,74 @@ suite('StatsHandler', () => {
       assert.strictEqual(metrics.premiumRequests, 3);
     });
   });
+
+  // =========================================================================
+  // CLI v1.0.34 compact stats format
+  // =========================================================================
+  suite('CLI v1.0.34 compact format', () => {
+    test('parses "Changes   +N -M" line', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, 'Changes   +12 -5');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.deepStrictEqual(metrics.codeChanges, { linesAdded: 12, linesRemoved: 5 });
+    });
+
+    test('parses "Changes   +0 -0" (the no-op case we need to detect)', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, 'Changes   +0 -0');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.deepStrictEqual(metrics.codeChanges, { linesAdded: 0, linesRemoved: 0 });
+    });
+
+    test('parses "Requests  N Premium (Xm Ys)" line', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, 'Requests  1 Premium (5m 19s)');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.strictEqual(metrics.premiumRequests, 1);
+      assert.strictEqual(metrics.apiTimeSeconds, 5 * 60 + 19);
+    });
+
+    test('parses "Tokens    ↑ X • ↓ Y • Z (cached)" line with unicode bullet', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, 'Tokens    \u2191 589.7k \u2022 \u2193 21.0k \u2022 543.0k (cached)');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.ok(metrics.modelBreakdown);
+      assert.strictEqual(metrics.modelBreakdown![0].inputTokens, 589700);
+      assert.strictEqual(metrics.modelBreakdown![0].outputTokens, 21000);
+      assert.strictEqual(metrics.modelBreakdown![0].cachedTokens, 543000);
+    });
+
+    test('parses all three v1.0.34 compact lines together (the user-reported sample)', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, 'Changes   +0 -0');
+      feedLine(handler, 'Requests  1 Premium (5m 19s)');
+      feedLine(handler, 'Tokens    \u2191 589.7k \u2022 \u2193 21.0k \u2022 543.0k (cached)');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.deepStrictEqual(metrics.codeChanges, { linesAdded: 0, linesRemoved: 0 });
+      assert.strictEqual(metrics.premiumRequests, 1);
+      assert.strictEqual(metrics.apiTimeSeconds, 319);
+      assert.ok(metrics.modelBreakdown);
+    });
+
+    test('compact "Changes" line strips bracketed log prefix', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, '[copilot] Changes   +3 -1');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.deepStrictEqual(metrics.codeChanges, { linesAdded: 3, linesRemoved: 1 });
+    });
+
+    test('compact format does not falsely match old "Total code changes:" line', () => {
+      const handler = new StatsHandler();
+      feedLine(handler, 'Total code changes:     +7 -2');
+      const metrics = handler.getMetrics();
+      assert.ok(metrics);
+      assert.deepStrictEqual(metrics.codeChanges, { linesAdded: 7, linesRemoved: 2 });
+    });
+  });
 });

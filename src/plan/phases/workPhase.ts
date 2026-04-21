@@ -137,6 +137,30 @@ export async function runAgent(
   ctx.setStartTime(startTime);
   ctx.logInfo(`Agent instructions: ${spec.instructions}`);
 
+  // Auto-promote complex jobs to a premium tier + high effort when neither model
+  // nor modelTier is explicitly set. Sonnet 4.6 has been observed to give up
+  // (empty assistant message → end_turn) on large multi-file scaffold tasks
+  // (Files-to-create ≥ 6 OR instructions > 4 KB). Bumping to a premium model
+  // with deeper reasoning is the cheapest reliable mitigation.
+  const COMPLEXITY_INSTR_BYTES = 4_000;
+  const COMPLEXITY_FILE_COUNT = 6;
+  const isExplicitlyTuned = !!spec.model || !!spec.modelTier;
+  if (!isExplicitlyTuned && spec.instructions) {
+    const instrBytes = Buffer.byteLength(spec.instructions, 'utf8');
+    // Count "Files to create / modify" entries — heuristic: lines that look like
+    // path-ish entries (contain '/' and end with file extension) inside the
+    // instructions. Cheap and false-positive tolerant.
+    const fileLikeLines = (spec.instructions.match(/^[\s\-*`]*[\w./_-]+\/[\w./_-]+\.[a-z0-9]+\s*$/gim) ?? []).length;
+    if (instrBytes >= COMPLEXITY_INSTR_BYTES || fileLikeLines >= COMPLEXITY_FILE_COUNT) {
+      // Mutate a copy so we never alter the persisted spec.
+      spec = { ...spec, modelTier: 'premium', effort: spec.effort ?? 'high' };
+      ctx.logInfo(
+        `Auto-promoted complex agent job: instrBytes=${instrBytes}, fileLikeLines=${fileLikeLines} ` +
+        `→ modelTier='premium', effort='${spec.effort}'. Set model/modelTier explicitly to opt out.`
+      );
+    }
+  }
+
   // Resolve model from modelTier if model isn't explicitly set
   let resolvedModel = spec.model;
   if (!resolvedModel && spec.modelTier) {
@@ -198,6 +222,25 @@ export async function runAgent(
     if (result.metrics) { metrics = { ...result.metrics, durationMs }; }
     else { metrics = { durationMs }; }
     if (result.success) {
+      // No-op exit detector: the CLI reports success but produced no work.
+      // Without this, the commit phase eventually fails with "No work evidence
+      // produced" — wasting the diagnostic signal and a full retry cycle.
+      // Tripping conditions (all must hold):
+      //   - The node does NOT declare expectsNoChanges (legitimate verify-only)
+      //   - Stats reported zero adds AND zero removes (so we have a metric to trust)
+      //   - Run lasted long enough that the model had a real chance to do work
+      //     (avoids tripping on fast verification turns or transient rejections)
+      const NOOP_MIN_DURATION_MS = 60_000;
+      const expectsNoChanges = !!ctx.node.expectsNoChanges;
+      const codeChanges = result.metrics?.codeChanges;
+      const isZeroChange = codeChanges && codeChanges.linesAdded === 0 && codeChanges.linesRemoved === 0;
+      if (!expectsNoChanges && isZeroChange && durationMs >= NOOP_MIN_DURATION_MS) {
+        const error = `Agent exited with no-op turn — zero code changes after ${Math.round(durationMs / 1000)}s. ` +
+          `The model gave up without producing output (likely research paralysis). ` +
+          `Retry with a higher tier or narrower instructions.`;
+        ctx.logError(`No-op detected: ${error}`);
+        return { success: false, error, copilotSessionId: result.sessionId, exitCode: result.exitCode, metrics };
+      }
       ctx.logInfo('Agent completed successfully');
       if (result.sessionId) {ctx.logInfo(`Captured session ID: ${result.sessionId}`);}
       return { success: true, copilotSessionId: result.sessionId, metrics };

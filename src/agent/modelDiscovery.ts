@@ -99,6 +99,7 @@ const KNOWN_MODEL_TIERS: Record<string, ModelInfo['tier']> = {
   'claude-opus-4.5':        'premium',   // 3x+
   'claude-opus-4.6':        'premium',   // 3x
   'claude-opus-4.6-fast':   'premium',   // 3x (lower latency variant)
+  'claude-opus-4.6-1m':     'premium',   // 3x+ (1M-token context window — prefer for massive-context tasks)
 
   // ── OpenAI ─────────────────────────────────────────────────────────
   'gpt-4.1':                'standard',  // 1x
@@ -451,6 +452,14 @@ export async function suggestModel(taskType: 'fast' | 'standard' | 'premium', de
 
   const candidates = result.models.filter(m => m.tier === taskType);
   if (candidates.length > 0) {
+    // For premium-tier suggestions, prefer large-context variants (e.g. 1m) so
+    // context-heavy work doesn't get truncated. Heuristic: any model id whose
+    // suffix indicates an extended context window (e.g. '-1m', '-200k', '-2m')
+    // is preferred over the base model.
+    if (taskType === 'premium') {
+      const largeContext = candidates.find(m => /-(\d+)(k|m)\b/i.test(m.id));
+      if (largeContext) { return largeContext; }
+    }
     return candidates[0];
   }
 

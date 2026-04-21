@@ -402,11 +402,17 @@ export class NodeManager {
     const failedPhase = nodeState.lastAttempt?.phase;
     const shouldResetPhases = hasNewWork || hasNewPrechecks || options?.clearWorktree;
 
-    // Reset auto-heal budget for phases with new specs so fresh work gets fresh heal attempts
+    // Reset auto-heal budget for phases with new specs so fresh work gets fresh heal attempts.
+    // 'setup' is plan-level (worktreeInit lives on plan.spec, not the node) so it is reset
+    // only when the worktree is cleared — that's the only retry path that re-runs setup.
     if (nodeState.autoHealAttempted) {
       if (hasNewWork) delete nodeState.autoHealAttempted['work'];
       if (hasNewPrechecks) delete nodeState.autoHealAttempted['prechecks'];
       if (hasNewPostchecks) delete nodeState.autoHealAttempted['postchecks'];
+      if (options?.clearWorktree) {
+        delete nodeState.autoHealAttempted['setup'];
+        delete nodeState.autoHealAttempted['merge-fi'];
+      }
     }
 
     if (shouldResetPhases) {

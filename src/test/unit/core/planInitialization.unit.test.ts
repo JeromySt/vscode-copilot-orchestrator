@@ -10,6 +10,9 @@
 import { suite, test, setup, teardown } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { loadConfiguration } from '../../../core/planInitialization';
 import { IConfigProvider } from '../../../interfaces/IConfigProvider';
 
@@ -855,5 +858,156 @@ suite('initializePlanRunner', () => {
     } catch {
       // Expected in test env
     }
+  });
+
+  // Regression: the ContextPressureHandlerFactory writes the CHECKPOINT_REQUIRED
+  // sentinel via the global checkpoint manager. Before the gate fix that registry
+  // was populated unconditionally, so the handler fired even when the agent had
+  // never been told the checkpoint protocol — leading to synthesized fallback
+  // manifests and empty "Continue the original task" sub-jobs. The gate must
+  // tie the registry write to copilotOrchestrator.contextPressure.enabled.
+  suite('contextPressure.enabled gating', () => {
+    let registry: any;
+
+    setup(() => {
+      // Use the cached module instance — planInitialization uses dynamic
+      // `await import(...)` which returns the cached singleton. Busting the
+      // require cache here would give the test a *different* module instance
+      // than the one written to by initializePlanRunner, causing the
+      // "DOES register" assertion to read undefined even when the production
+      // code correctly registered the manager.
+      registry = require('../../../plan/analysis/pressureMonitorRegistry');
+      // Clear any prior global manager
+      registry.setCheckpointManager(undefined as any);
+    });
+
+    // Per-suite real workspace dir so PlanPersistence's mkdirSync('.orchestrator') succeeds
+    // on POSIX CI runners (where '/test/workspace' is not writable).
+    let tmpWorkspace: string;
+
+    setup(() => {
+      tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-init-test-'));
+    });
+
+    teardown(() => {
+      registry.setCheckpointManager(undefined as any);
+      vscode.workspace.workspaceFolders = undefined;
+      try { fs.rmSync(tmpWorkspace, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    async function runWithEnabled(enabled: boolean): Promise<{ planRunner?: any; initError?: unknown }> {
+      const { initializePlanRunner } = require('../../../core/planInitialization');
+      const { createContainer } = require('../../../composition');
+      const Tokens = require('../../../core/tokens');
+
+      vscode.workspace.workspaceFolders = [
+        { uri: vscode.Uri.file(tmpWorkspace), name: 'test', index: 0 },
+      ];
+
+      const mockContext = {
+        subscriptions: [] as any[],
+        extensionUri: vscode.Uri.file('/ext'),
+        globalStorageUri: vscode.Uri.file('/storage'),
+        globalState: { get: () => undefined, update: async () => {} },
+      };
+
+      const container = createContainer(mockContext);
+
+      // Stub the IConfigProvider to control the contextPressure.enabled flag
+      const realProvider = container.resolve(Tokens.IConfigProvider);
+      const stubProvider = {
+        ...realProvider,
+        getConfig: <T>(section: string, key: string, defaultValue: T): T => {
+          if (section === 'copilotOrchestrator.contextPressure' && key === 'enabled') {
+            return enabled as unknown as T;
+          }
+          if (typeof realProvider.getConfig === 'function') {
+            return realProvider.getConfig(section, key, defaultValue);
+          }
+          return defaultValue;
+        },
+      };
+      container.registerSingleton(Tokens.IConfigProvider, () => stubProvider);
+
+      const git = container.resolve(Tokens.IGitOperations) ?? {
+        repository: { isRepo: async () => true },
+        merge: {},
+        worktree: {},
+      };
+      const debouncer = container.resolve(Tokens.IGitignoreDebouncer) ?? {
+        ensureEntries: async () => {},
+      };
+
+      try {
+        const result = await initializePlanRunner(mockContext, container, git, debouncer);
+        return result;
+      } catch (err) {
+        // Surface init errors so tests don't silently pass on early-bail.
+        return { initError: err };
+      }
+    }
+
+    test('does NOT register global checkpoint manager when disabled (default)', async function() {
+      this.timeout(10000);
+      const result = await runWithEnabled(false);
+      if (result.initError) {
+        assert.fail(`initializePlanRunner threw: ${(result.initError as Error)?.stack || result.initError}`);
+      }
+      assert.ok(result.planRunner, 'expected planRunner to be returned by initializePlanRunner');
+      assert.strictEqual(
+        registry.getCheckpointManager(),
+        undefined,
+        'global checkpoint manager must remain unregistered when contextPressure.enabled is false',
+      );
+    });
+
+    test('DOES register global checkpoint manager when enabled', async function() {
+      this.timeout(10000);
+      const result = await runWithEnabled(true);
+      if (result.initError) {
+        assert.fail(`initializePlanRunner threw: ${(result.initError as Error)?.stack || result.initError}`);
+      }
+      assert.ok(result.planRunner, 'expected planRunner to be returned by initializePlanRunner');
+      assert.ok(
+        registry.getCheckpointManager(),
+        'global checkpoint manager must be registered when contextPressure.enabled is true',
+      );
+    });
+
+    // Regression: even if a stale checkpoint-manifest.json exists in a worktree
+    // (e.g. committed during an earlier run when the feature was enabled), the
+    // runner must not synthesize -sub-N / -fan-in jobs when the user-facing
+    // setting is disabled. Achieved by skipping setCheckpointManager() and
+    // setJobSplitter() on the runner so the executionEngine's split branch
+    // (which requires both on its state) is short-circuited.
+    test('does NOT wire checkpointManager/jobSplitter on runner when disabled', async function() {
+      this.timeout(10000);
+      const { planRunner, initError } = await runWithEnabled(false);
+      if (initError) {
+        assert.fail(`initializePlanRunner threw: ${(initError as Error)?.stack || initError}`);
+      }
+      assert.ok(planRunner, 'expected planRunner to be returned by initializePlanRunner');
+      const state = (planRunner as any)._state;
+      assert.ok(state, 'expected planRunner._state to exist');
+      assert.strictEqual(state.checkpointManager, undefined,
+        'runner.checkpointManager must remain unset when contextPressure.enabled is false');
+      assert.strictEqual(state.jobSplitter, undefined,
+        'runner.jobSplitter must remain unset when contextPressure.enabled is false');
+    });
+
+    test('DOES wire checkpointManager/jobSplitter on runner when enabled', async function() {
+      this.timeout(10000);
+      const { planRunner, initError } = await runWithEnabled(true);
+      if (initError) {
+        assert.fail(`initializePlanRunner threw: ${(initError as Error)?.stack || initError}`);
+      }
+      assert.ok(planRunner, 'expected planRunner to be returned by initializePlanRunner');
+      const state = (planRunner as any)._state;
+      assert.ok(state, 'expected planRunner._state to exist');
+      assert.ok(state.checkpointManager,
+        'runner.checkpointManager must be wired when contextPressure.enabled is true');
+      assert.ok(state.jobSplitter,
+        'runner.jobSplitter must be wired when contextPressure.enabled is true');
+    });
   });
 });

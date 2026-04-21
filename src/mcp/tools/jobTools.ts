@@ -250,7 +250,8 @@ NOT BULK-SAFE (use update_copilot_plan_job individually):
 - instructions, contextFiles, allowedFolders, allowedUrls
 
 If jobIds is omitted, ALL agent-type jobs in the plan are updated.
-Running/terminal jobs are skipped automatically.`,
+Skipped automatically: running, succeeded, and canceled jobs.
+Included: pending, ready, failed, and blocked jobs (failed/blocked are the primary use case — update model/effort before retry).`,
       inputSchema: {
         type: 'object',
         properties: {
