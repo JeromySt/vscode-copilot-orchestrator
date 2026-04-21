@@ -1,0 +1,11 @@
+<Project>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" PrivateAssets="all" />
+    <PackageReference Include="StyleCop.Analyzers" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsTestProject)' != 'true' AND '$(IsAnalyzer)' != 'true' AND '$(MSBuildProjectName)' != 'AiOrchestrator.Analyzers'">
+    <!-- Placeholder: subsequent jobs add the AiOrchestrator.Analyzers project reference here -->
+  </ItemGroup>
+</Project>
