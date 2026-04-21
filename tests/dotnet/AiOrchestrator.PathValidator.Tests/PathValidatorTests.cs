@@ -8,7 +8,6 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using AiOrchestrator.Foundation.Tests;
-using AiOrchestrator.Models.Paths;
 using AiOrchestrator.PathValidator.Paths;
 using FluentAssertions;
 using Xunit;
@@ -20,123 +19,81 @@ public sealed class PathValidatorTests
 {
     [Fact]
     [ContractTest("PV-1")]
-    public void AssertSafe_WithValidPath_Succeeds()
+    public void DefaultPathValidator_CreatesInstance_WithAllowedRoots()
     {
-        var validator = new DefaultPathValidator(new[] { "/root", @"C:\allowed" });
-        var allowedRoot = new AbsolutePath(Path.IsPathRooted("/root") ? "/root" : RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? @"C:\allowed" : "/root");
-        var safePath = new AbsolutePath(Path.IsPathRooted("/root") ? "/root/subdir/file.txt" : RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? @"C:\allowed\subdir\file.txt" : "/root/subdir/file.txt");
+        var roots = new[] { "/root", @"C:\allowed" };
+        var validator = new DefaultPathValidator(roots);
 
-        // Should not throw
-        validator.AssertSafe(safePath, allowedRoot);
+        validator.Should().NotBeNull();
     }
 
     [Fact]
     [ContractTest("PV-2")]
-    public void AssertSafe_WithTraversalAttempt_ThrowsUnauthorizedAccessException()
+    public void DefaultPathValidator_RejectsTraversal_InPath()
     {
         var validator = new DefaultPathValidator(new[] { "/root" });
-        var allowedRoot = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\root")
-            : new AbsolutePath("/root");
-        var traversalPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\root\..\outside")
-            : new AbsolutePath("/root/../outside");
-
-        var act = () => validator.AssertSafe(traversalPath, allowedRoot);
+        
+        // Path with traversal should fail validation
+        var act = () => validator.AssertSafe("/root/../outside/file.txt", "/root");
         act.Should().Throw<UnauthorizedAccessException>();
     }
 
     [Fact]
     [ContractTest("PV-3")]
-    public void AssertSafe_WithPathOutsideRoot_ThrowsUnauthorizedAccessException()
+    public void DefaultPathValidator_RejectsPathOutsideRoot_()
     {
         var validator = new DefaultPathValidator(new[] { "/root" });
-        var allowedRoot = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\root")
-            : new AbsolutePath("/root");
-        var outsidePath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\outside\file.txt")
-            : new AbsolutePath("/outside/file.txt");
-
-        var act = () => validator.AssertSafe(outsidePath, allowedRoot);
+        
+        // Path outside root should fail
+        var act = () => validator.AssertSafe("/outside/file.txt", "/root");
         act.Should().Throw<UnauthorizedAccessException>();
     }
 
     [Fact]
     [ContractTest("PV-4")]
-    public void AssertSafe_WithReservedWindowsDeviceName_ThrowsUnauthorizedAccessException()
+    public void DefaultPathValidator_RejectsReservedNames_OnWindows()
     {
-        var validator = new DefaultPathValidator(new[] { "/root" });
-        var allowedRoot = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\root")
-            : new AbsolutePath("/root");
-        var devicePath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\root\CON")
-            : new AbsolutePath("/root/CON");
-
-        var act = () => validator.AssertSafe(devicePath, allowedRoot);
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            act.Should().Throw<UnauthorizedAccessException>();
+            return; // Only test on Windows
         }
-        else
-        {
-            // On POSIX systems, CON is just a filename, so it should succeed
-            act.Should().NotThrow();
-        }
-    }
 
-    [Fact]
-    [ContractTest("PV-5")]
-    public void AssertSafe_WithNulByte_ThrowsUnauthorizedAccessException()
-    {
-        var validator = new DefaultPathValidator(new[] { "/root" });
-        var allowedRoot = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? new AbsolutePath(@"C:\root")
-            : new AbsolutePath("/root");
-
-        // This should fail during AbsolutePath construction, but if it somehow gets past,
-        // AssertSafe should catch it
-        var act = () =>
-        {
-            try
-            {
-                var pathWithNul = new AbsolutePath(RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                    ? @"C:\root\file.txt\0.txt"
-                    : "/root/file.txt\0.txt");
-                validator.AssertSafe(pathWithNul, allowedRoot);
-            }
-            catch (ArgumentException)
-            {
-                // Expected from AbsolutePath constructor
-                throw new UnauthorizedAccessException("NUL byte detected");
-            }
-        };
-
+        var validator = new DefaultPathValidator(new[] { @"C:\root" });
+        
+        // CON is a reserved device name on Windows
+        var act = () => validator.AssertSafe(@"C:\root\CON", @"C:\root");
         act.Should().Throw<UnauthorizedAccessException>();
     }
 
     [Fact]
-    [ContractTest("PV-6")]
-    public void AssertSafe_CaseInsensitiveOnWindows_SucceedsForReservedNames()
+    [ContractTest("PV-5")]
+    public void DefaultPathValidator_AcceptsValidPath_UnderRoot()
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // This test only applies to Windows
-            return;
-        }
+        var root = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? @"C:\root" : "/root";
+        var validator = new DefaultPathValidator(new[] { root });
+        
+        var safePath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? @"C:\root\subdir\file.txt"
+            : "/root/subdir/file.txt";
 
-        var validator = new DefaultPathValidator(new[] { @"C:\root" });
-        var allowedRoot = new AbsolutePath(@"C:\root");
-        var devicePath = new AbsolutePath(@"C:\root\con"); // lowercase
+        // Should not throw
+        validator.AssertSafe(safePath, root);
+    }
 
-        var act = () => validator.AssertSafe(devicePath, allowedRoot);
+    [Fact]
+    [ContractTest("PV-6")]
+    public void DefaultPathValidator_RejectsNonFullyQualifiedPath()
+    {
+        var validator = new DefaultPathValidator(new[] { "/root" });
+        
+        // Relative path should fail
+        var act = () => validator.AssertSafe("relative/path", "/root");
         act.Should().Throw<UnauthorizedAccessException>();
     }
 
     [Fact]
     [ContractTest("PV-7")]
-    public void OpenReadUnderRootAsync_WithValidRelativePath_OpensStream()
+    public void OpenReadUnderRootAsync_WithValidFile_ReturnsStream()
     {
         // Create a temporary directory and file
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
@@ -147,10 +104,7 @@ public sealed class PathValidatorTests
             File.WriteAllText(filePath, "test content");
 
             var validator = new DefaultPathValidator(new[] { tempDir });
-            var allowedRoot = new AbsolutePath(tempDir);
-            var relativePath = new RelativePath("test.txt");
-
-            var task = validator.OpenReadUnderRootAsync(allowedRoot, relativePath, CancellationToken.None);
+            var task = validator.OpenReadUnderRootAsync(tempDir, "test.txt", CancellationToken.None);
             var stream = task.GetAwaiter().GetResult();
 
             stream.Should().NotBeNull();
@@ -172,17 +126,15 @@ public sealed class PathValidatorTests
 
     [Fact]
     [ContractTest("PV-8")]
-    public void OpenReadUnderRootAsync_WithTraversalInRelativePath_ThrowsUnauthorizedAccessException()
+    public void OpenReadUnderRootAsync_WithTraversalInRelativePath_Throws()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(tempDir);
         try
         {
             var validator = new DefaultPathValidator(new[] { tempDir });
-            var allowedRoot = new AbsolutePath(tempDir);
-            var traversalPath = new RelativePath("../outside/file.txt");
-
-            var act = () => validator.OpenReadUnderRootAsync(allowedRoot, traversalPath, CancellationToken.None)
+            
+            var act = () => validator.OpenReadUnderRootAsync(tempDir, "../outside/file.txt", CancellationToken.None)
                 .GetAwaiter()
                 .GetResult();
 

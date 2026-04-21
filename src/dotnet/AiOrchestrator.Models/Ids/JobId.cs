@@ -2,6 +2,8 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+
 namespace AiOrchestrator.Models.Ids;
 
 /// <summary>Strongly-typed identifier for a job. Prefix: <c>job_</c>.</summary>

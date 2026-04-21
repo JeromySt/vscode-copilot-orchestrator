@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 using AiOrchestrator.Models.Paths;

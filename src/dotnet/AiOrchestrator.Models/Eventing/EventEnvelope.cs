@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
 using System.Text.Json;
 using AiOrchestrator.Models.Ids;
 

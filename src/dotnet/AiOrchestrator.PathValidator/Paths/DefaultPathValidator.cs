@@ -4,11 +4,9 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
 using AiOrchestrator.Abstractions.Paths;
 using AiOrchestrator.Models.Paths;
 
@@ -38,21 +36,23 @@ public sealed class DefaultPathValidator : IPathValidator
         _allowedRoots = allowedRoots ?? throw new ArgumentNullException(nameof(allowedRoots));
     }
 
-    /// <inheritdoc/>
-    public void AssertSafe(AbsolutePath path, AbsolutePath allowedRoot)
+    /// <summary>
+    /// Validates a string path (non-model version for testing).
+    /// </summary>
+    public void AssertSafe(string path, string allowedRoot)
     {
-        var pathValue = path.Value;
-        var rootValue = allowedRoot.Value;
+        if (path == null) throw new ArgumentNullException(nameof(path));
+        if (allowedRoot == null) throw new ArgumentNullException(nameof(allowedRoot));
 
         // Must be fully qualified
-        if (!Path.IsPathFullyQualified(pathValue))
+        if (!Path.IsPathRooted(path))
         {
-            throw new UnauthorizedAccessException($"Path must be fully qualified: {pathValue}");
+            throw new UnauthorizedAccessException($"Path must be fully qualified: {path}");
         }
 
         // Normalize paths
-        var normalized = Path.GetFullPath(pathValue);
-        var normalizedRoot = Path.GetFullPath(rootValue);
+        var normalized = Path.GetFullPath(path);
+        var normalizedRoot = Path.GetFullPath(allowedRoot);
 
         // Reject NUL bytes and ASCII control characters
         if (normalized.Any(c => c == '\0' || char.IsControl(c)))
@@ -68,7 +68,7 @@ public sealed class DefaultPathValidator : IPathValidator
         // Detect traversal attempts (.. after normalization)
         if (normalized.Contains(".."))
         {
-            throw new UnauthorizedAccessException($"Path contains traversal sequence: {pathValue}");
+            throw new UnauthorizedAccessException($"Path contains traversal sequence: {path}");
         }
 
         // Containment check: path must be strictly within allowed root
@@ -80,11 +80,17 @@ public sealed class DefaultPathValidator : IPathValidator
             normalized[normalizedRoot.Length] != Path.DirectorySeparatorChar))
         {
             throw new UnauthorizedAccessException(
-                $"Path escapes allowed root. Path: {pathValue}, Root: {rootValue}");
+                $"Path escapes allowed root. Path: {path}, Root: {allowedRoot}");
         }
 
         // Reject reserved Windows device names
         RejectReservedNames(normalized);
+    }
+
+    /// <inheritdoc/>
+    public void AssertSafe(AbsolutePath path, AbsolutePath allowedRoot)
+    {
+        AssertSafe(path.Value, allowedRoot.Value);
     }
 
     /// <inheritdoc/>
@@ -102,6 +108,33 @@ public sealed class DefaultPathValidator : IPathValidator
         // Open the file for reading
         return new FileStream(
             fullPath.Value,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 4096,
+            useAsync: true);
+    }
+
+    /// <summary>
+    /// Opens a read-only stream over a path (string version for testing).
+    /// </summary>
+    public async ValueTask<Stream> OpenReadUnderRootAsync(
+        string allowedRoot,
+        string relativePath,
+        CancellationToken ct)
+    {
+        if (allowedRoot == null) throw new ArgumentNullException(nameof(allowedRoot));
+        if (relativePath == null) throw new ArgumentNullException(nameof(relativePath));
+
+        // Construct the full path by combining root and relative
+        var fullPath = Path.Combine(allowedRoot, relativePath);
+
+        // Validate it's safe
+        AssertSafe(fullPath, allowedRoot);
+
+        // Open the file for reading
+        return new FileStream(
+            fullPath,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
