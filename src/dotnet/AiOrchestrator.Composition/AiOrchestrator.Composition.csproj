@@ -10,7 +10,11 @@
   </ItemGroup>
 
   <ItemGroup>
+<<<<<<< HEAD
     <ProjectReference Include="..\AiOrchestrator.Process\AiOrchestrator.Process.csproj" />
+=======
+    <ProjectReference Include="..\AiOrchestrator.Redaction\AiOrchestrator.Redaction.csproj" />
+>>>>>>> e0af89bb3cb7f407f8692f58f0a50ea31a122da8
   </ItemGroup>
 
 </Project>

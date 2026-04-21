@@ -3,6 +3,7 @@
   <PropertyGroup>
     <AssemblyName>AiOrchestrator.Models</AssemblyName>
     <RootNamespace>AiOrchestrator.Models</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
 </Project>

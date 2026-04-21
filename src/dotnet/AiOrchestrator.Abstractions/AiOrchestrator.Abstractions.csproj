@@ -3,6 +3,7 @@
   <PropertyGroup>
     <AssemblyName>AiOrchestrator.Abstractions</AssemblyName>
     <RootNamespace>AiOrchestrator.Abstractions</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
   <ItemGroup>
