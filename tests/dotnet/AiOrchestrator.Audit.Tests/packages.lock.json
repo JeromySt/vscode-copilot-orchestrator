@@ -294,18 +294,34 @@
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )",
           "AiOrchestrator.Audit": "[1.0.0, )",
+          "AiOrchestrator.Diagnose": "[1.0.0, )",
           "AiOrchestrator.EventLog": "[1.0.0, )",
           "AiOrchestrator.Eventing": "[1.0.0, )",
           "AiOrchestrator.FileSystem": "[1.0.0, )",
           "AiOrchestrator.Logging": "[1.0.0, )",
           "AiOrchestrator.Models": "[1.0.0, )",
           "AiOrchestrator.PathValidator": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Store": "[1.0.0, )",
+          "AiOrchestrator.Redaction": "[1.0.0, )",
           "AiOrchestrator.Time": "[1.0.0, )",
           "Microsoft.Extensions.Configuration.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.Logging": "[9.0.4, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.4, )",
           "Microsoft.Extensions.Options.ConfigurationExtensions": "[9.0.4, )"
+        }
+      },
+      "aiorchestrator.diagnose": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Audit": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Store": "[1.0.0, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
       "aiorchestrator.eventing": {
@@ -348,6 +364,25 @@
         "type": "Project"
       },
       "aiorchestrator.pathvalidator": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )"
+        }
+      },
+      "aiorchestrator.plan.models": {
+        "type": "Project"
+      },
+      "aiorchestrator.plan.store": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Options": "[9.0.4, )"
+        }
+      },
+      "aiorchestrator.redaction": {
         "type": "Project",
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )"

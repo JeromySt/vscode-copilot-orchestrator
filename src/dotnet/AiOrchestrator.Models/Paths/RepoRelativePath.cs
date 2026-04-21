@@ -37,7 +37,7 @@ public readonly record struct RepoRelativePath
             }
         }
 
-        this.Value= value;
+        this.Value = value;
     }
 
     /// <summary>Gets the raw path value.</summary>

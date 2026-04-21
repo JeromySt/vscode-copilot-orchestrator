@@ -26,7 +26,7 @@ public readonly record struct CommitSha
             throw new ArgumentException("CommitSha must be a 40-character hexadecimal string.", nameof(hex));
         }
 
-        this.Hex= hex.ToLowerInvariant();
+        this.Hex = hex.ToLowerInvariant();
     }
 
     /// <summary>Gets the hexadecimal SHA string.</summary>
