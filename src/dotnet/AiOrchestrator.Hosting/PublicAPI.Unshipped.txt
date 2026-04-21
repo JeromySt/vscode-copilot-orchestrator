@@ -1,0 +1,10 @@
+#nullable enable
+namespace AiOrchestrator.Hosting;
+public static class HostBuilderExtensions
+public static IHostBuilder UseAiOrchestrator(this IHostBuilder builder, Action<AiOrchestratorOptions>? configure = null);
+public static IServiceCollection AddAiOrchestrator(this IServiceCollection services, IConfiguration config);
+public sealed record AiOrchestratorOptions { public AbsolutePath StoreRoot { get; init; } public bool EnableHookGate { get; init; } = true; public bool EnableConcurrencyBroker { get; init; } = true; public bool EnablePluginLoader { get; init; } = true; public bool EnableTelemetry { get; init; } = false; }
+public sealed class AiOrchestratorRoot : IAsyncDisposable
+public AiOrchestratorRoot(IServiceProvider sp);
+public IServiceProvider Services { get; }
+public ValueTask DisposeAsync();
