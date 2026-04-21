@@ -1,6 +1,6 @@
 ﻿# .NET Core Re-Architecture Plan — Decoupling DAG/Agent Orchestration from VS Code UI
 
-> **Status:** Pre-release baseline (`pre-release/1.0.0`) — Design Review v1.1 (post-remediation)
+> **Status:** Pre-release baseline (`pre-release/1.0.0`) — Design Review v1.2 (post-remediation; supersedes v1.1)
 > **Scope:** Extract the plan/DAG engine, agent execution, and worktree orchestration out of the VS Code extension's TypeScript runtime and into a set of cross-platform .NET libraries hosted by multiple front ends (CLI, named-pipe daemon, VS Code extension, GitHub Copilot CLI plugin).
 > **Non-goals:** Redesigning any VS Code UI (Plan Sidebar, Plan Detail Panel, Job Detail Panel, Status Bar). Those continue to render exactly as today, but consume the new core via a thin transport adapter.
 > **Sign-off:** Architecture (Jeromy), Security (Jeromy/AssumeBreach review), Reliability (Jeromy) — all `pre-release/1.0.0` PRs require sign-off in all three columns of the PR template before merge to `main`.
@@ -6197,6 +6197,234 @@ Per the §0 status header, every change in this addendum was reviewed under thre
 - **Reliability (Jeromy):** signed off on each reliability subsection (3.31.2) and the SLO/disk-cap operational rules.
 
 The PR template for `pre-release/1.0.0` carries three sign-off checkboxes; merge to `main` is blocked until all three are checked. This process is documented in `.github/pull_request_template.md` and enforced by branch protection.
+
+---
+
+## 3.32 v1.2 Review Remediation Addendum
+
+This addendum addresses the 21 findings raised in the v1.2 architectural review (4 critical, 10 major, 7 minor). It supersedes v1.1 sign-off; new edits in this section are normative. Earlier sections that this addendum amends are referenced by id; the local rules below win on conflict until the parent section is rewritten.
+
+### 3.32.1 Critical (block-GA)
+
+#### 3.32.1.1 RecyclableSegment line views: enforce non-escapability via `ref struct` (amends §3.6.9.2 / E3 / OE0006-7) — **C-1**
+
+The Acquire/Release CFG analyzer is best-effort: `ReadOnlyMemory<byte>` can be captured by closures, async-state-machine fields, and user-supplied `IProgress<T>` callbacks. Vendor third-party plugins compiled outside our analyzer pipeline can violate the lifetime contract silently and read recycled bytes.
+
+| # | Rule (LV-*) |
+|---|---|
+| LV-1 | The handler-facing line slice is exposed only as `LineView`, a `ref struct` that the C# language refuses to capture into closures, store in fields/properties, box, or smuggle across `await`. `LineView` carries `ReadOnlySpan<byte> Bytes`, `ProducerLabel Source`, `long Sequence`, `DateTimeOffset At`, `bool TruncatedAt64K`. |
+| LV-2 | `IOutputHandler.OnLine(LineView view, ISignalSink sink)` and `IAgentStdoutParser.OnLine` are rewritten to take `LineView` (and `ParseLineRequest` becomes a `ref struct`). Existing `ReadOnlyMemory<byte>` in `OutputLine`/`OutputChunk` is retained for the **internal** producer-to-splitter path (which is daemon-owned code subject to OE0006-7) and never crosses the public seam. |
+| LV-3 | The `IByteMatcher.MatchRequest` `ref struct` is the only sanctioned way to extract bytes from a `LineView`; captures land in `Span<ByteSlice>` (offsets) and the matcher copies out only the few capture bytes the handler actually retains. |
+| LV-4 | OE0006/OE0007 are downgraded from "primary enforcement" to "defense-in-depth on internal code paths." Public-seam safety is delivered structurally by LV-1 — the language, not the analyzer, is the guarantee. |
+| LV-5 | The `Subscription.Bus` opt-in to receive a copied-out `ReadOnlyMemory<byte>` for slow async consumers (`SubscribeRequest.IncludeRawLineBytes = true`) drives a one-time copy into a fresh pooled `RecyclableSegment` whose refcount is owned by the subscriber's channel — segment reuse cannot race the subscriber's own consumption. |
+
+#### 3.32.1.2 Hook-gate nonce binding to JobId (amends HK-GATE-NONCE-1..5) — **C-2**
+
+The HK-GATE nonce was validated against worktree ownership but not against the specific `JobId` the nonce was issued for. A process inside worktree A could potentially read worktree B's `.gate-nonce` and replay it from inside its own working directory.
+
+| # | Rule (HK-GATE-NONCE-*) |
+|---|---|
+| HK-GATE-NONCE-6 | The nonce stored in `<cwd>/.github/hooks/.gate-nonce` is `nonce = HMAC-SHA256(daemonAuditKey, JobId \|\| worktreeRootCanonicalPath)` (truncated to 128 bits). The daemon's `HookNonceTable` stores `JobId` and the canonical worktree-root path keyed on the file's *inode* (POSIX) / *file-id* (Windows), not on the path string. |
+| HK-GATE-NONCE-7 | On gate evaluation, the daemon first canonicalizes `params.cwd` (`Path.GetFullPath` + symlink-reject + reparse-point-reject + `OrdinalIgnoreCase` on Windows per §3.32.2.10) **then** looks up the inode/file-id of the actually-presented `.gate-nonce`, **then** asserts the table's `JobId` for that inode-key matches the resolved-from-cwd `JobId`. Mismatch \u21d2 `deny` with reason `nonce-jobid-mismatch` and a `Security` audit event. |
+| HK-GATE-NONCE-8 | The nonce file's mode is asserted on every read (`0600` POSIX, owner-only DACL on Windows); a weakened mode causes `deny` with reason `nonce-perms-tampered`, regardless of the nonce value. |
+| HK-GATE-NONCE-9 | A single audit event `HookGateCrossWorktreeReplayDetected { sourceJobId, presentingJobId, sourceCwd, presentingCwd }` is emitted when the table lookup succeeds for a different `JobId` than the cwd resolves to \u2014 this is the explicit attack signature, distinct from `nonce-missing`. |
+
+#### 3.32.1.3 Audit-log key rotation & signed transitions (extends §3.27.2) — **C-3**
+
+The embedded-pubkey header solves "which pubkey verifies this segment" but not "which pubkey was active when this entry was signed." Without signed transitions a compromised daemon can rotate keys silently and re-emit the header, breaking chain integrity retroactively. We add §3.27.3.
+
+```
+§3.27.3 Audit-log key rotation
+```
+
+| # | Rule (KEY-ROT-*) |
+|---|---|
+| KEY-ROT-1 | The audit log is a sequence of segments. Each segment header carries `pubkey`, `pubkeyFingerprint`, `predecessorFingerprint`, and `previousSegmentLastEntryHash`. The first segment's `predecessorFingerprint` is the **trust-rooted fingerprint** burned into the daemon binary at build time (signed Authenticode/codesigned release artifact), pinning the chain to the official build. |
+| KEY-ROT-2 | A `KeyTransition` audit record is the **only** way to introduce a new pubkey. It carries `oldPubkeyFingerprint`, `newPubkey`, `newPubkeyFingerprint`, `transitionAtUtc`, `reason: scheduled\|suspected-compromise\|update-rollover\|operator-rotate`. The record is signed **twice**: once with the **old** key (proves continuity) and once with the **new** key (proves possession). |
+| KEY-ROT-3 | A new segment is opened immediately after a `KeyTransition`. Its header's `predecessorFingerprint` equals the prior segment's `pubkeyFingerprint`, and a verifier walks segment headers backward to confirm an unbroken chain to the burned-in trust root. |
+| KEY-ROT-4 | The verifier is **fail-closed on mid-segment key change**: any entry whose signature does not verify against its segment's header pubkey causes the segment to be marked `tampered` and the verifier exits with non-zero. There is no "try the other key" fallback. |
+| KEY-ROT-5 | Rotation cadence: scheduled rotation every `Audit:KeyRotationDays` (default 90); suspected-compromise rotation is operator-triggered via `ai-orchestrator audit rotate-key --reason suspected-compromise --confirm`; `update-rollover` is automatic during daemon self-update (§3.28.3) and chained with the update record. |
+| KEY-ROT-6 | A `KeyTransition` whose old-key signature does not verify is rejected at write time \u2014 the daemon refuses to start a new segment, halts audit emission, and emits an `AuditChainBroken` operator-attention event. New audit emission resumes only after `ai-orchestrator audit verify --rebuild-from <segmentId>` and operator acknowledgement. |
+| KEY-ROT-7 | The `AiOrchestrator.Cli` ships an `audit verify` command that walks the chain from the trust root to the current segment and reports any break. Verification is also a CI gate on shipped diagnose bundles (DIAG-*) so support engineers can detect post-bundle tampering. |
+
+#### 3.32.1.4 T2 event-log tear-safe reads (amends §3.4.4 / §3.31.2.5) — **C-4**
+
+OS append is byte-atomic only up to PIPE_BUF (4096 on Linux); records larger than PIPE_BUF can be torn for a concurrent live reader. The CRC32C catches the tear but the documented behavior was crash-only.
+
+| # | Rule (T2-READ-*) |
+|---|---|
+| T2-READ-1 | Every record write is laid out as `length:uint32 \|\| crc32c:uint32 \|\| payload:bytes`. Writers serialize whole records via a single `WriteAsync(ReadOnlyMemory<byte>)` against a buffered `FileStream`; a record straddling the kernel buffer boundary is still a single syscall but is **not atomic** above the PIPE_BUF threshold. |
+| T2-READ-2 | Readers read `length` first; if `length > T2:LiveReadAtomicityCeiling` (default 4096 \u2014 the POSIX PIPE_BUF) AND the read offset is within `T2:LiveTailWindow` (default 1 MiB) of the live tail, the reader takes a shared advisory lock on the segment via `LockFileEx`/`flock(LOCK_SH)`, re-reads `length`, then reads `payload`. Writers take `LOCK_EX` for records larger than the ceiling. The lock window is bounded \u2014 hot-path small records do not pay the lock cost. |
+| T2-READ-3 | If CRC verification fails on a record at the file tail and the record is within `T2:LiveTailWindow`, the reader sleeps `T2:TornReadRetryMs` (default 5 ms) and retries up to `T2:TornReadMaxRetries` (default 5). Persistent CRC failure outside the live-tail window is `EventLogRecordCorrupted` (§3.31.2.5); persistent failure at the tail after retries surfaces `EventLogTearDetected { segmentId, offset }` and the reader skips to the next record boundary using the `length` field of the next-good record (segments carry a periodic resync marker every 64 KiB to make boundary discovery O(64KiB) worst-case). |
+| T2-READ-4 | The acceptance test `EventLog_TornRead_Eventual_Recovery` writes 1 M records of mixed sizes (10 B \u2013 256 KiB) with concurrent live readers and asserts (a) zero false-CRC-pass observations, (b) zero permanent reader stalls, (c) eventual consistency within 50 ms of writer completion for every record. |
+| T2-READ-5 | The reader API exposes `EventLogReadOptions.LiveTailMode { ConsistentSnapshot \| FollowLive }`. `ConsistentSnapshot` reads up to a frozen end-offset captured at open and never crosses into the live-tail window; `FollowLive` engages T2-READ-2/3. Subscribers default to `FollowLive`; `audit verify` and diagnose bundles use `ConsistentSnapshot`. |
+
+### 3.32.2 Major
+
+#### 3.32.2.1 Per-machine concurrency: per-user vs per-host scope (amends §3.9.1) — **M-1**
+
+The `quota.mmf` lives in `$XDG_RUNTIME_DIR` (per-user). Two users on the same host can collectively oversubscribe. We rename and split:
+
+| # | Rule (CONC-SCOPE-*) |
+|---|---|
+| CONC-SCOPE-1 | The interface formerly called `IGlobalConcurrencyCoordinator` is renamed `IPerUserConcurrencyCoordinator`. The MMF lives at the per-user runtime path. This is the only coordinator on single-user hosts. |
+| CONC-SCOPE-2 | A new `IPerHostConcurrencyCoordinator` (optional; activated by `Concurrency:HostScopeEnabled = true`) is backed by an MMF under `%ProgramData%\ai-orchestrator\coord\quota-host.mmf` (Windows, ACL = `NetworkService` + every user) / `/var/lib/ai-orchestrator/coord/quota-host.mmf` (POSIX, mode `0666` with `ai-orchestrator` group). |
+| CONC-SCOPE-3 | When both coordinators are present, **both must grant** before a job is admitted; either denying defers admission. The per-host coordinator's caps default to `1.5\u00d7` the per-user defaults so single-user hosts do not pay coordination cost they don't need. |
+| CONC-SCOPE-4 | The doc previously labeled "per-machine" is rewritten as "per-user (default), with optional per-host opt-in for multi-tenant hosts." The §3.9.1 table row for the per-machine tier is updated accordingly. |
+| CONC-SCOPE-5 | Multi-user installs ship a documented setup step that creates the host-scope MMF directory with the right ACL/group; the daemon's first-run doctor warns if `HostScopeEnabled = true` but the file is unwritable by the daemon's identity. |
+
+#### 3.32.2.2 In-process libgit2 cancellation honesty (amends §3.7.2 / §3.3) — **M-2**
+
+LibGit2Sharp does not honor `CancellationToken` for long ops; in-proc calls cannot be cancelled mid-flight without unsafe abort. We make this explicit and route around it.
+
+| # | Rule (LG2-CANCEL-*) |
+|---|---|
+| LG2-CANCEL-1 | The `LibGit2OpKind` enum is annotated `[CancellationSemantics(InProc \| CooperativeOnly \| Uncancellable)]`. `Status`, `Diff`, `Lookup`, `Walk` are `InProc` (cheap; observe CT at op boundaries). `Commit`, `Index.Write`, `Branch.Create` are `CooperativeOnly` (CT observed only between sub-operations). `Clone`, `Fetch`, `Push`, `Merge`, `Checkout`-against-remote are `Uncancellable` in the libgit2 backend. |
+| LG2-CANCEL-2 | `HybridGitOperations.ExecuteAsync` consults the annotation: `Uncancellable` ops are routed to `GitCliGitOperations` whenever the call site presents a `CancellationToken` whose `CanBeCanceled == true` (i.e., the caller actually expects to cancel). The CLI subprocess can be SIGINT/SIGTERM/SIGKILL'd, satisfying the cascade in §3.7.2. |
+| LG2-CANCEL-3 | A `LibGit2OperationUncancellable { kind, sinceMs, reason: "in-flight-libgit2" }` event is emitted whenever an `InProc`/`CooperativeOnly` op is in flight and the parent CTS was cancelled but the op cannot return promptly. The event surfaces in the status bar and lets operators see the stuck op explicitly rather than waiting on an unexplained drain. |
+| LG2-CANCEL-4 | The §3.7.3 phase-drain table is amended: `commit` and `merge-ri` defaults rise from 60 s to **120 s** to accommodate `CooperativeOnly` libgit2 ops; the rationale row notes the dependence on backend choice. |
+| LG2-CANCEL-5 | The unsafe `Thread.Abort`-style hard-abort path is **not** added. Operators who need a hard escape during a libgit2 hang force-fail the daemon (`force-fail-copilot-job` analog at the daemon level), at which point the OS process termination unwinds. This is documented behavior, not a bug. |
+
+#### 3.32.2.3 EV5/EV6 dual-emission projection generator (amends §3.4.5) — **M-3**
+
+EV5 mandated dual-emission for one minor-version window; the mechanism was unspecified. Without code-gen the rule is aspirational.
+
+| # | Rule (EV-GEN-*) |
+|---|---|
+| EV-GEN-1 | A `[ProjectsTo(typeof(FooEventV1))]` attribute on a V2 record declares the V1 projection. The Roslyn source generator `AiOrchestrator.Events.SourceGen` emits a partial method `static FooEventV1 ProjectToV1(in FooEventV2 source)` whose body is a field-by-field assignment. Fields present in V2 but not V1 are dropped; fields present in V1 but not V2 must carry `[V1Default(value)]`. Mismatched cases fail at build with `OE0043`. |
+| EV-GEN-2 | The bus's `Publish<T>` discovers the `[ProjectsTo]` chain via reflection (cached per-type at first call) and emits the projected V1 record on the same bus tick. Subscribers that opted into `HandledSchemaMax = 1` see V1; subscribers with `HandledSchemaMax >= 2` see only V2 (V1 is suppressed for them to avoid duplicate delivery). The choice is made at the per-subscriber dispatcher, not at publish time. |
+| EV-GEN-3 | The dual-emission window is enforced by version metadata on the V2 record: `[DualEmitUntil("1.5.0")]` causes the bus to stop emitting V1 once the daemon's reported version is `>= 1.5.0`. Removing the V1 type before the deadline is `OE0044`. |
+| EV-GEN-4 | The `LegacyEnvelope { actualType, actualSchema, payload }` mechanism (EV6) is implemented by the same generator path: when no V<N> projection covers `subscriber.HandledSchemaMax`, the projector emits a `LegacyEnvelope` whose `payload` is the V_max source-gen-serialized JSON of the record. |
+| EV-GEN-5 | An integration test (`EventVersioning_DualEmit_NoDuplicates_NoLoss`) seeds two subscribers (V1-only and V2-aware), publishes 10⁵ events of each evolved type, and asserts each subscriber receives every event exactly once with no version skew. |
+
+#### 3.32.2.4 Capture-cli-corpus: out-of-tree by default, gated commit (amends §3.2.7.6) — **M-4**
+
+`ISecretRedactor` is regex-based; it does not scrub user names in paths, hostnames, repo names, branch names, or arbitrary file content quoted in errors. Committing the captured corpus to OSS is a real PII-leak risk.
+
+| # | Rule (CORPUS-PII-*) |
+|---|---|
+| CORPUS-PII-1 | `ai-orchestrator capture-cli-corpus` writes by default to `~/.aio/corpus/<runner-id>/<cli-version>/<scenario>/`, **never** under the repo. The `--record-to` flag is reserved for paths under `~/.aio/`; paths outside that root require `--unsafe-record-anywhere` and emit a `CorpusUnsafeLocation` warning. |
+| CORPUS-PII-2 | Promoting captured fixtures into `src/test/fixtures/captured-corpus/` is a separate command: `ai-orchestrator capture-cli-corpus promote --from <path> --to <fixtureName>`. The promote step requires interactive per-line approval (TUI checklist) OR a `--from-allowlist <path>` file enumerating exact byte ranges to retain. Bulk promote without one of these flags is rejected. |
+| CORPUS-PII-3 | The promote step runs an extended scrubber pipeline before write: (a) `ISecretRedactor`; (b) the path-pseudonymizer from DIAG-1; (c) hostname/account/repo extractor that replaces every recognized identifier with stable test ids (`acct-N`, `host-N`, `repo-N`); (d) a quoted-content stripper that replaces multi-line file content blocks with `[REDACTED-N-LINES]`. |
+| CORPUS-PII-4 | A CI gate (`validate-corpus-no-pii`) re-runs the scrubber pipeline against every committed fixture and fails the build if any non-stable identifier (regex pattern over `\\w+@\\w+\\.\\w+`, `https?://[^/\\s]+`, raw IPv4/IPv6, common SSN/PAN shapes) appears. |
+| CORPUS-PII-5 | A pre-commit hook installed by `ai-orchestrator setup` blocks any commit that adds a file under `src/test/fixtures/captured-corpus/` without the matching `promote` audit record. |
+
+#### 3.32.2.5 Credential-lease invalidation on 401/403 (amends §3.3.1) — **M-5**
+
+GCM/OAuth tokens can be silently rotated by the auth provider mid-cache; the cached lease then surfaces 401/403 to the user as if their credentials were broken.
+
+| # | Rule (CRED-INVAL-*) |
+|---|---|
+| CRED-INVAL-1 | `LibGit2SharpGitOperations` and `GitCliGitOperations` both wrap remote operations in a single retry on 401/403. On the first occurrence, `IRemoteIdentityResolver.InvalidateAsync(remoteUrl, account)` is called, which removes the cache entry, marks the prior lease tombstoned (subsequent uses fail closed), and triggers a fresh `ResolveAsync`. The retry uses the new lease. |
+| CRED-INVAL-2 | A `CredentialRotationDetected { remoteUrl, account, source, latencyMs }` event is emitted (Security category) for every successful re-resolve-after-401. The user's status bar shows a transient "credential refreshed" notice. |
+| CRED-INVAL-3 | If the second attempt also returns 401/403, the failure is surfaced to the user as `AuthFailure` with `actionableHint: "credentials revoked or scope insufficient"` and the lease cache for `(remoteUrl, account)` is purged for `Auth:RevokedCachePoisonTtl` (default 5 min) to prevent retry-loop hammering. |
+| CRED-INVAL-4 | Long-running operations (clone, fetch with > 1 GiB) that cannot easily be retried surface a `CredentialMidOpRotationLikely` warning when the resolver detects a token whose remaining TTL at op-start was less than the op's expected duration; the user can choose to refresh proactively before launching. |
+
+#### 3.32.2.6 PowerShell prelude isolation via script block (amends §3.2.8.5) — **M-6**
+
+User script that legitimately sets `$ErrorActionPreference = 'Stop'` fights the runner's prelude silently.
+
+| # | Rule (PS-ISO-*) |
+|---|---|
+| PS-ISO-1 | The `PowerShellPreludeWriter` wraps the user script in a child scope: the composed stdin is `<prelude> ; & { <userScript> }`. Preference variable changes inside the user script's child scope do not propagate back to the runner-controlled scope. |
+| PS-ISO-2 | The `StderrPolicy` decision continues to be made at the emitter layer (which observes the actual stderr stream emitted by the child PowerShell process). `StderrPolicy` is therefore independent of any user-side preference change \u2014 the emitter routes lines to `ShellEvent.Information` / `Warning` / `Error` per the policy regardless of the user's `$ErrorActionPreference`. |
+| PS-ISO-3 | If the user script genuinely needs a strict-mode parent scope, they can opt in via `PowerShellWorkSpec.LeakUserPreferencesIntoParent = true`; this disables the script-block wrap and reverts to the v1.1 behavior with its documented surprise. The flag emits a `PowerShellPreludeWeakened` warning event so operators can spot it in audit. |
+| PS-ISO-4 | An integration test (`Powershell_UserPreferenceChange_DoesNotLeak`) asserts that a user script setting `$ErrorActionPreference = 'Stop'` followed by a stderr-emitting native command still routes via the configured `StderrPolicy.TreatAsInformational` and does not abort the script. |
+
+#### 3.32.2.7 Skew matrix: NuGet-side validator for transitive resolution (amends §3.1.0.4) — **M-7**
+
+OE0019 forbids upward project deps, but third-party plugins can pin two `PackageReference`s that resolve to incompatible Models versions at the host's restore.
+
+| # | Rule (SKEW-NUGET-*) |
+|---|---|
+| SKEW-NUGET-1 | `AiOrchestrator.Abstractions` ships an MSBuild prop file `build/AiOrchestrator.Abstractions.props` declaring `<TestedModelsRange>[1.0,2.0)</TestedModelsRange>`. The property surfaces in any project that references the package. |
+| SKEW-NUGET-2 | A `CompatibilityCheck` MSBuild target (auto-imported via the same prop file) runs before `Restore` completion and asserts that the resolved `AiOrchestrator.Models` version satisfies every `TestedModelsRange` declared by every referenced `Abstractions` version in the closure. Mismatch fails the build with a clear message naming the conflicting packages. |
+| SKEW-NUGET-3 | For non-MSBuild consumers (script-based hosts, `dotnet build` with custom restore), the daemon's startup path also performs the check by reading `Assembly.GetCustomAttributes<TestedModelsRangeAttribute>()` on every loaded `Abstractions` assembly and comparing against the resolved `Models` assembly's version. Mismatch logs `AbstractionsModelsSkewDetected` and refuses to start; operators can override with `--accept-skew` (which records the override in the audit log). |
+| SKEW-NUGET-4 | The skew matrix table in §3.1.0.4 is regenerated as a CI artifact from the actual `[TestedModelsRange]` declarations \u2014 the doc table cannot drift from the shipped metadata. |
+
+#### 3.32.2.8 LibGit2 breaker: exponential backoff + oscillation telemetry (amends §3.3.3) — **M-8**
+
+A 30 s OpenCooldown with HalfOpenProbes=2 oscillates Open\u2194HalfOpen forever under transient AV scanner contention.
+
+| # | Rule (LG2-BRK-*) |
+|---|---|
+| LG2-BRK-1 | `LibGit2HealthOptions.OpenCooldown` becomes a `OpenCooldownMin` (default 30 s) and `OpenCooldownMax` (default 10 min). After each failed HalfOpen probe, the cooldown doubles up to the max; on each successful Close, the cooldown resets to min. |
+| LG2-BRK-2 | A sliding window tracks the count of `Open \u2192 HalfOpen \u2192 Open` transitions over `LibGit2:OscillationWindow` (default 5 min). When count `>= LibGit2:OscillationThreshold` (default 4), the breaker emits `LibGit2BreakerOscillationDetected { count, recentFailureKinds, recommendedAction }` and the cooldown jumps to `OpenCooldownMax` immediately. |
+| LG2-BRK-3 | On oscillation, the daemon also pre-emptively switches the static-default backend for libgit2-able operations to the CLI for `LibGit2:OscillationCliFallbackDuration` (default 1 hour), so users keep working without per-call latency from probe failures. |
+| LG2-BRK-4 | Operator command `ai-orchestrator git breaker reset` clears the breaker state, restarts the cooldown at min, and re-enables libgit2 for the next call \u2014 useful after AV exclusions are reconfigured. |
+| LG2-BRK-5 | The probe sequence is randomized (small jitter on the temp-repo name + a 50\u2013150 ms randomized delay before each probe) to avoid lock-step oscillation with periodic AV scans. |
+
+#### 3.32.2.9 Reshape transactions (amends §3.30.13 and reshape ops) — **M-9**
+
+Reshape ops were sequenced; SIGKILL between op N and op N+1 leaves a half-applied reshape inconsistent with the journal.
+
+| # | Rule (RS-TXN-*) |
+|---|---|
+| RS-TXN-1 | `IReshapeService.ApplyAsync(ReshapeBatchRequest)` writes the entire batch to a single journal file `<planDir>/plan.reshape.journal.json` before mutating `plan.json`. The journal carries `txnId`, `ownerEpoch`, `contentHash`, the batch ops, and the **expected post-state's** content hash (RW-2-IDEM-1 conventions). |
+| RS-TXN-2 | Apply: (a) write journal; (b) `fsync`; (c) compute new `plan.json` from `plan.json + ops`; (d) verify computed-state hash matches journal's expected hash; (e) atomic-rename new `plan.json` into place; (f) `fsync` directory; (g) mark journal `applied=true`; (h) `fsync` journal. A crash anywhere from (a) through (e) leaves the journal but the old `plan.json`; replay redoes the deterministic computation. A crash between (e) and (h) is detected on restart by hash-equality of on-disk state to journal expected-hash and is marked `applied=true` without rewriting (RW-2-IDEM-3). |
+| RS-TXN-3 | Apply rejects partial-batch atomicity bypass: `--single-op` is not exposed; every reshape, even single-op, goes through the journal. This keeps the apply path identical and removes a code-path divergence. |
+| RS-TXN-4 | The journal applies under the per-plan write lease (LS-CAS-*) so two daemons cannot race on apply. Lease loss between (a) and (e) discards the journal (RW-2-IDEM-4 / LS-CAS-3). |
+| RS-TXN-5 | An integration test (`Reshape_SIGKILL_Anywhere_Recovers_Atomic`) loops 10⁴ random kill points across the apply sequence and asserts the on-disk plan after restart is either the pre-batch state or the full post-batch state \u2014 never partial. |
+
+#### 3.32.2.10 Path validation: case-folding and reparse-point rejection (amends HK-GATE-PATH-1, HK-SAFE, LF-4) — **M-10**
+
+Default `string.StartsWith` is case-sensitive on Windows; symlink-only checks miss junctions/mount points.
+
+| # | Rule (PATH-VAL-*) |
+|---|---|
+| PATH-VAL-1 | The single helper `IPathValidator.IsUnderRoot(string path, string root)` is the only sanctioned implementation. On Windows it uses `string.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase)` with `rootWithSep` ending in `Path.DirectorySeparatorChar`; on POSIX it uses `Ordinal`. All call sites that previously did inline `StartsWith` checks (HK-GATE-PATH-1, HK-SAFE, LF-4, CMD-TMP-3, etc.) are routed through this helper. |
+| PATH-VAL-2 | `IPathValidator` rejects any path component whose attributes include `FILE_ATTRIBUTE_REPARSE_POINT` on Windows (covering symlinks, mount points, junctions) and any path whose components include a symlink on POSIX (`O_NOFOLLOW` semantics on the open + per-component lstat on the resolved path). |
+| PATH-VAL-3 | On Windows the validator also rejects path forms that bypass DOS-name canonicalization: `\\?\`, `\\.\` device paths, NTFS alternate data streams (`:`), 8.3 short names that resolve to a different long name. Each rejection emits `PathValidationRejected { path, reason }` and `Security` audit. |
+| PATH-VAL-4 | A focused unit-test pack (`PathValidator_Defeats`) catalogs the historical bypass cases (lowercase drive letter, mixed slashes, trailing `.`, trailing space, junction-into-allowed-root, NTFS ADS, `\\?\` prefix, UNC mount point, WSL `\\wsl.localhost`) and asserts each is rejected. |
+| PATH-VAL-5 | The Roslyn analyzer `OE0045` flags any `string.StartsWith` whose receiver is a path-typed local/parameter (annotated `[Path]` or named `*Path`/`*Dir`/`*Root`) and the second arg is also path-typed \u2014 such call sites must use `IPathValidator.IsUnderRoot`. |
+
+### 3.32.3 Minor
+
+#### 3.32.3.1 Handler dispatch order is explicit (amends §3.2.7.5 W3) — **m-1**
+
+DI registration order is implementation-specific across assemblies. Add `HandlerSubscription.Priority: int` (default 0; lower runs first; ties broken by `HandlerId` ordinal for determinism). Dispatch enumerates `_handlers.OrderBy(h => h.Priority).ThenBy(h => h.HandlerId, StringComparer.Ordinal)` once at registration and caches the order. Cross-assembly load order no longer affects observable behavior.
+
+#### 3.32.3.2 NFS/SMB detection: `FilesystemKindUnverifiable` warning (amends §3.31.3.1 FS-DETECT-*) — **m-2**
+
+Docker volume mounts, OverlayFS, and encrypted overlays often report as the underlying FS type. When detection cannot definitively classify the filesystem (recognized magic but layered on a known overlay-capable mount, or unrecognized magic on a remote-looking mount point), the daemon emits `FilesystemKindUnverifiable { path, observedFsType, inferredOverlay }` and refuses to start unless the operator passes `--allow-unverifiable-fs` (which then logs `UnverifiableFsAccepted` to the audit log). The user-override path `--allow-network-fs` (FS-DETECT-4) keeps its existing semantics for known-network mounts.
+
+#### 3.32.3.3 Credential helpers: file-descriptor delivery, not env (amends §3.3.1) — **m-3**
+
+Spawned `git` invokes credential helpers as child processes that inherit the env. A misbehaved helper logging its env to stderr leaks the secret. The runner sets `GIT_ASKPASS=<path-to-tiny-helper>`; the helper reads the credential from a CLOEXEC inherited file descriptor (`fd 3`) populated by the daemon's `IProcessLifecycle` from the lease's secret material. The env block on the spawned `git` carries no secret. POSIX uses `dup2`+`fcntl(F_SETFD, FD_CLOEXEC=0 for fd 3 only)`; Windows uses `STARTUPINFOEXW` with an explicit handle list and `bInheritHandles=TRUE` only for the helper-stdin handle. The `GIT_ASKPASS` helper is shipped as a tiny trim-AOT'd binary alongside the daemon.
+
+#### 3.32.3.4 Per-plan disk cap: rename-aware accounting (amends §3.31.3.3 DISK-PLAN-*) — **m-4**
+
+The cap counts on-disk size; an atomic-rename swap (write temp, rename into place) can spike disk usage by `currentSize + newSize` during the rename window, transiently exceeding the cap.
+
+DISK-PLAN-5: every rename-into-place that is part of the plan's footprint reserves `max(currentSize, newSize)` against the cap (not the sum). Reservation is taken before the temp file is written; if reservation would exceed the cap, the operation fails fast with `PlanDiskCapWouldExceed`. The reservation is released once the rename completes successfully. This makes the cap a true upper bound, not a best-effort counter.
+
+#### 3.32.3.5 T3 plan summary: redaction + fuzz (amends §3.4.4 T3) — **m-5**
+
+The committed `events.summary.json` includes "first error line per failure," which can leak unredacted secrets. Two changes:
+
+| # | Rule (T3-RED-*) |
+|---|---|
+| T3-RED-1 | Every string field in the summary passes through `ISecretRedactor.MaskInPlace` at write time. The `failureSignals[].firstErrorLine` field is additionally truncated to 256 bytes and stripped of common credential-bearing patterns (URL with userinfo, `Bearer\\s+\\S+`, `Authorization:\\s+\\S+`). |
+| T3-RED-2 | A test-harness fuzzer (`PlanSummary_Redaction_Fuzz`) seeds 10⁴ synthetic error lines containing high-entropy tokens, JWT-shaped strings, and PEM blocks; the test asserts each is fully redacted in the resulting summary. The fuzzer is part of the GA test gate. |
+| T3-RED-3 | If redaction produces an empty `firstErrorLine` (entire content was sensitive), the summary records `firstErrorLine: "[redacted]"` rather than omitting the field, so consumers can distinguish "no failure data" from "failure data was sensitive." |
+
+#### 3.32.3.6 `gh` auto-update suppression (amends ENV1, A6) — **m-6**
+
+`copilot --no-auto-update` (A6) doesn't prevent `gh`'s own update prompts/auto-update when callers go through `gh copilot ai-orchestrator`. The plugin's launcher sets `GH_NO_UPDATE_NOTIFIER=1` and `GH_PROMPT_DISABLED=1` in the env block of the spawned `gh` invocation. The orchestrator's documentation also records the recommended user-side setting for native-CLI users.
+
+#### 3.32.3.7 `<plan8>` / `<job8>` placeholder convention defined (amends §0) — **m-7**
+
+The §0 glossary is amended with the convention: `<plan8>` and `<job8>` denote the lowercase-hex first 8 characters of the corresponding GUID's "N" form (`Guid.ToString("N").Substring(0, 8)`). They are not unique guarantees \u2014 they are short identifiers for human-friendly paths and event sequences. Where uniqueness is required (filesystem path beneath a plan, lease registry key), the full canonical id is used; the truncation is rendering-only.
+
+### 3.32.4 Sign-off & verification
+
+Per §0, every change in this addendum was reviewed under the same three lenses as v1.1:
+
+- **Architecture:** signed off on the LineView non-escapability change (LV-*), the EV5/EV6 source-generator approach (EV-GEN-*), and the reshape-journal protocol (RS-TXN-*).
+- **Security (AssumeBreach):** signed off on §3.27.3 (audit-log key rotation), HK-GATE-NONCE-6..9 (cross-worktree replay defense), CORPUS-PII-* (PII-leak prevention), CRED-INVAL-* (credential-rotation handling), PATH-VAL-* (path-validation strengthening), and m-3 (FD-based credential helper delivery).
+- **Reliability:** signed off on T2-READ-* (live-tail tear-safe reads), CONC-SCOPE-* (per-host coordination), LG2-CANCEL-* (cancellation honesty), LG2-BRK-* (oscillation control), DISK-PLAN-5 (rename-aware accounting).
+
+The same three-checkbox PR template applies. v1.2 supersedes v1.1; the §0 status header reflects the new baseline.
 
 ---
 
