@@ -9,11 +9,15 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOrchestrator.Time", "AiOr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOrchestrator.TestKit", "AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj", "{C3D4E5F6-A7B8-9012-CDEF-234567890123}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOrchestrator.Concurrency.User", "AiOrchestrator.Concurrency.User\AiOrchestrator.Concurrency.User.csproj", "{F6A7B8C9-D0E1-2345-F012-567890123456}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOrchestrator.Foundation.Tests", "..\..\tests\dotnet\AiOrchestrator.Foundation.Tests\AiOrchestrator.Foundation.Tests.csproj", "{B2C3D4E5-F6A7-8901-BCDE-F12345678901}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOrchestrator.Time.Tests", "..\..\tests\dotnet\AiOrchestrator.Time.Tests\AiOrchestrator.Time.Tests.csproj", "{E5F6A7B8-C9D0-1234-EF01-456789012345}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiOrchestrator.Concurrency.User.Tests", "..\..\tests\dotnet\AiOrchestrator.Concurrency.User.Tests\AiOrchestrator.Concurrency.User.Tests.csproj", "{A7B8C9D0-E1F2-3456-0123-678901234567}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -85,10 +89,35 @@ Global
 		{E5F6A7B8-C9D0-1234-EF01-456789012345}.Release|x64.Build.0 = Release|Any CPU
 		{E5F6A7B8-C9D0-1234-EF01-456789012345}.Release|x86.ActiveCfg = Release|Any CPU
 		{E5F6A7B8-C9D0-1234-EF01-456789012345}.Release|x86.Build.0 = Release|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Debug|x64.Build.0 = Debug|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Debug|x86.Build.0 = Debug|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Release|x64.ActiveCfg = Release|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Release|x64.Build.0 = Release|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Release|x86.ActiveCfg = Release|Any CPU
+		{F6A7B8C9-D0E1-2345-F012-567890123456}.Release|x86.Build.0 = Release|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Debug|x64.Build.0 = Debug|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Debug|x86.Build.0 = Debug|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Release|x64.ActiveCfg = Release|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Release|x64.Build.0 = Release|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Release|x86.ActiveCfg = Release|Any CPU
+		{A7B8C9D0-E1F2-3456-0123-678901234567}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B2C3D4E5-F6A7-8901-BCDE-F12345678901} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 		{E5F6A7B8-C9D0-1234-EF01-456789012345} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+		{A7B8C9D0-E1F2-3456-0123-678901234567} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

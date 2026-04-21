@@ -7,10 +7,12 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.Time\AiOrchestrator.Time.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Concurrency.User\AiOrchestrator.Concurrency.User.csproj" />
   </ItemGroup>
 
 </Project>
