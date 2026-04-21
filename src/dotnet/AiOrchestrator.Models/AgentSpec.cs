@@ -4,7 +4,6 @@
 
 using System;
 
-
 namespace AiOrchestrator.Models;
 
 /// <summary>Specifies work to be performed by an AI coding agent.</summary>

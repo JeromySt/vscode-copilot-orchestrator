@@ -28,6 +28,7 @@
     <ProjectReference Include="..\AiOrchestrator.Process\AiOrchestrator.Process.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Credentials\AiOrchestrator.Credentials.csproj" />
     <ProjectReference Include="..\AiOrchestrator.HookGate\AiOrchestrator.HookGate.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Plan.PhaseExec\AiOrchestrator.Plan.PhaseExec.csproj" />
   </ItemGroup>
 
 </Project>
