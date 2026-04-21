@@ -169,6 +169,19 @@
           "AiOrchestrator.Abstractions": "[1.0.0, )"
         }
       },
+      "aiorchestrator.plan.models": {
+        "type": "Project"
+      },
+      "aiorchestrator.plan.store": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
+          "Microsoft.Extensions.Options": "[9.0.4, )"
+        }
+      },
       "aiorchestrator.time": {
         "type": "Project",
         "dependencies": {
