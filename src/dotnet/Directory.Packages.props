@@ -8,7 +8,7 @@
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageVersion Include="FluentAssertions" Version="6.12.2" />
-    <PackageVersion Include="FsCheck.Xunit" Version="3.2.1" />
+    <PackageVersion Include="FsCheck.Xunit" Version="3.3.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
 
@@ -16,6 +16,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="9.0.0" />
     <PackageVersion Include="StyleCop.Analyzers" Version="1.2.0-beta.556" />
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" />
 
     <!-- Microsoft.Extensions.* -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
@@ -24,7 +25,9 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="9.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.4" />
 
@@ -38,5 +41,8 @@
 
     <!-- Hashing -->
     <PackageVersion Include="System.IO.Hashing" Version="9.0.4" />
+
+    <!-- Cryptography (Ed25519) -->
+    <PackageVersion Include="BouncyCastle.Cryptography" Version="2.4.0" />
   </ItemGroup>
 </Project>
