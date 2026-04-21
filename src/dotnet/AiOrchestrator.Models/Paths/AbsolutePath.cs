@@ -28,7 +28,6 @@ public readonly record struct AbsolutePath
             throw new ArgumentException($"Path must be absolute (rooted). Got: '{value}'", nameof(value));
         }
 
-
         this.Value = value;
     }
 

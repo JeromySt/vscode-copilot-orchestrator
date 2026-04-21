@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.Process\AiOrchestrator.Process.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Credentials\AiOrchestrator.Credentials.csproj" />
   </ItemGroup>
 
 </Project>

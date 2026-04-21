@@ -6,7 +6,8 @@ namespace AiOrchestrator.Abstractions.Credentials;
 
 /// <summary>
 /// Holds a credential (username + secret) retrieved from <see cref="ICredentialBroker"/>.
-/// Dispose to securely overwrite the secret in memory.
+/// The secret is wrapped in <see cref="ProtectedString"/> so it can be zeroed in memory
+/// on <see cref="Dispose"/>. Secrets MUST never be written to logs (INV-10 / CRED-PWD-LOG).
 /// </summary>
 public sealed record Credential : IDisposable
 {
@@ -15,15 +16,24 @@ public sealed record Credential : IDisposable
     /// <summary>Gets the username associated with this credential.</summary>
     public required string Username { get; init; }
 
-    /// <summary>Gets the secret token or password. Overwritten on <see cref="Dispose"/>.</summary>
-    public required string Secret { get; init; }
+    /// <summary>Gets the secret token or password. Zeroed on <see cref="Dispose"/>.</summary>
+    public required ProtectedString Password { get; init; }
 
-    /// <summary>
-    /// Releases the credential, overwriting the secret reference.
-    /// Note: due to string interning, full memory scrubbing is best-effort in managed code.
-    /// </summary>
+    /// <summary>Gets the UTC time at which this credential was retrieved from the OS keychain.</summary>
+    public required DateTimeOffset RetrievedAt { get; init; }
+
+    /// <summary>Gets the protocol this credential is bound to (<c>https</c>, <c>ssh</c>, or <c>basic</c>).</summary>
+    public required string SourceProtocol { get; init; }
+
+    /// <summary>Releases the credential and zeroes the underlying secret buffer.</summary>
     public void Dispose()
     {
+        if (this.disposed)
+        {
+            return;
+        }
+
+        this.Password.Dispose();
         this.disposed = true;
         GC.SuppressFinalize(this);
     }
