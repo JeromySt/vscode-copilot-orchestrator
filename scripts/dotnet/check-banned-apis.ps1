@@ -77,7 +77,7 @@ foreach ($entry in $bannedLines) {
         continue
     }
 
-    $matches = Select-String -Path $csFiles.FullName -Pattern ([regex]::Escape($searchTerm)) -ErrorAction SilentlyContinue
+    $matches = Select-String -Path $csFiles.FullName -Pattern ('\b' + [regex]::Escape($searchTerm) + '\b') -ErrorAction SilentlyContinue
     if ($matches) {
         foreach ($match in $matches) {
             $violations += [PSCustomObject]@{
@@ -93,7 +93,7 @@ foreach ($entry in $bannedLines) {
 
 if ($violations.Count -gt 0) {
     Write-Host ""
-    Write-Host "Banned API violations found in $Project:" -ForegroundColor Red
+    Write-Host "Banned API violations found in ${Project}:" -ForegroundColor Red
     foreach ($v in $violations) {
         Write-Host "  $($v.File):$($v.Line) — $($v.BannedApi)" -ForegroundColor Red
         Write-Host "    $($v.Content)" -ForegroundColor DarkRed

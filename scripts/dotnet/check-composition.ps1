@@ -79,7 +79,7 @@ foreach ($file in $csFiles) {
 
 if ($violations.Count -gt 0) {
     Write-Host ""
-    Write-Host "Composition registration missing for $Project:" -ForegroundColor Red
+    Write-Host "Composition registration missing for ${Project}:" -ForegroundColor Red
     foreach ($v in $violations) {
         Write-Host "  $($v.Class) : $($v.Interface) (in $($v.File)) — not registered in CompositionRoot" -ForegroundColor Red
     }

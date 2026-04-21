@@ -34,8 +34,28 @@
         "resolved": "1.2.0.556",
         "contentHash": "zvn9Mqs/ox/83cpYPignI8hJEM2A93s2HkHs8HYMOAQW0PkampyoErAiIyKxgTLqbbad29HX/shv/6LGSjPJNQ=="
       },
-      "aiorchestrator.plan.models": {
+      "aiorchestrator.abstractions": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Models": "[1.0.0, )"
+        }
+      },
+      "aiorchestrator.filesystem": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.PathValidator": "[1.0.0, )"
+        }
+      },
+      "aiorchestrator.models": {
         "type": "Project"
+      },
+      "aiorchestrator.pathvalidator": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )"
+        }
       }
     }
   }
