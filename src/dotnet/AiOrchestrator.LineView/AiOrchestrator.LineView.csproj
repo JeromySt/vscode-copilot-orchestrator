@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.LineView</AssemblyName>
+    <RootNamespace>AiOrchestrator.LineView</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
