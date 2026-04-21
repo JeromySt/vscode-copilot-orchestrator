@@ -19,5 +19,8 @@
     <!-- Shared versions for test packages that reference framework types -->
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.4" />
+
+    <!-- Roslyn (for generator tests) -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
   </ItemGroup>
 </Project>

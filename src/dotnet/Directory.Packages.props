@@ -41,5 +41,9 @@
 
     <!-- Hashing -->
     <PackageVersion Include="System.IO.Hashing" Version="9.0.4" />
+
+    <!-- Roslyn (source generators) -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
   </ItemGroup>
 </Project>
