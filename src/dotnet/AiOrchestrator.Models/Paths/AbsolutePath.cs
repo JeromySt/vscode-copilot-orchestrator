@@ -2,6 +2,9 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+using System.IO;
+
 namespace AiOrchestrator.Models.Paths;
 
 /// <summary>A validated absolute filesystem path.</summary>
