@@ -16,6 +16,7 @@
     <ProjectReference Include="..\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Plan.Store\AiOrchestrator.Plan.Store.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Plan.Reshape\AiOrchestrator.Plan.Reshape.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Time\AiOrchestrator.Time.csproj" />
   </ItemGroup>
 
