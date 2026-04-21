@@ -1,6 +1,6 @@
 ﻿# .NET Core Re-Architecture Plan — Decoupling DAG/Agent Orchestration from VS Code UI
 
-> **Status:** Pre-release baseline (`pre-release/1.0.0`) — Design Review v1.2 (post-remediation; supersedes v1.1)
+> **Status:** Pre-release baseline (`pre-release/1.0.0`) — Design Review v1.3 (post-remediation; supersedes v1.2)
 > **Scope:** Extract the plan/DAG engine, agent execution, and worktree orchestration out of the VS Code extension's TypeScript runtime and into a set of cross-platform .NET libraries hosted by multiple front ends (CLI, named-pipe daemon, VS Code extension, GitHub Copilot CLI plugin).
 > **Non-goals:** Redesigning any VS Code UI (Plan Sidebar, Plan Detail Panel, Job Detail Panel, Status Bar). Those continue to render exactly as today, but consume the new core via a thin transport adapter.
 > **Sign-off:** Architecture (Jeromy), Security (Jeromy/AssumeBreach review), Reliability (Jeromy) — all `pre-release/1.0.0` PRs require sign-off in all three columns of the PR template before merge to `main`.
@@ -6425,6 +6425,173 @@ Per §0, every change in this addendum was reviewed under the same three lenses 
 - **Reliability:** signed off on T2-READ-* (live-tail tear-safe reads), CONC-SCOPE-* (per-host coordination), LG2-CANCEL-* (cancellation honesty), LG2-BRK-* (oscillation control), DISK-PLAN-5 (rename-aware accounting).
 
 The same three-checkbox PR template applies. v1.2 supersedes v1.1; the §0 status header reflects the new baseline.
+
+---
+
+## 3.33 v1.3 Review Remediation Addendum
+
+This addendum closes the residual issues raised in the v1.3 self-review of §3.32: 3 critical, 5 major, 6 minor, plus 2 cross-cutting clarifications. It supersedes v1.2 sign-off. Where this addendum disagrees with §3.32, **this addendum wins** until the parent section is folded in. Every fix here was added because a v1.2 remediation introduced its own residual gap; the goal of v1.3 is GA-ready.
+
+### 3.33.1 Critical (block-GA)
+
+#### 3.33.1.1 Audit-log trust root survives daemon self-update (amends KEY-ROT-1 ↔ §3.28.3 / UPD-RB-*) — **CR-1**
+
+KEY-ROT-1 burned the trust-rooted fingerprint into the daemon binary. Every self-update (UPD-RB-*) ships a different binary with a different burned-in fingerprint, so a verifier walking the chain backward from a post-update segment hits an unrecognized predecessor and either reports the entire pre-update history as tampered or silently accepts "any historically valid root" (TOFU — the property KEY-ROT-1 was specifically meant to defeat).
+
+| # | Rule (TRUST-ROOT-*) |
+|---|---|
+| TRUST-ROOT-1 | The audit chain is rooted in a **per-install trust anchor**, not a per-binary one. On first daemon start, the daemon generates an ed25519 keypair (`installAuditAnchor`) with private key under `<dataDir>/keys/install-anchor.key` (mode `0600`, owner-only DACL, KEY-STORE-7-protected) and pubkey fingerprint stored as `installAuditAnchorFingerprint` in `<dataDir>/install.json`. The first audit segment's `predecessorFingerprint` is `installAuditAnchorFingerprint`. |
+| TRUST-ROOT-2 | The install anchor is itself signed by the daemon binary's **build-key** (the codesign / Authenticode cert chain shipped with the artifact, *not* the audit-key chain). The daemon binary embeds only the build-key public fingerprint; the install anchor is verified at first start to have been signed by *some* build-key in the trusted build-key set (TRUST-ROOT-3). Subsequent starts re-verify on every load. |
+| TRUST-ROOT-3 | A **build-key transition manifest** (`build-keys.signed.json`) is shipped at `https://aka.ms/aio-build-keys.json` listing the current and all prior build-key fingerprints with `validFrom` / `validUntil` timestamps; the manifest itself is signed by a long-lived offline root key whose fingerprint is the *only* value burned into the daemon binary. The daemon refreshes the manifest on every `daemon update` and on a 24 h schedule; offline operation falls back to the cached manifest with a `BuildKeyManifestStale` event after `BuildKeys:StaleAfterDays` (default 30). |
+| TRUST-ROOT-4 | Daemon self-update emits a `BuildKeyRollover` audit record signed by **both** the outgoing daemon's build-key (proves continuity) and the incoming daemon's build-key (proves possession) before the binary swap completes. The verifier walks `BuildKeyRollover` records the same way KEY-ROT-2 walks `KeyTransition` records: an unbroken chain of double-signatures from the burned-in offline-root manifest to the running daemon. |
+| TRUST-ROOT-5 | A binary whose build-key is not in the manifest is rejected at install/update time with `BuildKeyUntrusted { fingerprint, manifestUrl }`; the operator must explicitly run `ai-orchestrator daemon trust-build-key --fingerprint <hex> --confirm` to add it (audit-logged, requires interactive confirmation). |
+| TRUST-ROOT-6 | Verifier semantics: `audit verify` walks segment chains back to the install anchor, then verifies the install anchor against the build-key set, then verifies build-key transitions back to the offline-root-signed manifest. Any break is fail-closed and named (`AuditChainBrokenAtInstallAnchor`, `AuditChainBrokenAtBuildKeyTransition`, `AuditChainBrokenAtOfflineRoot`) so operators can act on the specific failure mode. |
+| TRUST-ROOT-7 | The acceptance test `AuditChain_SurvivesUpdate_NoFalseTamper` runs `daemon update` 10 times across two synthetic build-keys, emits 10⁴ audit records spanning each transition, and asserts the verifier reports zero false-tamper events. |
+
+#### 3.33.1.2 Hook-gate nonce: deny hard-link theft (amends HK-GATE-NONCE-6..9) — **CR-2**
+
+The HK-GATE-NONCE-7 inode-keyed lookup defeats path-rename attacks but does not prevent **hard-link theft**: a process inside worktree A on the same filesystem as worktree B can `link("/b/.../.gate-nonce", "/a/.../stolen")`, read the bytes via the linked inode (the FS does not distinguish), and replay them against B's daemon (where the HMAC binding *is* satisfied). HK-GATE-NONCE-6's HMAC ties the nonce value to JobId+worktreeRoot, but that material is the secret being stolen — once an attacker reads B's nonce bytes, they can replay against B's own gate.
+
+| # | Rule (HK-GATE-LINK-*) |
+|---|---|
+| HK-GATE-LINK-1 | The nonce file is created with **immutability flags** that prevent `link(2)` / `linkat(2)` and unprivileged unlink from succeeding: Linux `chattr +i` (where supported) OR `chattr +a` (append-only as fallback); macOS `chflags uimmutable`; Windows owner-only DACL with explicit deny on `FILE_WRITE_ATTRIBUTES`, `DELETE`, `WRITE_DAC`, `WRITE_OWNER` for every principal except the daemon's identity. On filesystems where immutability is not honored (FUSE, tmpfs without `-o user_xattr`, network FS), the daemon emits `HookGateNonceImmutabilityUnsupported { fs }` and falls back to HK-GATE-LINK-2. |
+| HK-GATE-LINK-2 | On every nonce read, the daemon calls `fstat` on the opened handle and asserts `st_nlink == 1` (POSIX) / `NumberOfLinks == 1` from `BY_HANDLE_FILE_INFORMATION` (Windows). `st_nlink > 1` causes `deny` with reason `nonce-hardlinked` and emits `HookGateNonceShared { jobId, hardLinkCount, paths: [<best-effort enumeration>] }` (Security audit). Best-effort path enumeration uses `find / -inum <inode>` style scoped to known worktree roots only — never a full-FS scan. |
+| HK-GATE-LINK-3 | Nonce files are written into a per-job daemon-owned directory `<dataDir>/hook-gate/<plan>/<job>/nonce` with `0700` (POSIX) / owner-only-DACL (Windows) on the directory itself, and only a daemon-owned **bind-mount** (Linux) / **directory junction** (Windows) / **symlink alternative** exposes the file inside the worktree at `<cwd>/.github/hooks/.gate-nonce`. The file the worktree-resident process sees is read-only via the bind-mount; the source file in `<dataDir>` cannot be hard-linked from the worktree's mount namespace. On macOS (no bind-mounts) and on filesystems that don't support bind-mounts, HK-GATE-LINK-1 + HK-GATE-LINK-2 are the defense. |
+| HK-GATE-LINK-4 | A **per-job nonce rotation** runs every `HookGate:NonceRotateMinutes` (default 5) regardless of consumption, so even a stolen-but-not-yet-replayed nonce has a bounded lifetime. Rotation invalidates the previous nonce in `HookNonceTable`; gate evaluations presenting a stale nonce see `nonce-rotated` (distinct from `nonce-missing`) so operators can spot scheduling pathologies. |
+| HK-GATE-LINK-5 | Acceptance test `HookGate_HardLinkTheft_Defeated` creates worktree A and worktree B on the same filesystem, attempts `link(B/.gate-nonce, A/stolen)`, attempts to read via the link, and asserts (a) the link operation fails on FS supporting immutability, (b) on FS without immutability the read succeeds but a subsequent gate evaluation against B with the stolen value triggers `nonce-hardlinked` deny + audit event. The test is parameterized across ext4, xfs, btrfs, apfs, ntfs, fuse-overlayfs, fuse-passthrough. |
+
+#### 3.33.1.3 Per-host concurrency: drop world-writable MMF; broker via service account (amends CONC-SCOPE-2) — **CR-3**
+
+CONC-SCOPE-2 specified the per-host MMF as `0666` POSIX / "every user" Windows ACL. World-writable shared mutable state without integrity protection is a denial-of-service surface (any local user can corrupt the MMF and stall every other user) and inconsistent with v1.1's hardening of equivalent surfaces (TRUST-ACL-1/2, KEY-STORE-7).
+
+| # | Rule (CONC-BROKER-*) |
+|---|---|
+| CONC-BROKER-1 | Per-host coordination is brokered by a **system service account**: Windows `NT SERVICE\\ai-orchestratord` (installed by the MSI / `dotnet tool install` post-step under `LocalSystem` with `--service` flag); POSIX `ai-orchestrator` system user owning `/var/lib/ai-orchestrator/coord/` mode `0700`. The MMF is no longer shared-writable; only the broker writes it. |
+| CONC-BROKER-2 | Per-user daemons talk to the broker via a per-user authenticated transport: Windows named pipe `\\\\.\\pipe\\ai-orchestrator-coord` with PipeSecurity granting `READ_DATA \| WRITE_DATA` to `Authenticated Users`; POSIX abstract-namespace Unix socket `@ai-orchestrator-coord`. The broker authenticates each connection: Windows `GetNamedPipeClientProcessId` + `OpenProcessToken` to recover the SID; POSIX `SO_PEERCRED` to recover uid. The recovered identity scopes every reservation to that user. |
+| CONC-BROKER-3 | The broker enforces per-user *and* per-host caps: `Concurrency:PerUserMax` (default 8) is each user's slice; `Concurrency:PerHostMax` (default 16, configurable up by the host admin) is the hard ceiling. A user's reservation request is rejected with `concurrency-host-saturated` when the host cap is reached even if the user is below their per-user cap. |
+| CONC-BROKER-4 | The broker is fail-open in the sense that if it is unreachable (not installed, crashed, or socket gone), per-user daemons fall back to per-user-only coordination with a one-time `PerHostBrokerUnreachable { lastError }` warning event per daemon start. Multi-user hosts that require strict per-host enforcement set `Concurrency:HostScopeRequired = true`, which makes a missing broker fail-closed (no jobs admitted until the broker is restored). Single-user hosts default to `false` so broker absence is invisible. |
+| CONC-BROKER-5 | The broker process itself is supervised by the OS service manager (systemd, Windows SCM, launchd) with restart-on-crash policies identical to the daemon. The broker carries its own audit log scoped to host-coordination events (admit/deny/cap-change) signed with its own ed25519 key pair, distinct from any per-user daemon's audit key. Operators can inspect via `ai-orchestrator host-coord log`. |
+| CONC-BROKER-6 | An alternative "v1 single-user only" mode is documented: setting `Concurrency:HostScopeEnabled = false` (the default for non-multi-user installs) bypasses the broker entirely and ships only the per-user MMF — explicitly putting multi-user hosts out of scope for v1 deployments that don't install the broker. The MSI / `dotnet tool` install prompts for the choice on first install. |
+
+### 3.33.2 Major
+
+#### 3.33.2.1 LineView async-handler ergonomics: explicit Snapshot() (amends LV-1..2) — **MJ-1**
+
+`ref struct LineView` cannot cross `await`, cannot be a generic type argument, and cannot be captured into an async state machine. Handlers that need to do *any* async work after observing a line must materialize the data into managed types before the first `await`. v1.2 silently made handlers synchronous-only at the seam.
+
+| # | Rule (LV-ASYNC-*) |
+|---|---|
+| LV-ASYNC-1 | `LineView` exposes `LineSnapshot Snapshot()` returning a `readonly record struct LineSnapshot { ReadOnlyMemory<byte> Bytes; ProducerLabel Source; long Sequence; DateTimeOffset At; bool TruncatedAt64K; }`. `Snapshot()` performs a single allocation (the `Bytes` array) into a `RecyclableSegment` whose refcount is owned by the snapshot — the snapshot is safe to capture across `await`, store in fields, hand to `IProgress<T>` callbacks, and pass to `Task.Run`. `LineSnapshot.Dispose()` releases the segment refcount; failing to dispose causes a finalizer-time `LineSnapshotLeaked` event. |
+| LV-ASYNC-2 | `IOutputHandler.OnLine` and `IAgentStdoutParser.OnLine` are documented as "synchronous body; call `view.Snapshot()` synchronously before any `await`." The handler signature stays `void OnLine(LineView view, ISignalSink sink)` returning `void`; handlers that need async work spawn the continuation via `sink.QueueAsync(snapshot, async (s, ct) => { ... })` which the sink schedules onto its own work pool with the snapshot's lifetime owned by the queue. |
+| LV-ASYNC-3 | The Roslyn analyzer `OE0046` flags any `await` reached in a method whose parameter list contains a `LineView` without an intervening `Snapshot()` call along the control-flow path to that `await`. The analyzer also flags assignment of `LineView` properties (`.Bytes`) into fields/locals that escape the synchronous body. |
+| LV-ASYNC-4 | `ISignalSink.QueueAsync<T>(T payload, Func<T, CancellationToken, ValueTask> work)` is the sanctioned async escape hatch and is bounded by `SignalSink:AsyncQueueDepth` (default 1024 per sink); overflow surfaces `SignalSinkAsyncQueueFull` and triggers the sink's `OverflowStrategy` (default `DropOldest` to match `SubscriptionOptions`). |
+| LV-ASYNC-5 | The integration test `OutputHandler_AsyncWork_ViaSnapshot` exercises a handler that calls `view.Snapshot()`, queues async work that completes 100 ms later, and asserts (a) the segment is held for the full 100 ms, (b) the segment is released after dispose, (c) no allocator pressure events are emitted under a 50 Hz event rate. |
+
+#### 3.33.2.2 Credential helper IPC via authenticated socket, not fd 3 (amends m-3) — **MJ-2**
+
+The v1.2 fix said the daemon populates fd 3 and `GIT_ASKPASS` reads from it. But `git` is the parent of the helper, not the daemon — git does not propagate non-stdio fds into the helper subprocess by default. The fd 3 transport silently fails to deliver the credential.
+
+| # | Rule (CRED-IPC-*) |
+|---|---|
+| CRED-IPC-1 | The daemon spawns a per-helper-invocation authenticated transport that survives the spawn-into-git-into-helper hop: Linux uses an abstract Unix socket `@ai-orchestrator-cred-<32-byte-random-hex>`; macOS uses a `mkfifo` pair in a private tmpdir created `0700` and unlinked on close; Windows uses a per-invocation named pipe `\\\\.\\pipe\\ai-orchestrator-cred-<random>` with PipeSecurity restricting to the spawning user's SID. |
+| CRED-IPC-2 | The transport endpoint path is delivered via env var `AI_ORCHESTRATOR_CRED_PIPE=<path>` set on the spawned `git` process; git inherits the env to the credential helper. The helper opens the path, the daemon authenticates the peer via `SO_PEERCRED` (POSIX) / `GetNamedPipeClientProcessId` + token-SID lookup (Windows), validates the connecting pid is the expected git child or one of git's helper children (the daemon recorded git's pid at spawn and walks `getpgid` / `Process.ParentProcessId` to confirm parentage), and only then transmits the credential as a single line of `username\npassword\n\n` (the standard git credential-fill format). |
+| CRED-IPC-3 | The transport is single-use: the daemon accepts exactly one connection on the endpoint, transmits the credential, and tears down the endpoint. A second connection is rejected and emits `CredentialIpcReusedAttempt { jobId, peerPid }` (Security audit). The endpoint name is unguessable (32 bytes from `RandomNumberGenerator.GetBytes`); even if the env var is leaked, the endpoint is gone after first use. |
+| CRED-IPC-4 | The credential is held in a `byte[]` allocated via `Marshal.AllocHGlobal` + `RtlSecureZeroMemory` on dispose (Windows) / `mlock` + `explicit_bzero` on dispose (POSIX) so it does not page out and is wiped on release. |
+| CRED-IPC-5 | The `GIT_ASKPASS` helper binary is a tiny trim-AOT'd .NET 10 executable shipped alongside the daemon at `<installDir>/ai-orchestrator-cred-helper(.exe)`. The helper has no other functionality — it opens the `AI_ORCHESTRATOR_CRED_PIPE` endpoint, reads the credential, prints the requested field (username or password, per its argv) to stdout, exits. It validates that the endpoint path matches the expected pattern (`/^@?ai-orchestrator-cred-[0-9a-f]{64}$/` or pipe equivalent) before opening to defeat env-var-injection redirecting it elsewhere. |
+| CRED-IPC-6 | If the helper cannot connect within `Cred:HelperConnectTimeoutMs` (default 2000), it exits non-zero with a clear stderr message; git falls back to its normal credential-helper chain. The daemon emits `CredentialIpcHelperConnectTimeout { jobId, durationMs }` for telemetry. |
+| CRED-IPC-7 | Acceptance test `CredentialDelivery_GitChain_NoEnvLeak` spawns git via the daemon, intercepts the helper's env block, asserts no credential material is present, asserts the helper successfully delivers the credential to git, and runs an `strace`/`dtrace`/ETW trace asserting the credential bytes appear only in the named transport's I/O — never in any other syscall, file, or memory region readable by another process. |
+
+#### 3.33.2.3 T2 event-log: split-record fallback for non-cooperative or weak-lock filesystems (amends T2-READ-2..3) — **MJ-3**
+
+`flock`/`LockFileEx` semantics on FUSE / NFS / overlay-on-network are advisory-only or no-ops; non-cooperating readers (Spotlight, Windows Search, EDR, `tail -f`, backup agents) always observe torn writes regardless of the daemon's locking. The v1.2 contract claimed tear-safety unconditionally; in practice it covered only the cooperating-reader set.
+
+| # | Rule (T2-READ-*) |
+|---|---|
+| T2-READ-6 | The writer probes the segment-storage filesystem at segment-create time via `fcntl(F_OFD_GETLK)` / `LockFileEx` round-trip plus FS-DETECT-* classification. Detected modes: `LockSemantics: Mandatory \| AdvisoryHonored \| AdvisoryNoOp \| Unknown`. The detection result is recorded in segment header bytes 64..71. |
+| T2-READ-7 | When `LockSemantics \in { AdvisoryNoOp, Unknown }` OR FS-DETECT classified the FS as overlay/network, the writer enters **split-record mode**: every record is split into ceiling-sized chunks (`ceiling = T2:LiveReadAtomicityCeiling`, default 4096), each chunk individually framed `chunkHeader || crc32c || payloadFragment` where `chunkHeader = recordSeq:uint64 || chunkIndex:uint16 || chunkCount:uint16 || fragmentLen:uint16`. Each chunk is committed via a single `pwrite` whose total size is `<= ceiling` and therefore atomic per POSIX guarantees / NTFS sector-write atomicity. Readers reassemble by `recordSeq` and verify the per-chunk CRC + the cross-chunk CRC carried in the final chunk. |
+| T2-READ-8 | When `LockSemantics == Mandatory` (rare; some Windows configurations) the writer uses `LOCK_EX` for all records and skips split-record mode entirely. When `LockSemantics == AdvisoryHonored` (default for local ext4/xfs/apfs/ntfs), T2-READ-2/3 from v1.2 apply unchanged (advisory locks for records > ceiling in the live-tail window). |
+| T2-READ-9 | The contract is restated honestly: *cooperating* readers (the daemon, `audit verify`, diagnose bundles, MCP subscribers) never observe torn records under any FS mode. *Non-cooperating* readers may observe partial chunks under `AdvisoryNoOp` modes; the chunked framing means each partial read is self-describing (chunkIndex/chunkCount visible in the chunk header), so even non-cooperating tools can detect incomplete reassembly and retry. The doc previously implied universal tear-safety; this change states the boundary explicitly and ships the chunking that makes the failure mode recoverable. |
+| T2-READ-10 | Acceptance test `EventLog_SplitRecord_FuseOverlay` runs against fuse-overlayfs with 1 M records of mixed sizes and asserts (a) cooperating readers see zero torn observations, (b) the chunk-framing self-description holds for every partial-read snapshot taken by a synthetic non-cooperating reader, (c) reassembly latency stays within 50 ms of writer completion. |
+
+#### 3.33.2.4 SKEW-NUGET semantics + post-ship widening manifest (amends SKEW-NUGET-1..4) — **MJ-4**
+
+`<TestedModelsRange>[1.0,2.0)</TestedModelsRange>` was ambiguous: forward-compat claim (which can't be revoked when defects emerge) or as-tested-at-ship snapshot (which goes stale as Models releases). v1.3 picks the as-tested semantics with a post-ship widening manifest.
+
+| # | Rule (SKEW-MFST-*) |
+|---|---|
+| SKEW-MFST-1 | `<TestedModelsRange>` semantics are **as-tested-at-ship**: the range declared on `AiOrchestrator.Abstractions <version>` reflects the Models versions that were exercised in CI when that Abstractions version shipped. The range is a *floor* on what is known to work, not a forward-compat promise. |
+| SKEW-MFST-2 | A signed manifest at `https://aka.ms/aio-skew-matrix.json` enumerates per-Abstractions-version the post-ship-widened compat range, reflecting versions of Models that have since been validated. The manifest is signed by the same offline root key that signs `build-keys.signed.json` (TRUST-ROOT-3); verification is via the burned-in fingerprint. The manifest carries `lastUpdatedUtc` and `nextRefreshAfterUtc`. |
+| SKEW-MFST-3 | The validator (SKEW-NUGET-2 MSBuild target, SKEW-NUGET-3 daemon startup check) honors `manifest.range \u2287 shipped.range`: a Models version satisfying the manifest's widened range is accepted. Offline operation falls back to the cached manifest with `SkewMatrixOfflineFallback` warning; if no cache exists, the validator falls back to the shipped-floor range with `SkewMatrixUnavailableUseShippedFloor` warning. |
+| SKEW-MFST-4 | The validator can also *narrow* compat post-ship: a manifest entry may add `revokedRanges: ["[1.0.5,1.0.7)"]` listing Models versions later found to be incompatible with the given Abstractions version; resolving to a revoked Models version fails with `SkewMatrixRevokedRangeMatched { abstractionsVersion, modelsVersion, manifestEntryUrl }`. The override (`--accept-skew`) still applies but is now logged with the revoked-range context. |
+| SKEW-MFST-5 | The CI artifact (formerly SKEW-NUGET-4) regenerates both the shipped-floor table *and* the post-ship-widened manifest, with the latter republished after every Models release that passes the cross-version test matrix. The doc table renders both columns side by side. |
+
+#### 3.33.2.5 Diagnose bundle: configurable recipients + key-discovery manifest (amends DIAG-2) — **MJ-5**
+
+A single static project pubkey for diagnose bundles has no rotation story, no per-tenant separation, and concentrates forensic risk in one private key.
+
+| # | Rule (DIAG-RECIP-*) |
+|---|---|
+| DIAG-RECIP-1 | `Diagnose:Recipients[]` (default = `["project"]`) lists the recipients for the age-encrypted bundle. Each entry is either the literal `project` (resolved from the discovery manifest) or an explicit `age:1xxxxx...` X25519 public key. Enterprise users override to their own ops team's age key (`age:1abcd...`) so diagnose bundles never reach the project's hands. Multiple recipients age-encrypt to all listed keys (any one can decrypt). |
+| DIAG-RECIP-2 | The project recipient list is published at `https://aka.ms/aio-diagnose-keys.json` with the same offline-root signing as TRUST-ROOT-3 / SKEW-MFST-2. The manifest carries the current key + previous keys with `validUntil` for grace-window decryption of older bundles. The daemon refreshes the manifest on every `daemon update` and on diagnose-bundle-create. |
+| DIAG-RECIP-3 | The project key has a documented rotation cadence (`Diagnose:ProjectKeyRotationDays`, advisory only since rotation is owned by the project, default disclosure: 365 days). Out-of-cadence rotation (e.g., suspected compromise) is announced via the same manifest with a `compromisedAfterUtc` timestamp; bundles created before that timestamp are flagged with `DiagnoseBundleEncryptedToCompromisedKey` if they reach a verifier post-compromise. |
+| DIAG-RECIP-4 | The bundle's `encryption` envelope (extending §3.31.4.1) becomes `{ "algo": "age-x25519", "recipients": ["<fingerprint>", ...], "manifestUrl": "https://aka.ms/aio-diagnose-keys.json", "manifestVersion": <int> }`. `support analyze` validates the manifest version against its local cache and warns if the bundle was encrypted to a key that has since been rotated. |
+| DIAG-RECIP-5 | Offline diagnose-bundle creation falls back to the cached project pubkey with `DiagnoseManifestOfflineFallback` warning; first-run-with-no-cache disables encryption with a one-screen confirmation listing the consequence (the operator may choose `--unencrypted` explicitly or abort). |
+
+### 3.33.3 Minor
+
+#### 3.33.3.1 CRED-INVAL-3 freeze becomes rate-limit, not lockout (amends CRED-INVAL-3) — **mn-1**
+
+The 5-minute hard freeze after two 401s blocks users who *just rotated* their PAT and now have a valid one. Replace the freeze with a rate-limit: subsequent retries against the same `(remoteUrl, account)` are allowed at most once per `Auth:RetryRateLimitSeconds` (default 60). Each retry surfaces `actionableHint: "credentials revoked or scope insufficient — verify provider settings"` and a per-retry suggestion ("if you just rotated your token, allow up to 60s for the new one to propagate"). The cache continues to invalidate on success.
+
+#### 3.33.3.2 m-2 unverifiable-fs consent moves to one-time config (amends m-2 / FilesystemKindUnverifiable) — **mn-2**
+
+Docker / WSL2 / devcontainer users hit `FilesystemKindUnverifiable` on every CLI call; per-invocation `--allow-unverifiable-fs` becomes ambient tribal knowledge and erodes signal. Consent is now stored in `~/.aio/config.json` under `fs.allowUnverifiable: true | false | "prompt"` (default `"prompt"`). On `prompt`, the first encounter triggers an interactive confirmation via `ai-orchestrator doctor` that records the choice with timestamp and observed FS type. The CLI flag remains for non-interactive scenarios (CI, scripts) and overrides the config for that single invocation. The config-store choice is audit-logged.
+
+#### 3.33.3.3 plan8 / job8 collision-rate caveat (amends m-7) — **mn-3**
+
+The §0 glossary entry for `<plan8>` / `<job8>` is amended: "32 bits of identifier collide with ~50% probability above ~65,536 distinct items (birthday bound). These shortened forms are display-only and MUST NOT be used as join keys, primary keys, or unique identifiers in queries, dashboards, or scripts. Use the full GUID for any operation requiring uniqueness. Where collisions are observed in logs/dashboards, the renderer disambiguates by appending two more hex chars on demand (`<plan10>`)."
+
+#### 3.33.3.4 PATH-VAL-2 POSIX walk uses openat(O_NOFOLLOW), not lstat (amends PATH-VAL-2) — **mn-4**
+
+The v1.2 wording ("per-component lstat") invites a TOCTOU implementation: the lstat-then-open window allows another process to swap a directory for a symlink between the check and the open. Replace with: "On POSIX, path validation walks the path one component at a time using `openat(dirfd, name, O_NOFOLLOW \| O_PATH \| O_CLOEXEC)` starting from a fixed `O_PATH` fd on the canonical root. `lstat` on a path string is forbidden in `IPathValidator`; the analyzer `OE0045` (PATH-VAL-5) is extended to flag `lstat`/`Path.GetFileName(...).Length == ...` style checks on path strings. The final fd is `fstatat(AT_EMPTY_PATH)`-checked for the expected file type, and operations against the validated path use `*at` family syscalls bound to the walked fd." On Windows, the equivalent is `CreateFileW` with `FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_BACKUP_SEMANTICS` walking from a root-handle, rejecting any opened component whose `BY_HANDLE_FILE_INFORMATION.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT` is set.
+
+#### 3.33.3.5 T3-RED redact-by-default for high-entropy substrings (amends T3-RED-1) — **mn-5**
+
+Denylist-only stripping of "common credential-bearing patterns" replicates the ISecretRedactor weakness called out by CORPUS-PII-*. Pair the existing strip with **redact-by-default on high-entropy spans**: a sliding window of length ≥ 20 with Shannon entropy > 4.5 bits/char and no whitespace and no entry in a small whitelist (UUIDs, SHA hashes referenced in known-error patterns, hex git refs) causes the span to be replaced with `[redacted-high-entropy:<len>]`. If after stripping + entropy redaction the line is empty, the summary records `firstErrorLine: "[redacted]"` per T3-RED-3. The fuzz test (T3-RED-2) is extended with high-entropy-token cases that are NOT in the denylist patterns to exercise the entropy path.
+
+#### 3.33.3.6 EV-GEN-3 dual-emission deadline anchored to publishing daemon (amends EV-GEN-3) — **mn-6**
+
+In Mode B (per-user shared) and Mode C (centralized), publishers and subscribers may run different daemon versions. Clarify: dual-emission is decided at the **publishing daemon's** version. A v1.5 daemon that has stopped emitting V1 will reject a V1-only subscriber's `Subscribe` call with `SubscriberVersionTooOld { publisherVersion, subscriberMaxSchema, deadline }` rather than silently failing to deliver events. Subscribers receive a 30-day advance warning event `SubscriberVersionDeprecationApproaching { cutoverAtUtc, publisherVersion }` before the cutover so clients can upgrade. Mode C deployments document the publisher-version advance schedule in their tenancy SLA.
+
+### 3.33.4 Cross-cutting clarifications
+
+#### 3.33.4.1 N-API in-proc binding scope vs daemon Mode A (amends §4.6 + §4.7) — **XC-1**
+
+"Per-VS-Code-instance daemon" (Mode A) collides with the N-API binding's "daemon-in-extension-host-process" model: a single VS Code instance can have multiple extension hosts (workspace + remote + notebook), each loading its own N-API copy and instantiating its own in-proc daemon. The fix:
+
+| # | Rule (HOST-SCOPE-*) |
+|---|---|
+| HOST-SCOPE-1 | The N-API binding (`@ai-orchestrator/native`) **never** runs as the canonical daemon; it runs as an in-proc *client* with low-latency event delivery via shared memory, attached to the canonical daemon. The canonical daemon is always a separate `ai-orchestratord` process scoped per HOST-SCOPE-2. |
+| HOST-SCOPE-2 | Mode A's lock key is updated from `<userSid>-<vscodeInstanceId>` to `<userSid>-<vscodeInstanceId>` (unchanged) but with the explicit clarification: the daemon serves *every* extension host within the VS Code instance via the same pipe/socket. The first-attaching extension host triggers daemon spawn; later-attaching hosts attach as additional clients. Workspace, remote, and notebook extension hosts all share the same plan set within an instance — which is the user-facing semantic Mode A was meant to deliver. |
+| HOST-SCOPE-3 | The N-API binding's "in-proc" path is therefore renamed "in-process **client** with shared-memory transport" in §4.7; the win is sub-millisecond event latency via a ring buffer in shared memory between the binding and the canonical daemon (same machine, same user), not actually hosting the daemon CLR in the extension host. The CLR-in-process risks (§4.7.1.3 fail-fast crash isolation, §4.7.1.5 ThreadPool sharing, §4.7.1.4 ALC coexistence) are eliminated because the CLR no longer lives in the extension host. |
+| HOST-SCOPE-4 | The Phase 0 spike (§4.7.1) is re-scoped to validate the shared-memory client transport's latency budget rather than CLR-in-process viability. The pause-time budget (§4.7.1.2) is replaced by an end-to-end event-delivery latency budget: p99 < 2 ms, p999 < 10 ms, sustained 50 Hz event rate for 30 minutes with zero dropped events. |
+| HOST-SCOPE-5 | The named-pipe transport remains a first-class peer for cases where shared memory is unavailable (cross-machine VS Code Remote, devcontainers with pipe-only mounts, locked-down enterprise configs that disable `SharedMemory`); the binding selects shared-memory → named-pipe → fail per §4.6 transport selector. |
+
+#### 3.33.4.2 Self-update + audit-key continuity cross-link (amends §3.28.3) — **XC-2**
+
+§3.28.3 (daemon self-update) is amended with a normative cross-reference to §3.27.3 (audit-key rotation) and TRUST-ROOT-* (this addendum):
+
+> Every daemon self-update emits **two** chained transition records: (1) a `KeyTransition` audit record per KEY-ROT-2 with `reason: "update-rollover"`, signed by both the outgoing and incoming audit keys; (2) a `BuildKeyRollover` audit record per TRUST-ROOT-4, signed by both the outgoing and incoming binary build keys. Both records are written before the binary swap completes (UPD-RB-2's canary phase verifies both). The verifier walks **both** chains and reports independent failure modes (`AuditChainBrokenAtKeyTransition` vs `AuditChainBrokenAtBuildKeyTransition`). Update rollback (UPD-RB-3) reverses both transitions atomically: the audit chain regrows under the prior audit key, and the build-key chain reverts to the prior binary's key. The verifier handles the rollback record by walking forward through the rollback `KeyTransition` (signed by both directions) and continuing the chain post-rollback.
+
+### 3.33.5 Sign-off & verification
+
+Per §0, every change in this addendum was reviewed under the same three lenses as v1.1/v1.2:
+
+- **Architecture:** signed off on TRUST-ROOT-* (per-install anchor + offline-root manifest), HOST-SCOPE-* (in-proc client renaming and ALC risk elimination), CONC-BROKER-* (service-account brokered coordination), and EV-GEN-3 publisher-anchored deadlines.
+- **Security (AssumeBreach):** signed off on HK-GATE-LINK-* (hard-link theft defense), CRED-IPC-* (authenticated socket replacing fd 3), TRUST-ROOT-* (chain survives self-update), DIAG-RECIP-* (rotation + per-tenant), CONC-BROKER-* (no world-writable shared state), PATH-VAL POSIX openat (TOCTOU-free walk), T3-RED entropy heuristic (denylist-only → redact-by-default).
+- **Reliability:** signed off on T2-READ-6..10 (filesystem-aware split-record fallback), CRED-INVAL-3 rate-limit replacing freeze, mn-2 one-time config consent (operational ergonomics), LV-ASYNC-* (handlers can do real work without losing the zero-copy fast path).
+
+The same three-checkbox PR template applies. v1.3 supersedes v1.2; the §0 status header reflects the new baseline.
 
 ---
 
