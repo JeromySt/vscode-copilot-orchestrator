@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Analyzers</AssemblyName>
+    <RootNamespace>AiOrchestrator.Analyzers</RootNamespace>
+    <!-- Analyzers must target netstandard2.0 so the Roslyn host can load them. -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IsAnalyzer>true</IsAnalyzer>
+    <!-- The DLL lives in the NuGet analyzer slot, not in lib/. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <BuildOutputTargetFolder>analyzers\dotnet\cs</BuildOutputTargetFolder>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <Description>Roslyn analyzers and code fixes enforcing AiOrchestrator coding standards (OE0001–OE0046).</Description>
+    <PackageTags>roslyn;analyzer;aiorchestrator</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Roslyn APIs for writing analyzers and code fixes. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
