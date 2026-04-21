@@ -228,3 +228,357 @@ suite('runAgent (standalone)', () => {
     assert.strictEqual(call.model, 'gpt-5');
   });
 });
+
+suite('runAgent (no-op detector — A1)', () => {
+  // Trick: patch Date.now so the FIRST call (startTime in runAgent) returns
+  // realNow() - 90_000, simulating a 90s elapsed run by the time durationMs
+  // is computed on the second Date.now call.
+  function patchDateNowToOldStart(): () => void {
+    const realNow = Date.now;
+    let firstCall = true;
+    (Date as any).now = () => {
+      if (firstCall) { firstCall = false; return realNow() - 90_000; }
+      return realNow();
+    };
+    return () => { (Date as any).now = realNow; };
+  }
+
+  test('flips success→failure when zero changes after long run and node does not expect no-changes', async () => {
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        sessionId: 'sess-noop',
+        metrics: { codeChanges: { linesAdded: 0, linesRemoved: 0 } },
+      }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'do work' } });
+    const restore = patchDateNowToOldStart();
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'do work' }, ctx, runner as any);
+      assert.strictEqual(result.success, false, 'Expected no-op detection to flip success');
+      assert.ok(result.error?.includes('no-op'), `Expected no-op error message, got: ${result.error}`);
+      assert.strictEqual(result.copilotSessionId, 'sess-noop');
+    } finally { restore(); }
+  });
+
+  test('does NOT trip when node declares expectsNoChanges=true', async () => {
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        metrics: { codeChanges: { linesAdded: 0, linesRemoved: 0 } },
+      }),
+    };
+    const ctx = makeCtx({
+      node: makeNode({ expectsNoChanges: true } as any),
+      workSpec: { type: 'agent', instructions: 'verify only' },
+    });
+    const restore = patchDateNowToOldStart();
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'verify only' }, ctx, runner as any);
+      assert.strictEqual(result.success, true, 'expectsNoChanges nodes must not trip the no-op detector');
+    } finally { restore(); }
+  });
+
+  test('does NOT trip when run is shorter than the no-op grace window', async () => {
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        metrics: { codeChanges: { linesAdded: 0, linesRemoved: 0 } },
+      }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'fast task' } });
+    // No Date.now patching → run completes well under 60s grace window.
+    const result = await runAgent({ type: 'agent', instructions: 'fast task' }, ctx, runner as any);
+    assert.strictEqual(result.success, true);
+  });
+
+  test('does NOT trip when there are real code changes', async () => {
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        metrics: { codeChanges: { linesAdded: 50, linesRemoved: 3 } },
+      }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'real work' } });
+    const restore = patchDateNowToOldStart();
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'real work' }, ctx, runner as any);
+      assert.strictEqual(result.success, true);
+    } finally { restore(); }
+  });
+
+  test('does NOT trip when stats produced no codeChanges metric', async () => {
+    // If we have no metric to inspect, we can't conclude no-op — fail open (success).
+    const runner = {
+      run: sinon.stub().resolves({ success: true, metrics: {} }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'work' } });
+    const restore = patchDateNowToOldStart();
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'work' }, ctx, runner as any);
+      assert.strictEqual(result.success, true);
+    } finally { restore(); }
+  });
+});
+
+suite('runAgent (auto-promote complex jobs — B1)', () => {
+  test('promotes large instructions to high effort', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000); // > 4 KB threshold
+    await runAgent({ type: 'agent', instructions: bigInstructions }, ctx, runner as any);
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, 'high', 'Expected effort=high after auto-promotion');
+  });
+
+  test('promotes when instructions list ≥6 file paths', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const filey = `# Job\n\nFiles to create:\n` +
+      `- src/dotnet/Foo/Foo.csproj\n` +
+      `- src/dotnet/Foo/Bar.cs\n` +
+      `- src/dotnet/Foo/Baz.cs\n` +
+      `- src/dotnet/Foo/Qux.cs\n` +
+      `- tests/dotnet/Foo.Tests/Foo.Tests.csproj\n` +
+      `- tests/dotnet/Foo.Tests/FooContractTests.cs\n`;
+    await runAgent({ type: 'agent', instructions: filey }, ctx, runner as any);
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, 'high', 'Expected effort=high after file-count auto-promotion');
+  });
+
+  test('does NOT promote when model is explicitly set', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000);
+    await runAgent(
+      { type: 'agent', instructions: bigInstructions, model: 'claude-sonnet-4.6' },
+      ctx, runner as any,
+    );
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.model, 'claude-sonnet-4.6');
+    assert.strictEqual(call.effort, undefined);
+  });
+
+  test('does NOT promote when modelTier is explicitly set', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000);
+    await runAgent(
+      { type: 'agent', instructions: bigInstructions, modelTier: 'standard' },
+      ctx, runner as any,
+    );
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, undefined);
+  });
+
+  test('preserves explicit effort (does not stomp caller choice)', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000);
+    await runAgent(
+      { type: 'agent', instructions: bigInstructions, effort: 'low' },
+      ctx, runner as any,
+    );
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, 'low', 'Caller effort must be preserved');
+  });
+
+  test('does NOT promote small simple jobs', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    await runAgent({ type: 'agent', instructions: 'do a small thing' }, ctx, runner as any);
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, undefined);
+  });
+});
+
+suite('runAgent (no-op detector — A1)', () => {
+  test('flips success→failure when zero changes after long run and node does not expect no-changes', async () => {
+    // Long-running agent that produces no commits — the failure mode reported in
+    // CLI v1.0.34 logs (empty assistant turn → end_turn → exit 0).
+    const runner = {
+      run: sinon.stub().callsFake(async () => {
+        // Simulate a 90-second run by stubbing Date.now via the metrics path:
+        // the detector reads `durationMs = Date.now() - startTime`, so we make the
+        // run promise resolve after wall-clock time has advanced. We can't stub
+        // Date.now from outside here without sinon clock interference, so instead
+        // we exploit setStartTime: the ctx records start, and we delay the resolve.
+        await new Promise(r => setTimeout(r, 5));
+        return {
+          success: true,
+          metrics: { codeChanges: { linesAdded: 0, linesRemoved: 0 } },
+          sessionId: 'sess-noop',
+        };
+      }),
+    };
+    // Force the duration check: we substitute setStartTime to record a start time
+    // that is 90s in the past so the detector sees `durationMs >= 60_000`.
+    const recordedStart: number[] = [];
+    const ctx = makeCtx({
+      workSpec: { type: 'agent', instructions: 'do work' },
+      setStartTime: (t: number) => { recordedStart.push(t); },
+    });
+    // Patch Date.now temporarily so startTime gets recorded as 90s ago
+    const realNow = Date.now;
+    let firstCall = true;
+    (Date as any).now = () => {
+      if (firstCall) { firstCall = false; return realNow() - 90_000; }
+      return realNow();
+    };
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'do work' }, ctx, runner as any);
+      assert.strictEqual(result.success, false, 'Expected no-op detection to flip success');
+      assert.ok(result.error?.includes('no-op'), `Expected no-op error message, got: ${result.error}`);
+      assert.strictEqual(result.copilotSessionId, 'sess-noop');
+    } finally { (Date as any).now = realNow; }
+  });
+
+  test('does NOT trip when node declares expectsNoChanges=true', async () => {
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        metrics: { codeChanges: { linesAdded: 0, linesRemoved: 0 } },
+      }),
+    };
+    const node = makeNode({ expectsNoChanges: true });
+    const ctx = makeCtx({ node, workSpec: { type: 'agent', instructions: 'verify only' } });
+    const realNow = Date.now;
+    let firstCall = true;
+    (Date as any).now = () => {
+      if (firstCall) { firstCall = false; return realNow() - 90_000; }
+      return realNow();
+    };
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'verify only' }, ctx, runner as any);
+      assert.strictEqual(result.success, true, 'expectsNoChanges nodes must not trip the no-op detector');
+    } finally { (Date as any).now = realNow; }
+  });
+
+  test('does NOT trip when run is shorter than the no-op grace window', async () => {
+    // Short run with zero changes is fine (e.g. transient denial that still exits 0).
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        metrics: { codeChanges: { linesAdded: 0, linesRemoved: 0 } },
+      }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'fast task' } });
+    // No Date.now patching → run completes well under 60s grace window.
+    const result = await runAgent({ type: 'agent', instructions: 'fast task' }, ctx, runner as any);
+    assert.strictEqual(result.success, true);
+  });
+
+  test('does NOT trip when there are real code changes', async () => {
+    const runner = {
+      run: sinon.stub().resolves({
+        success: true,
+        metrics: { codeChanges: { linesAdded: 50, linesRemoved: 3 } },
+      }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'real work' } });
+    const realNow = Date.now;
+    let firstCall = true;
+    (Date as any).now = () => {
+      if (firstCall) { firstCall = false; return realNow() - 90_000; }
+      return realNow();
+    };
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'real work' }, ctx, runner as any);
+      assert.strictEqual(result.success, true);
+    } finally { (Date as any).now = realNow; }
+  });
+
+  test('does NOT trip when stats produced no codeChanges metric (compat with older CLI without v1.0.34 parser hits)', async () => {
+    // If we have no metric to inspect, we can't conclude no-op — fail open (success).
+    const runner = {
+      run: sinon.stub().resolves({ success: true, metrics: {} }),
+    };
+    const ctx = makeCtx({ workSpec: { type: 'agent', instructions: 'work' } });
+    const realNow = Date.now;
+    let firstCall = true;
+    (Date as any).now = () => {
+      if (firstCall) { firstCall = false; return realNow() - 90_000; }
+      return realNow();
+    };
+    try {
+      const result = await runAgent({ type: 'agent', instructions: 'work' }, ctx, runner as any);
+      assert.strictEqual(result.success, true);
+    } finally { (Date as any).now = realNow; }
+  });
+});
+
+suite('runAgent (auto-promote complex jobs — B1)', () => {
+  test('promotes large instructions to premium tier + high effort', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000); // > 4 KB threshold
+    await runAgent({ type: 'agent', instructions: bigInstructions }, ctx, runner as any);
+    // suggestModel may not return a model in test env; verify the *tier* and *effort*
+    // were resolved by inspecting the runner call's `effort` arg.
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, 'high', 'Expected effort=high after auto-promotion');
+  });
+
+  test('promotes when instructions list ≥6 file paths', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const filey = `# Job\n\nFiles to create:\n` +
+      `- src/dotnet/Foo/Foo.csproj\n` +
+      `- src/dotnet/Foo/Bar.cs\n` +
+      `- src/dotnet/Foo/Baz.cs\n` +
+      `- src/dotnet/Foo/Qux.cs\n` +
+      `- tests/dotnet/Foo.Tests/Foo.Tests.csproj\n` +
+      `- tests/dotnet/Foo.Tests/FooContractTests.cs\n`;
+    await runAgent({ type: 'agent', instructions: filey }, ctx, runner as any);
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, 'high', 'Expected effort=high after file-count auto-promotion');
+  });
+
+  test('does NOT promote when model is explicitly set', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000);
+    await runAgent(
+      { type: 'agent', instructions: bigInstructions, model: 'claude-sonnet-4.6' },
+      ctx, runner as any,
+    );
+    const call = runner.run.firstCall.args[0];
+    // Explicit model wins; no effort injected.
+    assert.strictEqual(call.model, 'claude-sonnet-4.6');
+    assert.strictEqual(call.effort, undefined);
+  });
+
+  test('does NOT promote when modelTier is explicitly set', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000);
+    await runAgent(
+      { type: 'agent', instructions: bigInstructions, modelTier: 'standard' },
+      ctx, runner as any,
+    );
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, undefined);
+  });
+
+  test('preserves explicit effort (does not downgrade when explicit)', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    const bigInstructions = 'x'.repeat(5_000);
+    // Caller asked for low; auto-promote should still upgrade (no explicit model/tier),
+    // but should not stomp the caller's effort choice.
+    await runAgent(
+      { type: 'agent', instructions: bigInstructions, effort: 'low' },
+      ctx, runner as any,
+    );
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, 'low', 'Caller effort must be preserved');
+  });
+
+  test('does NOT promote small simple jobs', async () => {
+    const runner = { run: sinon.stub().resolves({ success: true }) };
+    const ctx = makeCtx();
+    await runAgent({ type: 'agent', instructions: 'do a small thing' }, ctx, runner as any);
+    const call = runner.run.firstCall.args[0];
+    assert.strictEqual(call.effort, undefined);
+  });
+});

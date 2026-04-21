@@ -996,6 +996,12 @@ suite('DefaultJobExecutor Phase Pipeline', () => {
     assert.strictEqual(result.success, false);
     assert.ok(result.error?.includes('init failed'));
     assert.strictEqual(result.failedPhase, 'setup');
+    // The failing init spec must be propagated so executionEngine's auto-heal
+    // gating can correctly identify it as a non-agent (shell) failure rather
+    // than incorrectly inspecting node.work (which may be an agent spec).
+    assert.ok(result.failedWorkSpec, 'failedWorkSpec should be set on setup failure');
+    assert.strictEqual((result.failedWorkSpec as any).type, 'shell');
+    assert.strictEqual((result.failedWorkSpec as any).command, 'npm ci');
   });
 
   test('applyFailureConfig: applies onFailure settings from work spec', async () => {

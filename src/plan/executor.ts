@@ -21,7 +21,7 @@ import type { IFileSystem } from '../interfaces/IFileSystem';
 import type { ICopilotRunner } from '../interfaces/ICopilotRunner';
 import { aggregateMetrics } from './metricsAggregator';
 import type { IEvidenceValidator } from '../interfaces';
-import type { PhaseContext } from '../interfaces/IPhaseExecutor';
+import type { PhaseContext, PhaseResult } from '../interfaces/IPhaseExecutor';
 import { ensureOrchestratorDirs } from '../core';
 import {
   SetupPhaseExecutor,
@@ -270,20 +270,32 @@ export class DefaultJobExecutor implements JobExecutor {
           initCtx.workSpec = initSpec;
           initCtx.env = mergeEnv(initSpec);
           const initResult = await new WorkPhaseExecutor(phaseDeps()).execute(initCtx);
+          // Capture sessionId on success OR failure — agent-driven worktreeInit
+          // specs may report a copilot session even when the spec ultimately fails;
+          // dropping it here would break later session-based diagnostics/auto-heal.
+          if (initResult.copilotSessionId) { capturedSessionId = initResult.copilotSessionId; }
           if (!initResult.success) {
             context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
             this.logEntry(executionKey, 'setup', 'error', `worktreeInit [${i + 1}] failed: ${initResult.error}`);
             this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
             stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed');
-            return { success: false, error: `Worktree init failed: ${initResult.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming };
+            // Apply the init spec's onFailure config (noAutoHeal/message/resumeFromPhase)
+            // so worktreeInit specs can opt out of auto-heal or surface user-facing
+            // messages, mirroring how prechecks/work/postchecks handle failures.
+            return this.applyFailureConfig(
+              { success: false, error: `Worktree init failed: ${initResult.error}`, stepStatuses, failedPhase: 'setup', failedWorkSpec: initSpec, exitCode: initResult.exitCode, metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, noAutoHeal: initResult.noAutoHeal, failureMessage: initResult.failureMessage, overrideResumeFromPhase: initResult.overrideResumeFromPhase, phaseTiming: context.phaseTiming, copilotSessionId: capturedSessionId },
+              initSpec,
+            );
           }
-          if (initResult.copilotSessionId) { capturedSessionId = initResult.copilotSessionId; }
         }
         if (initSpecs.length > 0) { this.logEntry(executionKey, 'setup', 'info', `All ${initSpecs.length} worktreeInit spec(s) completed successfully`); }
 
         context.phaseTiming![context.phaseTiming!.length - 1].endedAt = Date.now();
         this.logEntry(executionKey, 'setup', 'info', '========== SETUP SECTION END ==========');
-        if (!r.success) { stepStatuses.setup = 'failed'; context.onStepStatusChange?.('setup', 'failed'); return { success: false, error: `Setup failed: ${r.error}`, stepStatuses, failedPhase: 'setup', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
+        // Note: we don't re-check `!r.success` here — the early return at the top
+        // of this block (right after `SetupPhaseExecutor.execute`) already handles
+        // setup-phase failure. `r` isn't reassigned in the worktreeInit loop, so
+        // re-checking it would be dead code.
         stepStatuses.setup = 'success'; context.onStepStatusChange?.('setup', 'success');
       }
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, pid: execution.process?.pid, phaseTiming: context.phaseTiming };}
@@ -353,6 +365,7 @@ export class DefaultJobExecutor implements JobExecutor {
       // ---- COMMIT ----
       const workWasSkipped = skip('work') || stepStatuses.work === 'skipped';
       let pendingCommitFailure: string | null = null;
+      let pendingCommitOverrideResume: PhaseResult['overrideResumeFromPhase'] | undefined;
       context.onProgress?.('Committing changes'); context.onStepStatusChange?.('commit', 'running');
       this.logEntry(executionKey, 'commit', 'info', '========== COMMIT SECTION START ==========');
       const phaseStartCommit = Date.now();
@@ -364,8 +377,8 @@ export class DefaultJobExecutor implements JobExecutor {
       if (cr.reviewMetrics) { phaseMetrics['commit'] = cr.reviewMetrics; capturedMetrics = capturedMetrics ? aggregateMetrics([capturedMetrics, cr.reviewMetrics]) : cr.reviewMetrics; }
       if (!cr.success) {
         if (workWasSkipped && context.resumeFromPhase !== 'commit') { this.logEntry(executionKey, 'commit', 'info', 'Commit found no evidence, but work was skipped (resuming from later phase). Succeeding without commit.'); stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
-        else if (postchecksSpec_ && !skip('postchecks')) { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); pendingCommitFailure = cr.error ?? 'unknown'; }
-        else { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); return { success: false, error: `Commit failed: ${cr.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
+        else if (postchecksSpec_ && !skip('postchecks')) { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); pendingCommitFailure = cr.error ?? 'unknown'; pendingCommitOverrideResume = cr.overrideResumeFromPhase; }
+        else { stepStatuses.commit = 'failed'; context.onStepStatusChange?.('commit', 'failed'); return { success: false, error: `Commit failed: ${cr.error}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming, overrideResumeFromPhase: cr.overrideResumeFromPhase }; }
       } else { stepStatuses.commit = 'success'; context.onStepStatusChange?.('commit', 'success'); }
 
       // ---- POSTCHECKS ----
@@ -402,7 +415,7 @@ export class DefaultJobExecutor implements JobExecutor {
           stepStatuses.postchecks = 'success'; context.onStepStatusChange?.('postchecks', 'success');
         }
       } else { stepStatuses.postchecks = 'skipped'; context.onStepStatusChange?.('postchecks', 'skipped'); }
-      if (pendingCommitFailure) { return { success: false, error: `Commit failed: ${pendingCommitFailure}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming }; }
+      if (pendingCommitFailure) { return { success: false, error: `Commit failed: ${pendingCommitFailure}`, stepStatuses, copilotSessionId: capturedSessionId, failedPhase: 'commit', metrics: capturedMetrics, phaseMetrics: pmk(''), pid: execution.process?.pid, phaseTiming: context.phaseTiming, overrideResumeFromPhase: pendingCommitOverrideResume }; }
       if (execution.aborted) {return { success: false, error: 'Execution canceled', stepStatuses, copilotSessionId: capturedSessionId, phaseTiming: context.phaseTiming };}
 
       // ---- MERGE-RI ----

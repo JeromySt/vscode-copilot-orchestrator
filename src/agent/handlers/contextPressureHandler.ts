@@ -164,13 +164,22 @@ export class ContextPressureHandler implements IOutputHandler {
  * Factory that creates {@link ContextPressureHandler} instances for copilot processes.
  *
  * Returns `undefined` when planId or nodeId is missing (e.g. model discovery,
- * CLI check — not a plan job).
+ * CLI check — not a plan job), or when the context-pressure feature is
+ * disabled (no global checkpoint manager registered).
  */
 export const ContextPressureHandlerFactory: IOutputHandlerFactory = {
   name: 'context-pressure',
   processFilter: ['copilot'],
   create: (ctx: HandlerContext): IOutputHandler | undefined => {
     if (!ctx.planId || !ctx.nodeId) {
+      return undefined;
+    }
+    // Feature gate: planInitialization only registers the global checkpoint
+    // manager when copilotOrchestrator.contextPressure.enabled is true. When
+    // it's absent we short-circuit the entire detection path — no monitor is
+    // created, no token tracking, no sentinel writes, no DAG reshape. This
+    // makes the setting fully authoritative: OFF means OFF end-to-end.
+    if (!getCheckpointManager()) {
       return undefined;
     }
     const monitor = new ContextPressureMonitor(ctx.planId, ctx.nodeId, 1, 'work');

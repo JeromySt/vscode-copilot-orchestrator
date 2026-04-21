@@ -616,12 +616,18 @@ export class JobExecutionEngine {
           // skipped; later phases (including commit) run normally.
           const failedPhase = result.failedPhase || 'work';
           const isHealablePhase = ['setup', 'prechecks', 'work', 'postchecks'].includes(failedPhase);
-          // Resolve the failed phase's work spec: prefer inline, fall back to disk (finalized plans)
+          // Resolve the failed phase's work spec.
+          // PRIORITY: result.failedWorkSpec — set by phase executors when they have the
+          // exact spec in hand (notably setup, where the failing spec is a worktreeInit
+          // entry and is NOT the same as node.work). Fall back to inline node specs,
+          // then to disk specs (for finalized plans where prechecks/postchecks may be
+          // serialized separately).
           const failedWorkSpecInline = failedPhase === 'prechecks' ? node.prechecks
             : failedPhase === 'postchecks' ? node.postchecks
+            : failedPhase === 'setup' ? undefined  // setup has no inline spec on the node
             : node.work;
-          let failedWorkSpec = failedWorkSpecInline;
-          if (!failedWorkSpec && plan.definition) {
+          let failedWorkSpec: WorkSpec | undefined = result.failedWorkSpec ?? failedWorkSpecInline;
+          if (!failedWorkSpec && plan.definition && failedPhase !== 'setup') {
             try {
               failedWorkSpec = failedPhase === 'prechecks'
                 ? await plan.definition.getPrechecksSpec(node.id)
@@ -664,7 +670,7 @@ export class JobExecutionEngine {
           }
           
           const healCount = (() => {
-            const v = nodeState.autoHealAttempted?.[failedPhase as 'prechecks' | 'work' | 'postchecks'];
+            const v = nodeState.autoHealAttempted?.[failedPhase as 'setup' | 'prechecks' | 'work' | 'postchecks'];
             if (v === true) {return 1;} // backward compat
             return typeof v === 'number' ? v : 0;
           })();
@@ -693,7 +699,7 @@ export class JobExecutionEngine {
             while (currentHealCount < MAX_AUTO_HEAL_PER_PHASE) {
               currentHealCount++;
               if (!nodeState.autoHealAttempted) {nodeState.autoHealAttempted = {};}
-              nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = currentHealCount;
+              nodeState.autoHealAttempted[failedPhase as 'setup' | 'prechecks' | 'work' | 'postchecks'] = currentHealCount;
             
             if (isAgentWork && wasExternallyKilled) {
               // Agent was interrupted - retry with same spec (don't swap to different agent spec)
@@ -1194,7 +1200,7 @@ export class JobExecutionEngine {
 
               // Track as a heal attempt for the budget
               if (!nodeState.autoHealAttempted) { nodeState.autoHealAttempted = {}; }
-              nodeState.autoHealAttempted[failedPhase as 'prechecks' | 'work' | 'postchecks'] = healCount + 1;
+              nodeState.autoHealAttempted[failedPhase as 'setup' | 'prechecks' | 'work' | 'postchecks'] = healCount + 1;
 
               // Reset state for retry
               nodeState.error = undefined;
@@ -1402,9 +1408,20 @@ export class JobExecutionEngine {
         // If the agent checkpointed due to context pressure, reshape the DAG with
         // fan-out sub-jobs and a fan-in validation job before transitioning to succeeded.
         //
-        // Feature flag: skip all context pressure logic when disabled via env var
-        const contextPressureDisabled = process.env.ORCH_CONTEXT_PRESSURE === 'false';
-        const hasCheckpointManifest = !contextPressureDisabled
+        // Gated on TWO conditions (defense in depth):
+        //   1. ORCH_CONTEXT_PRESSURE env var is not 'false' (test/runtime override).
+        //   2. copilotOrchestrator.contextPressure.enabled setting is true (user-facing).
+        // Composition skips wiring `checkpointManager`/`jobSplitter` onto the runner
+        // when the setting is false, so the truthy checks below are normally enough;
+        // we re-check the config here so a stale manifest left in a worktree (e.g.
+        // committed during an earlier run when the feature was enabled) cannot
+        // resurrect the split path on plans run with the feature disabled.
+        const contextPressureDisabledEnv = process.env.ORCH_CONTEXT_PRESSURE === 'false';
+        const contextPressureEnabledSetting = this.state.configManager.getConfig<boolean>(
+          'copilotOrchestrator.contextPressure', 'enabled', false,
+        );
+        const hasCheckpointManifest = !contextPressureDisabledEnv
+          && contextPressureEnabledSetting
           && nodeState.worktreePath
           && this.state.checkpointManager
           && this.state.jobSplitter
@@ -1443,9 +1460,16 @@ export class JobExecutionEngine {
 
               // Compute the checkpoint group path so sub-jobs and fan-in are
               // registered in the plan's group hierarchy for status tracking.
+              // The plan group system treats '/' as a nesting delimiter, so any
+              // '/' in the node name (common when names mirror file paths like
+              // "Solution foundation AiOrchestrator.sln, Directory.Build.props")
+              // would explode into many empty nested group boxes in the UI.
+              // Sanitize by replacing '/' with '-' in the name segment so the
+              // checkpoint group adds exactly one level under the parent group.
+              const safeNameSegment = node.name.replace(/\//g, '-');
               const cpGroupPath = node.group
-                ? `${node.group}/${node.name}`
-                : node.name;
+                ? `${node.group}/${safeNameSegment}`
+                : safeNameSegment;
 
               // Fan-out: create sub-jobs (work only, NO postchecks).
               // IMPORTANT: Capture original downstream dependents BEFORE adding sub-jobs,

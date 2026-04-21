@@ -243,6 +243,33 @@ suite('Model Discovery - Async Functions', () => {
         assert.ok(suggestion.id);
       }
     });
+
+    test('prefers large-context variant (e.g. -1m) for premium tier', async function () {
+      this.timeout(15000);
+      resetModelCache();
+      // Mock CLI config that lists both regular Opus and the 1m large-context variant
+      const configWithLargeContext = `Configuration Settings:
+
+  \`model\`: AI model to use for Copilot CLI.
+    - "claude-opus-4.6"
+    - "claude-opus-4.6-1m"
+    - "claude-sonnet-4.6"
+`;
+      const localDeps: ModelDiscoveryDeps = {
+        spawner: createMockSpawner({
+          '--help': FAKE_HELP_V1,
+          'help': FAKE_HELP_V1,
+          'help config': configWithLargeContext,
+          'config --help': configWithLargeContext,
+        }),
+      };
+      const suggestion = await suggestModel('premium', localDeps);
+      // When both 200k and 1m premium models are available, the 1m variant must win.
+      if (suggestion) {
+        assert.strictEqual(suggestion.id, 'claude-opus-4.6-1m',
+          `Expected large-context variant to be preferred, got '${suggestion.id}'`);
+      }
+    });
   });
 
   // ==========================================================================
@@ -550,6 +577,13 @@ suite('classifyModel - new model names', () => {
 
   test('classifies claude-opus-4.6-fast as anthropic/claude/premium', () => {
     const result = classifyModel('claude-opus-4.6-fast');
+    assert.strictEqual(result.vendor, 'anthropic');
+    assert.strictEqual(result.family, 'claude');
+    assert.strictEqual(result.tier, 'premium');
+  });
+
+  test('classifies claude-opus-4.6-1m as anthropic/claude/premium (1M context variant)', () => {
+    const result = classifyModel('claude-opus-4.6-1m');
     assert.strictEqual(result.vendor, 'anthropic');
     assert.strictEqual(result.family, 'claude');
     assert.strictEqual(result.tier, 'premium');

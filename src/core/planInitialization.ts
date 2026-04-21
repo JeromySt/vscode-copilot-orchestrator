@@ -129,22 +129,37 @@ export async function initializePlanRunner(
   const planRepository = container.resolve<import('../interfaces/IPlanRepository').IPlanRepository>(Tokens.IPlanRepository);
   planRunner.setPlanRepository(planRepository);
 
-  // Wire context pressure services (checkpoint detection and DAG reshape)
-  const { DefaultCheckpointManager } = await import('../plan/analysis/checkpointManager');
-  const { DefaultJobSplitter } = await import('../plan/analysis/jobSplitter');
+  // Wire context pressure services (checkpoint detection and DAG reshape).
+  //
+  // GATED on copilotOrchestrator.contextPressure.enabled (default: false). When
+  // disabled we skip wiring the checkpoint manager and job splitter onto the
+  // plan runner entirely, so the executionEngine's split branch (which requires
+  // both `checkpointManager` and `jobSplitter` on its state) is short-circuited
+  // even if a stale `checkpoint-manifest.json` exists in a worktree (e.g.
+  // committed during an earlier run when the feature was enabled).
+  //
+  // We also skip registering the global checkpoint manager so the
+  // ContextPressureHandler factory's `if (!mgr)` branch turns the entire
+  // detection flow into a no-op. The runner instructions and hook installer
+  // are gated on the same setting in copilotCliRunner.ts.
   const fileSystem = container.resolve<import('../interfaces/IFileSystem').IFileSystem>(Tokens.IFileSystem);
   const configProvider = container.resolve<import('../interfaces/IConfigProvider').IConfigProvider>(Tokens.IConfigProvider);
-  // Reuse a single CheckpointManager instance for both the plan runner and the
-  // global pressure registry, so the ContextPressureHandler and the runner observe
-  // the same checkpoint state (avoids divergent behavior between the two paths).
-  const checkpointManager = new DefaultCheckpointManager(fileSystem);
-  planRunner.setCheckpointManager(checkpointManager);
-  planRunner.setJobSplitter(new DefaultJobSplitter(configProvider));
+  const contextPressureEnabled = configProvider.getConfig<boolean>(
+    'copilotOrchestrator.contextPressure', 'enabled', false
+  );
+  if (contextPressureEnabled) {
+    const { DefaultCheckpointManager } = await import('../plan/analysis/checkpointManager');
+    const { DefaultJobSplitter } = await import('../plan/analysis/jobSplitter');
+    // Reuse a single CheckpointManager instance for both the plan runner and the
+    // global pressure registry, so the ContextPressureHandler and the runner observe
+    // the same checkpoint state (avoids divergent behavior between the two paths).
+    const checkpointManager = new DefaultCheckpointManager(fileSystem);
+    planRunner.setCheckpointManager(checkpointManager);
+    planRunner.setJobSplitter(new DefaultJobSplitter(configProvider));
 
-  // Also expose the checkpoint manager to the global pressure registry so the
-  // ContextPressureHandler can write the sentinel when level transitions to critical.
-  const { setCheckpointManager: setGlobalCheckpointManager } = await import('../plan/analysis/pressureMonitorRegistry');
-  setGlobalCheckpointManager(checkpointManager);
+    const { setCheckpointManager: setGlobalCheckpointManager } = await import('../plan/analysis/pressureMonitorRegistry');
+    setGlobalCheckpointManager(checkpointManager);
+  }
 
   // Register PlanRecovery service now that PlanRunner exists
   // (IPlanRecovery needs IPlanRunner, so it must be registered after PlanRunner is created)

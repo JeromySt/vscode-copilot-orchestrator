@@ -15,7 +15,7 @@ import { PlanPersistence } from '../../../plan/persistence';
 import { PlanEventEmitter } from '../../../plan/planEvents';
 import { PlanConfigManager } from '../../../plan/configManager';
 import { CopilotCliRunner } from '../../../agent/copilotCliRunner';
-import type { PlanInstance, JobNode, NodeExecutionState, PlanNode, ExecutionContext, JobExecutionResult } from '../../../plan/types';
+import type { PlanInstance, JobNode, NodeExecutionState, PlanNode, ExecutionContext, JobExecutionResult, WorkSpec } from '../../../plan/types';
 import type { ILogger } from '../../../interfaces/ILogger';
 
 function silenceConsole(): { restore: () => void } {
@@ -384,6 +384,62 @@ suite('JobExecutionEngine', () => {
       // Should have entries in history for the failed initial + auto-heal sequence
       assert.ok(ns.attemptHistory);
       assert.ok(ns.attemptHistory!.length >= 2);
+    });
+
+    test('auto-heal swaps to agent on setup-phase worktreeInit shell failure (failedWorkSpec)', async () => {
+      // Regression: setup-phase failures previously inspected node.work (typically
+      // an agent spec), so isNonAgentWork was false and auto-heal never engaged
+      // for deterministic worktreeInit shell failures (NU1504, NU1603, dotnet
+      // restore errors, etc.). The fix passes the failing init spec via
+      // result.failedWorkSpec and the engine prefers that over node.work.
+      const dir = makeTmpDir();
+      const plan = createTestPlan();
+      const node = plan.jobs.get('node-1')! as JobNode;
+      // node.work is an AGENT spec (typical for these jobs)
+      node.work = { type: 'agent', instructions: 'Implement the project' };
+      node.autoHeal = true;
+      const sm = new PlanStateMachine(plan);
+      const log = createMockLogger();
+
+      // The failing spec is a worktreeInit SHELL spec, NOT node.work.
+      const failingInitSpec: WorkSpec = { type: 'shell', command: 'dotnet restore solution.sln' };
+
+      const failResult: JobExecutionResult = {
+        success: false,
+        error: 'Worktree init failed: Exit code 1',
+        failedPhase: 'setup',
+        failedWorkSpec: failingInitSpec, // <-- the new field
+        exitCode: 1,
+        stepStatuses: { 'merge-fi': 'skipped', setup: 'failed' },
+      };
+      const healResult: JobExecutionResult = {
+        success: true,
+        completedCommit: 'heal-commit-12345678901234567890123',
+        stepStatuses: { 'merge-fi': 'skipped', setup: 'success', prechecks: 'success', work: 'success', commit: 'success', postchecks: 'success', 'merge-ri': 'skipped' },
+      };
+      const executeStub = sinon.stub();
+      executeStub.onFirstCall().resolves(failResult);
+      executeStub.onSecondCall().resolves(healResult);
+
+      const state = createEngineState(dir, { execute: executeStub });
+      state.plans.set(plan.id, plan);
+      state.stateMachines.set(plan.id, sm);
+      const mockGit = createMockGitOperations();
+      const nodeManager = new NodeManager(state as any, log, mockGit);
+      const engine = new JobExecutionEngine(state, nodeManager, log, mockGit);
+
+      await engine.executeJobNode(plan, sm, node);
+
+      const ns = plan.nodeStates.get('node-1')!;
+      assert.strictEqual(ns.status, 'succeeded', 'setup-phase auto-heal should recover the node');
+      // Heal budget tracked under 'setup'
+      assert.ok(ns.autoHealAttempted, 'autoHealAttempted should be set');
+      assert.ok(
+        (ns.autoHealAttempted as any).setup,
+        `setup heal budget should be tracked, got: ${JSON.stringify(ns.autoHealAttempted)}`,
+      );
+      // At least 2 invocations of the executor (initial failure + heal)
+      assert.ok(executeStub.callCount >= 2, `executor should be called at least 2x, got ${executeStub.callCount}`);
     });
 
     test('auto-heal failure still results in failed node', async () => {

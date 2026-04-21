@@ -193,14 +193,14 @@ export class CommitPhaseExecutor implements IPhaseExecutor {
           ctx.logInfo(`AI review: Changes were expected — ${reviewResult.reason}`);
           const error = this.noEvidenceError();
           ctx.logError(error);
-          return { success: false, error, reviewMetrics: reviewResult.metrics };
+          return { success: false, error, reviewMetrics: reviewResult.metrics, overrideResumeFromPhase: 'work' };
         }
       }
 
-      // No evidence — fail
+      // No evidence — fail (retry from work phase via auto-heal)
       const error = this.noEvidenceError();
       ctx.logError(error);
-      return { success: false, error };
+      return { success: false, error, overrideResumeFromPhase: 'work' };
     }
 
     // Stage and commit

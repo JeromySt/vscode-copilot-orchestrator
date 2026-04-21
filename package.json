@@ -2,7 +2,7 @@
   "name": "vscode-copilot-orchestrator",
   "displayName": "Copilot Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
-  "version": "0.16.5",
+  "version": "0.16.9",
   "publisher": "JeromyStatia",
   "license": "GPL-3.0-only",
   "icon": "media/copilot-icon.png",
@@ -457,8 +457,8 @@
         },
         "copilotOrchestrator.contextPressure.enabled": {
           "type": "boolean",
-          "default": true,
-          "description": "Enable automatic context pressure detection and job splitting. When enabled, the orchestrator monitors agent token usage and creates sub-jobs when context pressure is detected."
+          "default": false,
+          "description": "Enable automatic context pressure detection and job splitting. When enabled, the orchestrator monitors agent token usage and creates sub-jobs when context pressure is detected. Default is false — enable only after validating the splitter behavior on your workload."
         },
         "copilotOrchestrator.contextPressure.elevatedThreshold": {
           "type": "number",

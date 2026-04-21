@@ -122,6 +122,53 @@ export class StatsHandler implements IOutputHandler {
       return;
     }
 
+    // CLI v1.0.34 compact format — "Changes   +N -M" (no "Total code changes:" prefix)
+    const compactChangesMatch = content.match(/^Changes\s+\+(\d+)\s+-(\d+)\s*$/i);
+    if (compactChangesMatch) {
+      this._codeChanges = {
+        linesAdded: parseInt(compactChangesMatch[1], 10),
+        linesRemoved: parseInt(compactChangesMatch[2], 10),
+      };
+      this._hasAnyMetric = true;
+      if (!this._statsStartedAt) { this._statsStartedAt = Date.now(); }
+      this._parsingModels = false;
+      return;
+    }
+
+    // CLI v1.0.34 compact format — "Requests  N Premium (Xm Ys)"
+    const compactRequestsMatch = content.match(/^Requests\s+([\d.]+)\s+Premium\s+\(([^)]+)\)\s*$/i);
+    if (compactRequestsMatch) {
+      this._premiumRequests = parseFloat(compactRequestsMatch[1]);
+      this._apiTimeSeconds = parseDuration(compactRequestsMatch[2].trim());
+      this._hasAnyMetric = true;
+      if (!this._statsStartedAt) { this._statsStartedAt = Date.now(); }
+      this._parsingModels = false;
+      return;
+    }
+
+    // CLI v1.0.34 compact format — "Tokens    ↑ X • ↓ Y • Z (cached)"
+    // Bullet may be Unicode '•' (U+2022) or ASCII fallback; arrows are '↑' / '↓'.
+    const compactTokensMatch = content.match(
+      /^Tokens\s+[↑\^]\s*([\d.]+[km]?)\s*[•·*]\s*[↓v]\s*([\d.]+[km]?)(?:\s*[•·*]\s*([\d.]+[km]?)\s*\(cached\))?\s*$/i
+    );
+    if (compactTokensMatch) {
+      const inputTokens = parseTokenCount(compactTokensMatch[1]);
+      const outputTokens = parseTokenCount(compactTokensMatch[2]);
+      const cached = compactTokensMatch[3] ? parseTokenCount(compactTokensMatch[3]) : undefined;
+      // Synthesize a single-model breakdown entry so downstream code (which derives
+      // tokenUsage from modelBreakdown) keeps working even when no per-model lines
+      // appear (the v1.0.34 compact format omits them on short runs).
+      if (!this._modelBreakdown || this._modelBreakdown.length === 0) {
+        const entry: ModelUsageBreakdown = { model: 'unknown', inputTokens, outputTokens };
+        if (cached !== undefined) { entry.cachedTokens = cached; }
+        this._modelBreakdown = [entry];
+      }
+      this._hasAnyMetric = true;
+      if (!this._statsStartedAt) { this._statsStartedAt = Date.now(); }
+      this._parsingModels = false;
+      return;
+    }
+
     // Breakdown by AI model:
     if (/Breakdown by AI model:/i.test(content)) {
       this._parsingModels = true;

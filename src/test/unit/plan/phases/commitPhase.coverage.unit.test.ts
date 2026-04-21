@@ -488,6 +488,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
       assert.strictEqual(result.success, false);
       assert.ok(result.error?.includes('No work evidence'));
       assert.ok(logInfo.calledWithMatch('did not return a parseable judgment'));
+      assert.strictEqual(result.overrideResumeFromPhase, 'work');
     });
   });
 
@@ -594,6 +595,7 @@ suite('CommitPhaseExecutor - Coverage', () => {
       assert.ok(result.error?.includes('Modify files'));
       assert.ok(result.error?.includes('Create an evidence file'));
       assert.ok(result.error?.includes('Declare expectsNoChanges: true'));
+      assert.strictEqual(result.overrideResumeFromPhase, 'work');
     });
   });
 

@@ -198,10 +198,20 @@ suite('ContextPressureHandlerFactory', () => {
 
   setup(() => {
     sandbox = sinon.createSandbox();
+    // The factory short-circuits when no global checkpoint manager is
+    // registered (feature gate: copilotOrchestrator.contextPressure.enabled).
+    // Register a stub manager so the existing factory tests exercise the
+    // active-feature path.
+    pressureMonitorRegistry.setCheckpointManager({
+      writeSentinel: sinon.stub().resolves(),
+      manifestExists: sinon.stub().resolves(false),
+      readManifest: sinon.stub().resolves(undefined),
+    } as any);
   });
 
   teardown(() => {
     sandbox.restore();
+    pressureMonitorRegistry.setCheckpointManager(undefined as any);
   });
 
   suite('metadata', () => {
@@ -282,6 +292,26 @@ suite('ContextPressureHandlerFactory', () => {
       const state = result.monitor.getState();
       assert.strictEqual(state.planId, 'plan-1');
       assert.strictEqual(state.nodeId, 'node-1');
+    });
+
+    // Feature gate: when copilotOrchestrator.contextPressure.enabled is false,
+    // planInitialization skips registering the global checkpoint manager. The
+    // factory must short-circuit in that state so no monitor is created and
+    // no token tracking, sentinel writes, or DAG reshapes occur.
+    test('returns undefined when feature is disabled (no checkpoint manager registered)', () => {
+      pressureMonitorRegistry.setCheckpointManager(undefined as any);
+      const registerStub = sandbox.stub(pressureMonitorRegistry, 'registerMonitor');
+
+      const result = ContextPressureHandlerFactory.create({
+        processLabel: 'copilot',
+        planId: 'plan-1',
+        nodeId: 'node-1',
+      });
+
+      assert.strictEqual(result, undefined,
+        'factory must skip handler creation when feature is disabled');
+      assert.strictEqual(registerStub.called, false,
+        'no monitor should be registered when feature is disabled');
     });
   });
 });
