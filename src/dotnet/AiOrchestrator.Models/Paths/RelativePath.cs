@@ -17,12 +17,12 @@ public readonly record struct RelativePath
             throw new ArgumentException("RelativePath must not be a rooted path.", nameof(value));
         }
 
-        Value = value;
+        this.Value = value;
     }
 
     /// <summary>Gets the underlying path string.</summary>
     public string Value { get; }
 
     /// <inheritdoc/>
-    public override string ToString() => Value;
+    public override string ToString() => this.Value;
 }

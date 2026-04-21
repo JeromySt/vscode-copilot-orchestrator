@@ -9,7 +9,10 @@ public readonly record struct JobId
 {
     /// <summary>Initializes a new instance of the <see cref="JobId"/> struct.</summary>
     /// <param name="value">The underlying GUID value.</param>
-    public JobId(Guid value) => Value = value;
+    public JobId(Guid value)
+    {
+        this.Value = value;
+    }
 
     /// <summary>Gets the underlying GUID value.</summary>
     public Guid Value { get; }
@@ -50,5 +53,5 @@ public readonly record struct JobId
     }
 
     /// <inheritdoc/>
-    public override string ToString() => $"job_{Value:N}";
+    public override string ToString() => $"job_{this.Value:N}";
 }

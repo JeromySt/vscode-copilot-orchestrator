@@ -9,4 +9,8 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Process\AiOrchestrator.Process.csproj" />
+  </ItemGroup>
+
 </Project>
