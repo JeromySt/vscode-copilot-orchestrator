@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.Redaction\AiOrchestrator.Redaction.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Diagnose\AiOrchestrator.Diagnose.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Plan.Portability\AiOrchestrator.Plan.Portability.csproj" />
   </ItemGroup>
 
 </Project>

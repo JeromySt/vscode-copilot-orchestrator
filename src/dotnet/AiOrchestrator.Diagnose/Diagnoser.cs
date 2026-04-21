@@ -191,6 +191,7 @@ public sealed class Diagnoser
             Entries = entryMeta.ToImmutable(),
             DotnetRuntimeVersion = System.Environment.Version.ToString(),
             AioVersion = options.AioVersion,
+            Kind = "diagnose",
             Warnings = warnings,
         };
 
@@ -460,6 +461,7 @@ public sealed class Diagnoser
                     ["sha256"] = e.Value.Sha256,
                 })
                 .ToArray(),
+            ["kind"] = m.Kind,
             ["pseudonymizationMode"] = m.PseudonymizationMode.ToString(),
             ["recipientPubKeyFingerprint"] = m.RecipientPubKeyFingerprint,
             ["schemaVersion"] = m.SchemaVersion.ToString(),

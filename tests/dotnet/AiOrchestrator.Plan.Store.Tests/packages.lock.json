@@ -296,6 +296,7 @@
           "AiOrchestrator.Models": "[1.0.0, )",
           "AiOrchestrator.PathValidator": "[1.0.0, )",
           "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Portability": "[1.0.0, )",
           "AiOrchestrator.Plan.Store": "[1.0.0, )",
           "AiOrchestrator.Redaction": "[1.0.0, )",
           "AiOrchestrator.Time": "[1.0.0, )",
@@ -365,6 +366,16 @@
       },
       "aiorchestrator.plan.models": {
         "type": "Project"
+      },
+      "aiorchestrator.plan.portability": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Store": "[1.0.0, )",
+          "Microsoft.Extensions.Options": "[9.0.4, )"
+        }
       },
       "aiorchestrator.plan.store": {
         "type": "Project",

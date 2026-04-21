@@ -14,6 +14,9 @@ public sealed class BundleManifest
     /// <summary>Gets the manifest schema version. Current version is <c>1.0</c>.</summary>
     public required Version SchemaVersion { get; init; }
 
+    /// <summary>Gets the bundle kind, enabling unified schema differentiation between <c>diagnose</c> and <c>plan</c> (portability) archives (PORT-1).</summary>
+    public string Kind { get; init; } = "diagnose";
+
     /// <summary>Gets the UTC time the bundle was produced.</summary>
     public required DateTimeOffset CreatedAt { get; init; }
 
