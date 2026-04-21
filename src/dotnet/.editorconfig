@@ -47,24 +47,3 @@ indent_size = 2
 indent_style = space
 indent_size = 2
 trim_trailing_whitespace = false
-
-# Pre-existing Models project: StyleCop suppressions for files written before these
-# analyzers were enforced (multi-type files, ordering, this-prefix style).
-# Using ** (no trailing slash) to match files at all depths.
-[AiOrchestrator.Models/**.cs]
-dotnet_diagnostic.SA1101.severity = suggestion
-dotnet_diagnostic.SA1201.severity = suggestion
-dotnet_diagnostic.SA1402.severity = suggestion
-dotnet_diagnostic.SA1649.severity = suggestion
-
-# Pre-existing Abstractions project: StyleCop suppressions for pre-existing code style
-# violations (underscore-prefixed fields, this-prefix, multi-type files).
-[AiOrchestrator.Abstractions/**.cs]
-dotnet_diagnostic.SA1101.severity = suggestion
-dotnet_diagnostic.SA1201.severity = suggestion
-dotnet_diagnostic.SA1309.severity = suggestion
-
-# Configuration project: suppress SA1309 to allow the underscore-prefix convention
-# that matches the rest of the codebase. SA1101 is enforced (this. required).
-[AiOrchestrator.Configuration/**.cs]
-dotnet_diagnostic.SA1309.severity = suggestion
