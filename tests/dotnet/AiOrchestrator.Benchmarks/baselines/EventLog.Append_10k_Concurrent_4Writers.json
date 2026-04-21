@@ -1,0 +1,8 @@
+{
+  "benchmarkId": "EventLog.Append_10k_Concurrent_4Writers",
+  "p50Ns": 1100000,
+  "p99Ns": 2200000,
+  "allocatedBytes": 410000,
+  "capturedAt": "2026-04-21T00:00:00Z",
+  "runtime": ".NET 10 RyuJIT ServerGC"
+}

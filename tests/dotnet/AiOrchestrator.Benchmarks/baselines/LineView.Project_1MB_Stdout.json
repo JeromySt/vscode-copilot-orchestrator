@@ -1,0 +1,8 @@
+{
+  "benchmarkId": "LineView.Project_1MB_Stdout",
+  "p50Ns": 920000,
+  "p99Ns": 1900000,
+  "allocatedBytes": 140000,
+  "capturedAt": "2026-04-21T00:00:00Z",
+  "runtime": ".NET 10 RyuJIT ServerGC"
+}

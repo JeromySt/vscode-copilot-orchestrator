@@ -29,8 +29,14 @@ $null = New-Item -ItemType Directory -Force -Path $tmpDir
 
 $projectPath = Join-Path $repoRoot 'src' 'dotnet' $Project
 if (-not (Test-Path $projectPath)) {
-    Write-Error "Project path not found: $projectPath"
-    exit 1
+    # Fall back to tests/dotnet/AiOrchestrator.<Project> (used by Benchmarks).
+    $altPath = Join-Path $repoRoot 'tests' 'dotnet' "AiOrchestrator.$Project"
+    if (Test-Path $altPath) {
+        $projectPath = $altPath
+    } else {
+        Write-Error "Project path not found: $projectPath (also tried $altPath)"
+        exit 1
+    }
 }
 
 $logFile = Join-Path $tmpDir "aio-build-$Project.log"

@@ -26,6 +26,12 @@
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.4" />
 
     <!-- Shared versions for test packages that reference framework types -->
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.4" />
     <PackageVersion Include="BouncyCastle.Cryptography" Version="2.4.0" />
+
+    <!-- Benchmarking -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageVersion Include="BenchmarkDotNet.Diagnostics.Windows" Version="0.14.0" />
   </ItemGroup>
 </Project>
