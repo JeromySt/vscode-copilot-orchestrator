@@ -25,7 +25,7 @@ public sealed class DefaultPathValidator : IPathValidator
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
 
-    private readonly IEnumerable<string> _allowedRoots;
+    private readonly IEnumerable<string> allowedRoots;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DefaultPathValidator"/> class.
@@ -33,16 +33,25 @@ public sealed class DefaultPathValidator : IPathValidator
     /// <param name="allowedRoots">The set of allowed root directories.</param>
     public DefaultPathValidator(IEnumerable<string> allowedRoots)
     {
-        _allowedRoots = allowedRoots ?? throw new ArgumentNullException(nameof(allowedRoots));
+        this.allowedRoots = allowedRoots ?? throw new ArgumentNullException(nameof(allowedRoots));
     }
 
     /// <summary>
     /// Validates a string path (non-model version for testing).
     /// </summary>
+    /// <param name="path">The candidate path to validate.</param>
+    /// <param name="allowedRoot">The allowed root directory.</param>
     public void AssertSafe(string path, string allowedRoot)
     {
-        if (path == null) throw new ArgumentNullException(nameof(path));
-        if (allowedRoot == null) throw new ArgumentNullException(nameof(allowedRoot));
+        if (path == null)
+        {
+            throw new ArgumentNullException(nameof(path));
+        }
+
+        if (allowedRoot == null)
+        {
+            throw new ArgumentNullException(nameof(allowedRoot));
+        }
 
         // Must be fully qualified
         if (!Path.IsPathRooted(path))
@@ -76,7 +85,7 @@ public sealed class DefaultPathValidator : IPathValidator
             ? normalized.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
             : normalized.StartsWith(normalizedRoot, StringComparison.Ordinal);
 
-        if (!pathStartsWithRoot || (normalized.Length > normalizedRoot.Length && 
+        if (!pathStartsWithRoot || (normalized.Length > normalizedRoot.Length &&
             normalized[normalizedRoot.Length] != Path.DirectorySeparatorChar))
         {
             throw new UnauthorizedAccessException(
@@ -90,7 +99,7 @@ public sealed class DefaultPathValidator : IPathValidator
     /// <inheritdoc/>
     public void AssertSafe(AbsolutePath path, AbsolutePath allowedRoot)
     {
-        AssertSafe(path.Value, allowedRoot.Value);
+        this.AssertSafe(path.Value, allowedRoot.Value);
     }
 
     /// <inheritdoc/>
@@ -103,48 +112,60 @@ public sealed class DefaultPathValidator : IPathValidator
         var fullPath = allowedRoot.Combine(relative);
 
         // Validate it's safe
-        AssertSafe(fullPath, allowedRoot);
+        this.AssertSafe(fullPath, allowedRoot);
 
         // Open the file for reading
-        return new FileStream(
+        return await Task.FromResult<Stream>(new FileStream(
             fullPath.Value,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
             bufferSize: 4096,
-            useAsync: true);
+            useAsync: true)).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Opens a read-only stream over a path (string version for testing).
     /// </summary>
+    /// <param name="allowedRoot">The allowed root directory.</param>
+    /// <param name="relativePath">The relative path beneath the allowed root.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A read-only stream over the resolved file.</returns>
     public async ValueTask<Stream> OpenReadUnderRootAsync(
         string allowedRoot,
         string relativePath,
         CancellationToken ct)
     {
-        if (allowedRoot == null) throw new ArgumentNullException(nameof(allowedRoot));
-        if (relativePath == null) throw new ArgumentNullException(nameof(relativePath));
+        if (allowedRoot == null)
+        {
+            throw new ArgumentNullException(nameof(allowedRoot));
+        }
+
+        if (relativePath == null)
+        {
+            throw new ArgumentNullException(nameof(relativePath));
+        }
 
         // Construct the full path by combining root and relative
         var fullPath = Path.Combine(allowedRoot, relativePath);
 
         // Validate it's safe
-        AssertSafe(fullPath, allowedRoot);
+        this.AssertSafe(fullPath, allowedRoot);
 
         // Open the file for reading
-        return new FileStream(
+        return await Task.FromResult<Stream>(new FileStream(
             fullPath,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
             bufferSize: 4096,
-            useAsync: true);
+            useAsync: true)).ConfigureAwait(false);
     }
 
     private static void RejectReservedNames(string normalizedPath)
     {
-        var parts = normalizedPath.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, 
+        var parts = normalizedPath.Split(
+            new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
             StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var part in parts)

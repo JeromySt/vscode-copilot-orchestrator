@@ -25,8 +25,15 @@ public static partial class CompositionRoot
         this IServiceCollection services,
         IEnumerable<string> allowedRoots)
     {
-        if (services == null) throw new ArgumentNullException(nameof(services));
-        if (allowedRoots == null) throw new ArgumentNullException(nameof(allowedRoots));
+        if (services == null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        if (allowedRoots == null)
+        {
+            throw new ArgumentNullException(nameof(allowedRoots));
+        }
 
         return services.AddSingleton<IPathValidator>(
             new DefaultPathValidator(allowedRoots));

@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using AiOrchestrator.Foundation.Tests;
 using AiOrchestrator.PathValidator.Paths;
 using FluentAssertions;
@@ -93,7 +94,7 @@ public sealed class PathValidatorTests
 
     [Fact]
     [ContractTest("PV-7")]
-    public void OpenReadUnderRootAsync_WithValidFile_ReturnsStream()
+    public async System.Threading.Tasks.Task OpenReadUnderRootAsync_WithValidFile_ReturnsStream()
     {
         // Create a temporary directory and file
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
@@ -104,8 +105,7 @@ public sealed class PathValidatorTests
             File.WriteAllText(filePath, "test content");
 
             var validator = new DefaultPathValidator(new[] { tempDir });
-            var task = validator.OpenReadUnderRootAsync(tempDir, "test.txt", CancellationToken.None);
-            var stream = task.GetAwaiter().GetResult();
+            var stream = await validator.OpenReadUnderRootAsync(tempDir, "test.txt", CancellationToken.None);
 
             stream.Should().NotBeNull();
             stream.Should().BeReadable();
@@ -126,19 +126,20 @@ public sealed class PathValidatorTests
 
     [Fact]
     [ContractTest("PV-8")]
-    public void OpenReadUnderRootAsync_WithTraversalInRelativePath_Throws()
+    public async System.Threading.Tasks.Task OpenReadUnderRootAsync_WithTraversalInRelativePath_Throws()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(tempDir);
         try
         {
             var validator = new DefaultPathValidator(new[] { tempDir });
-            
-            var act = () => validator.OpenReadUnderRootAsync(tempDir, "../outside/file.txt", CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
 
-            act.Should().Throw<UnauthorizedAccessException>();
+            var act = async () =>
+            {
+                await validator.OpenReadUnderRootAsync(tempDir, "../outside/file.txt", CancellationToken.None);
+            };
+
+            await act.Should().ThrowAsync<UnauthorizedAccessException>();
         }
         finally
         {

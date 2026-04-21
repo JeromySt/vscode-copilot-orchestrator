@@ -40,6 +40,14 @@
           "AiOrchestrator.Models": "[1.0.0, )"
         }
       },
+      "aiorchestrator.filesystem": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.PathValidator": "[1.0.0, )"
+        }
+      },
       "aiorchestrator.models": {
         "type": "Project"
       },

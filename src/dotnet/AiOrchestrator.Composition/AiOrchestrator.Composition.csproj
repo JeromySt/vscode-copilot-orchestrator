@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.FileSystem\AiOrchestrator.FileSystem.csproj" />
   </ItemGroup>
 
 </Project>

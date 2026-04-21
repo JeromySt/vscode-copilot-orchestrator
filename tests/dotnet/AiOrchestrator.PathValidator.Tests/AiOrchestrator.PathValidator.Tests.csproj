@@ -6,8 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\dotnet\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
-    <ProjectReference Include="..\..\src\dotnet\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Foundation.Tests\AiOrchestrator.Foundation.Tests.csproj" />
   </ItemGroup>
 

@@ -2,6 +2,8 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+
 namespace AiOrchestrator.Models.Ids;
 
 /// <summary>A validated 40-character hexadecimal Git commit SHA.</summary>
@@ -17,14 +19,14 @@ public readonly record struct CommitSha
             throw new ArgumentException("CommitSha must be exactly 40 hex characters.", nameof(hex));
         }
 
-        Hex = hex.ToLowerInvariant();
+        this.Hex = hex.ToLowerInvariant();
     }
 
     /// <summary>Gets the 40-character lowercase hex representation of the commit SHA.</summary>
     public string Hex { get; }
 
     /// <inheritdoc/>
-    public override string ToString() => Hex;
+    public override string ToString() => this.Hex;
 
     private static bool IsAllHex(string s)
     {

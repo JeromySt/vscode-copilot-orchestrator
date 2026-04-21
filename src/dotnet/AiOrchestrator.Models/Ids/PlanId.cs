@@ -11,7 +11,10 @@ public readonly record struct PlanId
 {
     /// <summary>Initializes a new instance of the <see cref="PlanId"/> struct.</summary>
     /// <param name="value">The underlying GUID value.</param>
-    public PlanId(Guid value) => Value = value;
+    public PlanId(Guid value)
+    {
+        this.Value = value;
+    }
 
     /// <summary>Gets the underlying GUID value.</summary>
     public Guid Value { get; }
@@ -52,5 +55,5 @@ public readonly record struct PlanId
     }
 
     /// <inheritdoc/>
-    public override string ToString() => $"plan_{Value:N}";
+    public override string ToString() => $"plan_{this.Value:N}";
 }

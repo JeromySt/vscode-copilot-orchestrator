@@ -2,6 +2,9 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+using System.IO;
+
 namespace AiOrchestrator.Models.Paths;
 
 /// <summary>A validated absolute filesystem path.</summary>
@@ -17,7 +20,7 @@ public readonly record struct AbsolutePath
             throw new ArgumentException("AbsolutePath must be a rooted path.", nameof(value));
         }
 
-        Value = value;
+        this.Value = value;
     }
 
     /// <summary>Gets the underlying path string.</summary>
@@ -26,8 +29,8 @@ public readonly record struct AbsolutePath
     /// <summary>Combines this absolute path with a relative path segment.</summary>
     /// <param name="rel">The relative path to append.</param>
     /// <returns>A new <see cref="AbsolutePath"/> representing the combined path.</returns>
-    public AbsolutePath Combine(RelativePath rel) => new(Path.Combine(Value, rel.Value));
+    public AbsolutePath Combine(RelativePath rel) => new(Path.Combine(this.Value, rel.Value));
 
     /// <inheritdoc/>
-    public override string ToString() => Value;
+    public override string ToString() => this.Value;
 }

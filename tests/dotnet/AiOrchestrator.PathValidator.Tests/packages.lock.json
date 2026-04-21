@@ -127,12 +127,27 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "aiorchestrator.abstractions": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Models": "[1.0.0, )"
+        }
+      },
       "aiorchestrator.foundation.tests": {
         "type": "Project",
         "dependencies": {
           "FluentAssertions": "[6.12.2, )",
           "Microsoft.NET.Test.Sdk": "[17.13.0, )",
           "xunit": "[2.9.3, )"
+        }
+      },
+      "aiorchestrator.models": {
+        "type": "Project"
+      },
+      "aiorchestrator.pathvalidator": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )"
         }
       }
     }

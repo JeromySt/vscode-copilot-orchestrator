@@ -94,13 +94,15 @@ foreach ($package in $cobertura.coverage.packages.package) {
     foreach ($class in $package.classes.class) {
         $filename = $class.filename -replace '\\', '/'
         if ($filename -notlike "*$Project*") { continue }
+        # Exclude generated source (obj/Debug, obj/Release, .g.cs, .designer.cs).
+        if ($filename -like "*/obj/*" -or $filename -like "*.g.cs" -or $filename -like "*.designer.cs") { continue }
 
         foreach ($line in $class.lines.line) {
             $totalLines++
             if ([int]$line.hits -gt 0) { $coveredLines++ }
 
-            $condition = $line.'condition-coverage'
-            if ($condition) {
+            $condition = $line.GetAttribute('condition-coverage')
+            if (-not [string]::IsNullOrEmpty($condition)) {
                 if ($condition -match '(\d+)/(\d+)') {
                     $coveredBranches += [int]$Matches[1]
                     $totalBranches   += [int]$Matches[2]
