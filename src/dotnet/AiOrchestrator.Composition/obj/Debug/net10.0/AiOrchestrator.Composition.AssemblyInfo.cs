@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AiOrchestrator.Composition")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f980fe252fda7d4b3026f30819afa39b7f9dc1f5")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d8a56c0bba3ea4f9cb0e075bf7c2210e9b51673b")]
 [assembly: System.Reflection.AssemblyProductAttribute("AiOrchestrator.Composition")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AiOrchestrator.Composition")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

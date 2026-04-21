@@ -964,18 +964,18 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\cbb8b637\\src\\dotnet\\AiOrchestrator.Composition\\AiOrchestrator.Composition.csproj",
+      "projectUniqueName": "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\2142acd7\\src\\dotnet\\AiOrchestrator.Composition\\AiOrchestrator.Composition.csproj",
       "projectName": "AiOrchestrator.Composition",
-      "projectPath": "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\cbb8b637\\src\\dotnet\\AiOrchestrator.Composition\\AiOrchestrator.Composition.csproj",
+      "projectPath": "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\2142acd7\\src\\dotnet\\AiOrchestrator.Composition\\AiOrchestrator.Composition.csproj",
       "packagesPath": "C:\\.tools\\.nuget\\packages\\",
-      "outputPath": "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\cbb8b637\\src\\dotnet\\AiOrchestrator.Composition\\obj\\",
+      "outputPath": "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\2142acd7\\src\\dotnet\\AiOrchestrator.Composition\\obj\\",
       "projectStyle": "PackageReference",
       "centralPackageVersionsManagementEnabled": true,
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\cbb8b637\\src\\dotnet\\NuGet.Config",
+        "C:\\src\\repos\\vscode-copilot-orchestrator\\.worktrees\\2142acd7\\src\\dotnet\\NuGet.Config",
         "C:\\Users\\jstatia\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
@@ -1000,7 +1000,7 @@
         ]
       },
       "restoreLockProperties": {
-        "restorePackagesWithLockFile": "true"
+        "restoreLockedMode": true
       },
       "restoreAuditProperties": {
         "enableAudit": "true",
