@@ -17,9 +17,9 @@ namespace AiOrchestrator.Analyzers.Rules.OE0008;
 /// <summary>
 /// Code fix for OE0008 — changes <c>async void</c> to <c>async Task</c>.
 /// </summary>
-[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0008AsyncVoidToTaskCodeFix))]
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0008CodeFix))]
 [System.Composition.Shared]
-public sealed class OE0008AsyncVoidToTaskCodeFix : CodeFixProvider
+public sealed class OE0008CodeFix : CodeFixProvider
 {
     /// <inheritdoc/>
     public override ImmutableArray<string> FixableDiagnosticIds =>

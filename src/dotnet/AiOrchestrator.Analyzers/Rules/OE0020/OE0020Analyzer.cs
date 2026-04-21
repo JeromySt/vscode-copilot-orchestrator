@@ -16,7 +16,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0020;
 /// or <c>object</c>. Use a specific type or a generic parameter instead.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0020DynamicOrObjectParameterAnalyzer : DiagnosticAnalyzer
+public sealed class OE0020Analyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>

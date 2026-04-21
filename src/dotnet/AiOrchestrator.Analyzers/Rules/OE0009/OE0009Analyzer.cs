@@ -16,7 +16,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0009;
 /// for source-generated P/Invoke marshalling.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0009DllImportAnalyzer : DiagnosticAnalyzer
+public sealed class OE0009Analyzer : DiagnosticAnalyzer
 {
     private const string DllImportShortName = "DllImport";
     private const string DllImportFullName = "DllImportAttribute";

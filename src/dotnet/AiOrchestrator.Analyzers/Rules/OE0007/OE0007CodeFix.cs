@@ -18,9 +18,9 @@ namespace AiOrchestrator.Analyzers.Rules.OE0007;
 /// Code fix for OE0007 — adds a <c>CancellationToken cancellationToken = default</c> parameter
 /// to the end of the method parameter list.
 /// </summary>
-[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0007AddCancellationTokenCodeFix))]
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0007CodeFix))]
 [System.Composition.Shared]
-public sealed class OE0007AddCancellationTokenCodeFix : CodeFixProvider
+public sealed class OE0007CodeFix : CodeFixProvider
 {
     /// <inheritdoc/>
     public override ImmutableArray<string> FixableDiagnosticIds =>

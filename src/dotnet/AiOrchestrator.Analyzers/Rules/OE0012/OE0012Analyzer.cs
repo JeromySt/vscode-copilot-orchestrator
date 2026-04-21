@@ -15,7 +15,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0012;
 /// Use <c>IProcessSpawner</c> instead.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0012ProcessStartAnalyzer : DiagnosticAnalyzer
+public sealed class OE0012Analyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>

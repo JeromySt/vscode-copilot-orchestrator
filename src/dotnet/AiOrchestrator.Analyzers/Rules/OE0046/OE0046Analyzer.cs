@@ -17,7 +17,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0046;
 /// Detects calls to <c>ILogger</c> extension methods (Log*, with a string-interpolation argument).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0046LoggerStringInterpolationAnalyzer : DiagnosticAnalyzer
+public sealed class OE0046Analyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>

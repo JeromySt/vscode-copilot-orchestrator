@@ -17,9 +17,9 @@ namespace AiOrchestrator.Analyzers.Rules.OE0030;
 /// <summary>
 /// Code fix for OE0030 — adds <c>[ContractTest("TODO")]</c> to a test method that is missing it.
 /// </summary>
-[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0030AddContractTestAttributeCodeFix))]
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0030CodeFix))]
 [System.Composition.Shared]
-public sealed class OE0030AddContractTestAttributeCodeFix : CodeFixProvider
+public sealed class OE0030CodeFix : CodeFixProvider
 {
     /// <inheritdoc/>
     public override ImmutableArray<string> FixableDiagnosticIds =>

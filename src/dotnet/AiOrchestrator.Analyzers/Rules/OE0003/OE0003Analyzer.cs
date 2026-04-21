@@ -16,7 +16,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0003;
 /// <c>VsExtension</c> or <c>Transport</c>.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0003VsReferenceOutsideExtensionAnalyzer : DiagnosticAnalyzer
+public sealed class OE0003Analyzer : DiagnosticAnalyzer
 {
     private const string VsNamespacePrefix = "Microsoft.VisualStudio";
 
@@ -88,7 +88,7 @@ public sealed class OE0003VsReferenceOutsideExtensionAnalyzer : DiagnosticAnalyz
     private static bool IsInExtensionTransportProject(SyntaxNode node)
     {
         var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.Contains("VsExtension", System.StringComparison.OrdinalIgnoreCase) ||
-               filePath.Contains("Transport", System.StringComparison.OrdinalIgnoreCase);
+        return filePath.IndexOf("VsExtension", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+               filePath.IndexOf("Transport", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

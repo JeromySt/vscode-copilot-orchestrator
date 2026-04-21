@@ -13,10 +13,8 @@ namespace AiOrchestrator.Analyzers;
 /// </summary>
 public static class Diagnostics
 {
-    private const string Category = "AiOrchestrator";
-
     /// <summary>OE0001 — Public type or member is missing an XML documentation comment.</summary>
-    public static readonly DiagnosticDescriptor OE0001 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0001 = new(
         id: DiagnosticIds.OE0001,
         title: "Public type or member missing XML doc comment",
         messageFormat: "Public {0} '{1}' is missing an XML documentation comment",
@@ -27,7 +25,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0001.md");
 
     /// <summary>OE0002 — Direct instantiation of a DI-registered type outside the Composition project.</summary>
-    public static readonly DiagnosticDescriptor OE0002 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0002 = new(
         id: DiagnosticIds.OE0002,
         title: "Direct instantiation of DI-managed type outside Composition",
         messageFormat: "Do not use 'new {0}()' outside AiOrchestrator.Composition; resolve it from the DI container",
@@ -38,7 +36,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0002.md");
 
     /// <summary>OE0003 — Reference to Microsoft.VisualStudio namespace outside the extension transport project.</summary>
-    public static readonly DiagnosticDescriptor OE0003 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0003 = new(
         id: DiagnosticIds.OE0003,
         title: "Microsoft.VisualStudio reference outside extension transport",
         messageFormat: "Do not reference the 'Microsoft.VisualStudio' namespace outside the VS extension transport project",
@@ -49,7 +47,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0003.md");
 
     /// <summary>OE0004 — Use of System.IO.File or System.IO.Directory outside AiOrchestrator.FileSystem.</summary>
-    public static readonly DiagnosticDescriptor OE0004 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0004 = new(
         id: DiagnosticIds.OE0004,
         title: "System.IO.File/Directory used outside FileSystem project",
         messageFormat: "Do not use '{0}' directly; use IFileSystem instead",
@@ -60,7 +58,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0004.md");
 
     /// <summary>OE0005 — Use of System.Diagnostics.Process outside AiOrchestrator.Process.</summary>
-    public static readonly DiagnosticDescriptor OE0005 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0005 = new(
         id: DiagnosticIds.OE0005,
         title: "System.Diagnostics.Process used outside Process project",
         messageFormat: "Do not use 'System.Diagnostics.Process' directly; use IProcessSpawner instead",
@@ -71,7 +69,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0005.md");
 
     /// <summary>OE0006 — Use of LibGit2Sharp or git shell-out outside AiOrchestrator.Git.</summary>
-    public static readonly DiagnosticDescriptor OE0006 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0006 = new(
         id: DiagnosticIds.OE0006,
         title: "LibGit2Sharp or git shell-out used outside Git project",
         messageFormat: "Do not use LibGit2Sharp or git shell commands outside AiOrchestrator.Git; use IGitOperations instead",
@@ -82,7 +80,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0006.md");
 
     /// <summary>OE0007 — Async method is missing a CancellationToken parameter.</summary>
-    public static readonly DiagnosticDescriptor OE0007 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0007 = new(
         id: DiagnosticIds.OE0007,
         title: "Async method missing CancellationToken parameter",
         messageFormat: "Async method '{0}' must accept a CancellationToken parameter",
@@ -93,7 +91,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0007.md");
 
     /// <summary>OE0008 — async void method (async void is not allowed except in event handlers).</summary>
-    public static readonly DiagnosticDescriptor OE0008 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0008 = new(
         id: DiagnosticIds.OE0008,
         title: "async void method",
         messageFormat: "Method '{0}' is 'async void'; use 'async Task' instead",
@@ -104,7 +102,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0008.md");
 
     /// <summary>OE0009 — [DllImport] used instead of [LibraryImport].</summary>
-    public static readonly DiagnosticDescriptor OE0009 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0009 = new(
         id: DiagnosticIds.OE0009,
         title: "[DllImport] used instead of [LibraryImport]",
         messageFormat: "Replace [DllImport] with [LibraryImport] for source-generated P/Invoke",
@@ -115,7 +113,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0009.md");
 
     /// <summary>OE0010 — Banned time/clock API usage.</summary>
-    public static readonly DiagnosticDescriptor OE0010 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0010 = new(
         id: DiagnosticIds.OE0010,
         title: "Banned time/clock API",
         messageFormat: "Do not use '{0}'; use IClock instead",
@@ -126,7 +124,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0010.md");
 
     /// <summary>OE0011 — Synchronous System.IO.File read/write API usage.</summary>
-    public static readonly DiagnosticDescriptor OE0011 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0011 = new(
         id: DiagnosticIds.OE0011,
         title: "Synchronous File I/O API",
         messageFormat: "Do not use synchronous '{0}'; use async IFileSystem methods instead",
@@ -137,7 +135,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0011.md");
 
     /// <summary>OE0012 — Process.Start usage.</summary>
-    public static readonly DiagnosticDescriptor OE0012 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0012 = new(
         id: DiagnosticIds.OE0012,
         title: "Process.Start is banned",
         messageFormat: "Do not use 'Process.Start'; use IProcessSpawner instead",
@@ -148,7 +146,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0012.md");
 
     /// <summary>OE0020 — Public method has dynamic or object parameter type.</summary>
-    public static readonly DiagnosticDescriptor OE0020 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0020 = new(
         id: DiagnosticIds.OE0020,
         title: "Public method has dynamic or object parameter",
         messageFormat: "Public method '{0}' has parameter '{1}' of type '{2}'; use a specific type or generic",
@@ -159,7 +157,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0020.md");
 
     /// <summary>OE0030 — Test method missing [ContractTest] attribute.</summary>
-    public static readonly DiagnosticDescriptor OE0030 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0030 = new(
         id: DiagnosticIds.OE0030,
         title: "Test method missing [ContractTest] attribute",
         messageFormat: "Test method '{0}' is missing a [ContractTest(\"RULE-ID\")] attribute",
@@ -170,7 +168,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0030.md");
 
     /// <summary>OE0040 — Reflection-based JSON serialization detected.</summary>
-    public static readonly DiagnosticDescriptor OE0040 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0040 = new(
         id: DiagnosticIds.OE0040,
         title: "Reflection-based JSON serialization",
         messageFormat: "'{0}' uses reflection-based serialization; pass a JsonSerializerContext for source-generated serialization",
@@ -181,7 +179,7 @@ public static class Diagnostics
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0040.md");
 
     /// <summary>OE0046 — Logger call uses string interpolation in the message template.</summary>
-    public static readonly DiagnosticDescriptor OE0046 = new DiagnosticDescriptor(
+    public static readonly DiagnosticDescriptor OE0046 = new(
         id: DiagnosticIds.OE0046,
         title: "Logger message template uses string interpolation",
         messageFormat: "Logger call '{0}' uses string interpolation; use structured logging with named placeholders instead",
@@ -190,4 +188,6 @@ public static class Diagnostics
         isEnabledByDefault: true,
         description: "String interpolation in logger message templates defeats structured logging. Use named placeholders like {PropertyName} and pass values as arguments.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0046.md");
+
+    private const string Category = "AiOrchestrator";
 }

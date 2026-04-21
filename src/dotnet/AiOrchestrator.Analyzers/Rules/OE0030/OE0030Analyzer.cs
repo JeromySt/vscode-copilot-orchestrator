@@ -16,7 +16,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0030;
 /// not carry a <c>[ContractTest("RULE-ID")]</c> attribute.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0030TestMissingContractTestAttributeAnalyzer : DiagnosticAnalyzer
+public sealed class OE0030Analyzer : DiagnosticAnalyzer
 {
     private const string FactAttribute = "Fact";
     private const string TheoryAttribute = "Theory";

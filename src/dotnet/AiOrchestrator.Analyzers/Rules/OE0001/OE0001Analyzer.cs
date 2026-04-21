@@ -14,7 +14,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0001;
 /// OE0001 — Reports public types and members that lack an XML documentation comment.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0001PublicTypeMissingXmlDocAnalyzer : DiagnosticAnalyzer
+public sealed class OE0001Analyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>

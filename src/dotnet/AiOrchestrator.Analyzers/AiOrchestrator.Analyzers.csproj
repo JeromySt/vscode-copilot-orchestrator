@@ -9,11 +9,25 @@
     <IsAnalyzer>true</IsAnalyzer>
     <!-- The DLL lives in the NuGet analyzer slot, not in lib/. -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <BuildOutputTargetFolder>analyzers\dotnet\cs</BuildOutputTargetFolder>
     <DevelopmentDependency>true</DevelopmentDependency>
     <Description>Roslyn analyzers and code fixes enforcing AiOrchestrator coding standards (OE0001–OE0046).</Description>
     <PackageTags>roslyn;analyzer;aiorchestrator</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Explicitly place the DLL in the analyzers/dotnet/cs slot in the NuGet package. -->
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <NoWarn>$(NoWarn);RS1038;RS2008;NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)AnalyzerReleases.Shipped.txt" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)AnalyzerReleases.Unshipped.txt" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Roslyn APIs for writing analyzers and code fixes. -->

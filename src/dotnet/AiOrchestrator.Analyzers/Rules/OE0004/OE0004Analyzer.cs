@@ -15,7 +15,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0004;
 /// the <c>AiOrchestrator.FileSystem</c> project (identified by file path or namespace).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0004FileSystemAccessOutsideFileSystemProjectAnalyzer : DiagnosticAnalyzer
+public sealed class OE0004Analyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
@@ -80,7 +80,7 @@ public sealed class OE0004FileSystemAccessOutsideFileSystemProjectAnalyzer : Dia
     private static bool IsInFileSystemProject(SyntaxNode node)
     {
         var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.Contains("AiOrchestrator.FileSystem", System.StringComparison.OrdinalIgnoreCase) ||
-               filePath.Contains("FileSystem", System.StringComparison.OrdinalIgnoreCase);
+        return filePath.IndexOf("AiOrchestrator.FileSystem", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+               filePath.IndexOf("FileSystem", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

@@ -15,7 +15,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0006;
 /// the <c>AiOrchestrator.Git</c> project.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0006GitOutsideGitProjectAnalyzer : DiagnosticAnalyzer
+public sealed class OE0006Analyzer : DiagnosticAnalyzer
 {
     private const string LibGit2SharpPrefix = "LibGit2Sharp";
 
@@ -52,9 +52,8 @@ public sealed class OE0006GitOutsideGitProjectAnalyzer : DiagnosticAnalyzer
     {
         var identifier = (IdentifierNameSyntax)ctx.Node;
 
-        // Skip identifiers that are children of using directives (covered above).
         if (identifier.Parent is UsingDirectiveSyntax ||
-            identifier.Parent is QualifiedNameSyntax qn && qn.Parent is UsingDirectiveSyntax)
+            (identifier.Parent is QualifiedNameSyntax qn && qn.Parent is UsingDirectiveSyntax))
         {
             return;
         }
@@ -81,6 +80,6 @@ public sealed class OE0006GitOutsideGitProjectAnalyzer : DiagnosticAnalyzer
     private static bool IsInGitProject(SyntaxNode node)
     {
         var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.Contains("AiOrchestrator.Git", System.StringComparison.OrdinalIgnoreCase);
+        return filePath.IndexOf("AiOrchestrator.Git", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

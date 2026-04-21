@@ -15,7 +15,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0040;
 /// that do not pass a <c>JsonSerializerContext</c> (source-generated) argument.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0040ReflectionJsonSerializationAnalyzer : DiagnosticAnalyzer
+public sealed class OE0040Analyzer : DiagnosticAnalyzer
 {
     private const string JsonSerializerType = "System.Text.Json.JsonSerializer";
 

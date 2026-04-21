@@ -15,7 +15,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0005;
 /// the <c>AiOrchestrator.Process</c> project.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0005ProcessOutsideProcessProjectAnalyzer : DiagnosticAnalyzer
+public sealed class OE0005Analyzer : DiagnosticAnalyzer
 {
     private const string ProcessTypeName = "System.Diagnostics.Process";
 
@@ -87,6 +87,6 @@ public sealed class OE0005ProcessOutsideProcessProjectAnalyzer : DiagnosticAnaly
     private static bool IsInProcessProject(SyntaxNode node)
     {
         var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.Contains("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase);
+        return filePath.IndexOf("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

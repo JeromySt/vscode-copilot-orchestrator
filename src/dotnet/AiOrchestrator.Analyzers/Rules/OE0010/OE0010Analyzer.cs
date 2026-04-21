@@ -16,7 +16,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0010;
 /// and <c>Thread.Sleep</c>.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0010BannedTimeApiAnalyzer : DiagnosticAnalyzer
+public sealed class OE0010Analyzer : DiagnosticAnalyzer
 {
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>

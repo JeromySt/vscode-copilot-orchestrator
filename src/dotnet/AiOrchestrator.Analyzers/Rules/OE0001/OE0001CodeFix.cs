@@ -17,9 +17,9 @@ namespace AiOrchestrator.Analyzers.Rules.OE0001;
 /// <summary>
 /// Code fix for OE0001 — inserts a minimal XML documentation comment template.
 /// </summary>
-[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0001AddXmlDocCodeFix))]
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0001CodeFix))]
 [System.Composition.Shared]
-public sealed class OE0001AddXmlDocCodeFix : CodeFixProvider
+public sealed class OE0001CodeFix : CodeFixProvider
 {
     /// <inheritdoc/>
     public override ImmutableArray<string> FixableDiagnosticIds =>

@@ -17,7 +17,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0007;
 /// interface member lacks a token, and <c>async void</c> methods are exempt.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0007AsyncMissingCancellationTokenAnalyzer : DiagnosticAnalyzer
+public sealed class OE0007Analyzer : DiagnosticAnalyzer
 {
     private const string CancellationTokenTypeName = "System.Threading.CancellationToken";
 

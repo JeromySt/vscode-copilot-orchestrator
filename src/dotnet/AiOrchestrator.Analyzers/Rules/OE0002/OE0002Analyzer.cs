@@ -16,7 +16,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0002;
 /// <c>AiOrchestrator.Composition</c>.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0002NewConcreteOutsideCompositionAnalyzer : DiagnosticAnalyzer
+public sealed class OE0002Analyzer : DiagnosticAnalyzer
 {
     private const string CompositionNamespace = "AiOrchestrator.Composition";
     private const string AiOrchestratorPrefix = "AiOrchestrator.";

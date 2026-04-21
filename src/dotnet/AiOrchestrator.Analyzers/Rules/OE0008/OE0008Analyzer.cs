@@ -17,7 +17,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0008;
 /// (<c>(object sender, EventArgs e)</c>).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0008AsyncVoidAnalyzer : DiagnosticAnalyzer
+public sealed class OE0008Analyzer : DiagnosticAnalyzer
 {
     private const string AsyncEventHandlerAttribute = "AsyncEventHandler";
 
@@ -51,7 +51,7 @@ public sealed class OE0008AsyncVoidAnalyzer : DiagnosticAnalyzer
         // Exempt methods with [AsyncEventHandler] attribute.
         if (method.AttributeLists
             .SelectMany(al => al.Attributes)
-            .Any(a => a.Name.ToString().Contains(AsyncEventHandlerAttribute, System.StringComparison.Ordinal)))
+            .Any(a => a.Name.ToString().IndexOf(AsyncEventHandlerAttribute, System.StringComparison.Ordinal) >= 0))
         {
             return;
         }

@@ -17,9 +17,9 @@ namespace AiOrchestrator.Analyzers.Rules.OE0009;
 /// <summary>
 /// Code fix for OE0009 — replaces <c>[DllImport("lib")]</c> with <c>[LibraryImport("lib")]</c>.
 /// </summary>
-[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0009DllImportToLibraryImportCodeFix))]
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(OE0009CodeFix))]
 [System.Composition.Shared]
-public sealed class OE0009DllImportToLibraryImportCodeFix : CodeFixProvider
+public sealed class OE0009CodeFix : CodeFixProvider
 {
     /// <inheritdoc/>
     public override ImmutableArray<string> FixableDiagnosticIds =>

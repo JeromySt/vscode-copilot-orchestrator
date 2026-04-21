@@ -17,7 +17,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0011;
 /// <c>AppendAllText</c>.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class OE0011SynchronousFileIoAnalyzer : DiagnosticAnalyzer
+public sealed class OE0011Analyzer : DiagnosticAnalyzer
 {
     private static readonly ImmutableHashSet<string> BannedMethods = ImmutableHashSet.Create(
         System.StringComparer.Ordinal,
