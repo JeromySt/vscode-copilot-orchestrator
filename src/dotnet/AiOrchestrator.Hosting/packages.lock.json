@@ -215,23 +215,28 @@
       "aiorchestrator.composition": {
         "type": "Project",
         "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Agent": "[1.0.0, )",
+          "AiOrchestrator.Audit": "[1.0.0, )",
           "AiOrchestrator.Concurrency.Broker": "[1.0.0, )",
-          "AiOrchestrator.Credentials": "[1.0.0, )",
+          "AiOrchestrator.EventLog": "[1.0.0, )",
           "AiOrchestrator.Eventing": "[1.0.0, )",
-          "AiOrchestrator.HookGate": "[1.0.0, )",
+          "AiOrchestrator.FileSystem": "[1.0.0, )",
           "AiOrchestrator.Logging": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
           "AiOrchestrator.Output": "[1.0.0, )",
-          "AiOrchestrator.Plan.PhaseExec": "[1.0.0, )",
+          "AiOrchestrator.PathValidator": "[1.0.0, )",
+          "AiOrchestrator.Plugins": "[1.0.0, )",
           "AiOrchestrator.Process": "[1.0.0, )",
+          "AiOrchestrator.Redaction": "[1.0.0, )",
+          "AiOrchestrator.Shell": "[1.0.0, )",
           "AiOrchestrator.Time": "[1.0.0, )",
           "Microsoft.Extensions.Configuration.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.Hosting.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Http": "[9.0.4, )",
           "Microsoft.Extensions.Logging": "[9.0.4, )",
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.Logging.Console": "[9.0.4, )",
-          "Microsoft.Extensions.Options": "[9.0.4, )",
           "Microsoft.Extensions.Options.ConfigurationExtensions": "[9.0.4, )"
         }
       },
@@ -253,17 +258,6 @@
           "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
-      "aiorchestrator.credentials": {
-        "type": "Project",
-        "dependencies": {
-          "AiOrchestrator.Abstractions": "[1.0.0, )",
-          "AiOrchestrator.Audit": "[1.0.0, )",
-          "AiOrchestrator.Models": "[1.0.0, )",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Options": "[9.0.4, )"
-        }
-      },
       "aiorchestrator.eventing": {
         "type": "Project",
         "dependencies": {
@@ -273,16 +267,22 @@
           "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
-      "aiorchestrator.hookgate": {
+      "aiorchestrator.eventlog": {
         "type": "Project",
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )",
-          "AiOrchestrator.Audit": "[1.0.0, )",
           "AiOrchestrator.Models": "[1.0.0, )",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Hosting.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Options": "[9.0.4, )"
+          "Microsoft.Extensions.Options": "[9.0.4, )",
+          "System.IO.Hashing": "[9.0.4, )"
+        }
+      },
+      "aiorchestrator.filesystem": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.PathValidator": "[1.0.0, )"
         }
       },
       "aiorchestrator.lineview": {
@@ -315,30 +315,19 @@
           "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
-      "aiorchestrator.plan.models": {
-        "type": "Project"
-      },
-      "aiorchestrator.plan.phaseexec": {
+      "aiorchestrator.pathvalidator": {
         "type": "Project",
         "dependencies": {
-          "AiOrchestrator.Abstractions": "[1.0.0, )",
-          "AiOrchestrator.Agent": "[1.0.0, )",
-          "AiOrchestrator.HookGate": "[1.0.0, )",
-          "AiOrchestrator.Models": "[1.0.0, )",
-          "AiOrchestrator.Plan.Models": "[1.0.0, )",
-          "AiOrchestrator.Plan.Store": "[1.0.0, )",
-          "AiOrchestrator.Shell": "[1.0.0, )",
-          "AiOrchestrator.WorktreeLease": "[1.0.0, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Options": "[9.0.4, )"
+          "AiOrchestrator.Abstractions": "[1.0.0, )"
         }
       },
-      "aiorchestrator.plan.store": {
+      "aiorchestrator.plugins": {
         "type": "Project",
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Audit": "[1.0.0, )",
           "AiOrchestrator.Models": "[1.0.0, )",
-          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "BouncyCastle.Cryptography": "[2.4.0, )",
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.Options": "[9.0.4, )"
         }
@@ -349,6 +338,12 @@
           "AiOrchestrator.Abstractions": "[1.0.0, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )"
+        }
+      },
+      "aiorchestrator.redaction": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )"
         }
       },
       "aiorchestrator.shell": {
@@ -366,16 +361,6 @@
         "type": "Project",
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )"
-        }
-      },
-      "aiorchestrator.worktreelease": {
-        "type": "Project",
-        "dependencies": {
-          "AiOrchestrator.Abstractions": "[1.0.0, )",
-          "AiOrchestrator.Models": "[1.0.0, )",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[9.0.4, )",
-          "Microsoft.Extensions.Options": "[9.0.4, )"
         }
       },
       "BouncyCastle.Cryptography": {
@@ -463,20 +448,6 @@
           "Microsoft.Extensions.Logging.Abstractions": "9.0.4"
         }
       },
-      "Microsoft.Extensions.Http": {
-        "type": "CentralTransitive",
-        "requested": "[9.0.4, )",
-        "resolved": "9.0.4",
-        "contentHash": "ezelU6HJgmq4862YoWuEbHGSV+JnfnonTSbNSJVh6n6wDehyiJn4hBtcK7rGbf2KO3QeSvK5y8E7uzn1oaRH5w==",
-        "dependencies": {
-          "Microsoft.Extensions.Configuration.Abstractions": "9.0.4",
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.4",
-          "Microsoft.Extensions.Diagnostics": "9.0.4",
-          "Microsoft.Extensions.Logging": "9.0.4",
-          "Microsoft.Extensions.Logging.Abstractions": "9.0.4",
-          "Microsoft.Extensions.Options": "9.0.4"
-        }
-      },
       "Microsoft.Extensions.Logging": {
         "type": "CentralTransitive",
         "requested": "[9.0.4, )",
@@ -544,6 +515,12 @@
         "requested": "[1.11.2, )",
         "resolved": "1.11.2",
         "contentHash": "jgSd/FvtxPPc6nLaZnFj+bulHM2iQjy+NBCY5MbQjH6vkW/SfcXD9NMP3pKCmdF+SbZpgL+EoLQc+PmcnYYLlA=="
+      },
+      "System.IO.Hashing": {
+        "type": "CentralTransitive",
+        "requested": "[9.0.4, )",
+        "resolved": "9.0.4",
+        "contentHash": "WogPvgAFqQORFD8Iyha6RZ+/1QB3dsWRWxbwi8/HHVgiGQ8z0oMWpwe8Kk3Ti+Roe+P6a3sBg+WwBfEsyziZKg=="
       }
     }
   }
