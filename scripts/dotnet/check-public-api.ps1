@@ -71,7 +71,7 @@ $hasDrift = ($missing.Count -gt 0) -or ($extra.Count -gt 0)
 
 if ($hasDrift) {
     Write-Host ""
-    Write-Host "Public API drift detected for $Project:" -ForegroundColor Red
+    Write-Host "Public API drift detected for ${Project}:" -ForegroundColor Red
     foreach ($m in $missing) { Write-Host "  MISSING from unshipped: $m" -ForegroundColor Red }
     foreach ($e in $extra)   { Write-Host "  EXTRA in unshipped (not in spec): $e" -ForegroundColor Yellow }
     exit 1

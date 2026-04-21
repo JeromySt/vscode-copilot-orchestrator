@@ -22,16 +22,3 @@ public sealed record AuditEvent(
     AuditOutcome Outcome,
     string? Details,
     string? ChainHash);
-
-/// <summary>Describes the outcome of an audited action.</summary>
-public enum AuditOutcome
-{
-    /// <summary>The action completed successfully.</summary>
-    Success,
-
-    /// <summary>The action failed due to an error.</summary>
-    Failure,
-
-    /// <summary>The action was denied by an authorization policy.</summary>
-    Denied,
-}
