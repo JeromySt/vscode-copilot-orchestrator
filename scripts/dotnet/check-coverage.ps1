@@ -102,7 +102,7 @@ foreach ($package in $cobertura.coverage.packages.package) {
             if ([int]$line.hits -gt 0) { $coveredLines++ }
 
             $condition = $line.GetAttribute('condition-coverage')
-            if (-not [string]::IsNullOrEmpty($condition)) {
+            if ($condition) {
                 if ($condition -match '(\d+)/(\d+)') {
                     $coveredBranches += [int]$Matches[1]
                     $totalBranches   += [int]$Matches[2]
