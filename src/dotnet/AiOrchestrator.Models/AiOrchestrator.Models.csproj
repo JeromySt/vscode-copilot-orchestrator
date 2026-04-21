@@ -5,4 +5,11 @@
     <RootNamespace>AiOrchestrator.Models</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" Version="3.3.4" />
+  </ItemGroup>
+
+
 </Project>
