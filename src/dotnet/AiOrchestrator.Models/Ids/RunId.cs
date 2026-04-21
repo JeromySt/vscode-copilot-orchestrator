@@ -9,7 +9,10 @@ public readonly record struct RunId
 {
     /// <summary>Initializes a new instance of the <see cref="RunId"/> struct.</summary>
     /// <param name="value">The underlying GUID value.</param>
-    public RunId(Guid value) => Value = value;
+    public RunId(Guid value)
+    {
+        this.Value = value;
+    }
 
     /// <summary>Gets the underlying GUID value.</summary>
     public Guid Value { get; }
@@ -50,5 +53,5 @@ public readonly record struct RunId
     }
 
     /// <inheritdoc/>
-    public override string ToString() => $"run_{Value:N}";
+    public override string ToString() => $"run_{this.Value:N}";
 }

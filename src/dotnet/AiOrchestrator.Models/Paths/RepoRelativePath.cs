@@ -23,12 +23,12 @@ public readonly record struct RepoRelativePath
             throw new ArgumentException("RepoRelativePath must not contain parent-traversal '..' segments.", nameof(value));
         }
 
-        Value = value;
+        this.Value = value;
     }
 
     /// <summary>Gets the underlying path string.</summary>
     public string Value { get; }
 
     /// <inheritdoc/>
-    public override string ToString() => Value;
+    public override string ToString() => this.Value;
 }
