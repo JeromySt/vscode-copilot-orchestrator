@@ -19,6 +19,7 @@
     <ProjectReference Include="..\AiOrchestrator.Time\AiOrchestrator.Time.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Concurrency.User\AiOrchestrator.Concurrency.User.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Concurrency.Broker\AiOrchestrator.Concurrency.Broker.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Plan.Scheduler\AiOrchestrator.Plan.Scheduler.csproj" />
   </ItemGroup>
 
   <ItemGroup>
