@@ -27,7 +27,6 @@ public readonly record struct RelativePath
             throw new ArgumentException($"RelativePath must not be rooted. Got: '{value}'", nameof(value));
         }
 
-
         this.Value = value;
     }
 
