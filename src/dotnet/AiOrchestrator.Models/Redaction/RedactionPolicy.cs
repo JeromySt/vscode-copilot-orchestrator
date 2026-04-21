@@ -15,16 +15,3 @@ public sealed record RedactionPolicy
     /// <summary>Gets the pseudonymization mode for sensitive identifiers.</summary>
     public required PseudonymizationMode PseudonymizationMode { get; init; }
 }
-
-/// <summary>Controls how sensitive identifiers are pseudonymized during redaction.</summary>
-public enum PseudonymizationMode
-{
-    /// <summary>No pseudonymization is applied.</summary>
-    Off,
-
-    /// <summary>Identifiers are replaced with anonymous tokens that cannot be reversed.</summary>
-    Anonymous,
-
-    /// <summary>Identifiers are replaced with tokens that can be reversed by an authorized party.</summary>
-    Reversible,
-}

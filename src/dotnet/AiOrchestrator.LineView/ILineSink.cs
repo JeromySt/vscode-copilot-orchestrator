@@ -1,5 +1,5 @@
-// <copyright file="ILineSink.cs" company="AiOrchestrator">
-// Copyright (c) AiOrchestrator. All rights reserved.
+// <copyright file="ILineSink.cs" company="AiOrchestrator contributors">
+// Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
 using System;

@@ -1,5 +1,5 @@
-// <copyright file="LineProjectionResult.cs" company="AiOrchestrator">
-// Copyright (c) AiOrchestrator. All rights reserved.
+// <copyright file="LineProjectionResult.cs" company="AiOrchestrator contributors">
+// Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
 namespace AiOrchestrator.LineView;

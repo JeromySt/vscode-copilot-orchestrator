@@ -1,5 +1,5 @@
-// <copyright file="CompositionRoot.LineView.cs" company="AiOrchestrator">
-// Copyright (c) AiOrchestrator. All rights reserved.
+// <copyright file="CompositionRoot.LineView.cs" company="AiOrchestrator contributors">
+// Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
 using Microsoft.Extensions.DependencyInjection;
@@ -14,7 +14,7 @@ public static class CompositionRoot
     /// <returns>The same service collection for chaining.</returns>
     public static IServiceCollection AddLineView(IServiceCollection services)
     {
-        services.AddTransient<LineProjector>();
+        _ = services.AddTransient<LineProjector>();
         return services;
     }
 }
