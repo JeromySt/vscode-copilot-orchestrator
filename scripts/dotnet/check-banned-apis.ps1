@@ -80,7 +80,7 @@ foreach ($entry in $bannedLines) {
         continue
     }
 
-    $matches = Select-String -Path $csFiles.FullName -Pattern ([regex]::Escape($searchTerm)) -ErrorAction SilentlyContinue
+    $matches = Select-String -Path $csFiles.FullName -Pattern ('\b' + [regex]::Escape($searchTerm) + '\b') -ErrorAction SilentlyContinue
     if ($matches) {
         foreach ($match in $matches) {
             $violations += [PSCustomObject]@{
