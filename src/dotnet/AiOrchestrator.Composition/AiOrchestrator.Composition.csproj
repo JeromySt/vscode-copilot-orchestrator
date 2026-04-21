@@ -34,4 +34,9 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Redaction\AiOrchestrator.Redaction.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Process\AiOrchestrator.Process.csproj" />
+  </ItemGroup>
+
 </Project>
