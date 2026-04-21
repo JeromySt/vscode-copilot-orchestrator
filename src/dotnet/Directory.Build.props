@@ -9,6 +9,7 @@
     <AnalysisMode>All</AnalysisMode>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NoWarn></NoWarn>
   </PropertyGroup>
 

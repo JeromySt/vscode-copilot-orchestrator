@@ -9,6 +9,7 @@
     <AnalysisMode>All</AnalysisMode>
     <IsTestProject>true</IsTestProject>
     <IsPackable>false</IsPackable>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NoWarn></NoWarn>
   </PropertyGroup>
 

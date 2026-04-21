@@ -56,3 +56,8 @@ yarn-error.log*
 # Auto-generated orchestrator instruction files (per-job UUID patterns)
 # Auto-generated healing instructions
 .github/instructions/orchestrator-*.instructions.md
+
+# .NET build outputs
+**/bin/
+**/obj/
+*.user
