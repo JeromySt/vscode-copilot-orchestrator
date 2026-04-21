@@ -1,0 +1,58 @@
+#nullable enable
+AiOrchestrator.Redaction.IPathPseudonymizer
+AiOrchestrator.Redaction.IPathPseudonymizer.Pseudonymize(string! path, byte[]! bundleSalt) -> string!
+AiOrchestrator.Redaction.ISecretDetector
+AiOrchestrator.Redaction.ISecretDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.ISecretDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.RedactionMatch
+AiOrchestrator.Redaction.RedactionMatch.RedactionMatch(int Start, int Length, string! RuleId) -> void
+AiOrchestrator.Redaction.RedactionMatch.Start.get -> int
+AiOrchestrator.Redaction.RedactionMatch.Length.get -> int
+AiOrchestrator.Redaction.RedactionMatch.RuleId.get -> string!
+AiOrchestrator.Redaction.RedactorPipeline
+AiOrchestrator.Redaction.RedactorPipeline.RedactorPipeline(System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.ISecretDetector>! detectors) -> void
+AiOrchestrator.Redaction.RedactorPipeline.Redact(string! input) -> string!
+AiOrchestrator.Redaction.RedactorPipeline.RedactAsync(System.Buffers.ReadOnlySequence<byte> input, System.Buffers.IBufferWriter<byte>! output, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<int>
+AiOrchestrator.Redaction.Detectors.AwsAccessKeyDetector
+AiOrchestrator.Redaction.Detectors.AwsAccessKeyDetector.AwsAccessKeyDetector() -> void
+AiOrchestrator.Redaction.Detectors.AwsAccessKeyDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.AwsAccessKeyDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.ApiKeyDetector
+AiOrchestrator.Redaction.Detectors.ApiKeyDetector.ApiKeyDetector() -> void
+AiOrchestrator.Redaction.Detectors.ApiKeyDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.ApiKeyDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.ConnectionStringDetector
+AiOrchestrator.Redaction.Detectors.ConnectionStringDetector.ConnectionStringDetector() -> void
+AiOrchestrator.Redaction.Detectors.ConnectionStringDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.ConnectionStringDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.GenericSecretDetector
+AiOrchestrator.Redaction.Detectors.GenericSecretDetector.GenericSecretDetector() -> void
+AiOrchestrator.Redaction.Detectors.GenericSecretDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.GenericSecretDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.GitHubPatDetector
+AiOrchestrator.Redaction.Detectors.GitHubPatDetector.GitHubPatDetector() -> void
+AiOrchestrator.Redaction.Detectors.GitHubPatDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.GitHubPatDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.JwtDetector
+AiOrchestrator.Redaction.Detectors.JwtDetector.JwtDetector() -> void
+AiOrchestrator.Redaction.Detectors.JwtDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.JwtDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.PathSidDetector
+AiOrchestrator.Redaction.Detectors.PathSidDetector.PathSidDetector() -> void
+AiOrchestrator.Redaction.Detectors.PathSidDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.PathSidDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Detectors.SshPrivateKeyDetector
+AiOrchestrator.Redaction.Detectors.SshPrivateKeyDetector.SshPrivateKeyDetector() -> void
+AiOrchestrator.Redaction.Detectors.SshPrivateKeyDetector.Detect(string! input) -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Redaction.RedactionMatch>!
+AiOrchestrator.Redaction.Detectors.SshPrivateKeyDetector.RuleId.get -> string!
+AiOrchestrator.Redaction.Pseudonymization.MappingTable
+AiOrchestrator.Redaction.Pseudonymization.MappingTable.MappingTable() -> void
+AiOrchestrator.Redaction.Pseudonymization.MappingTable.GetOrAdd(string! realValue, System.Func<string!, string!>! pseudonymFactory) -> string!
+AiOrchestrator.Redaction.Pseudonymization.MappingTable.Snapshot() -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+AiOrchestrator.Redaction.Pseudonymization.Pseudonymizer
+AiOrchestrator.Redaction.Pseudonymization.Pseudonymizer.Pseudonymizer(AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode mode, AiOrchestrator.Redaction.Pseudonymization.MappingTable? table = null) -> void
+AiOrchestrator.Redaction.Pseudonymization.Pseudonymizer.Pseudonymize(string! path, byte[]! bundleSalt) -> string!
+AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode
+AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode.Off = 0 -> AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode
+AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode.Anonymous = 1 -> AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode
+AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode.Reversible = 2 -> AiOrchestrator.Redaction.Pseudonymization.PseudonymizationMode
