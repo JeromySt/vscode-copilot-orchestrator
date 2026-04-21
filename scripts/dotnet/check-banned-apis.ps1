@@ -61,8 +61,11 @@ foreach ($entry in $bannedLines) {
     $apiSignature = $parts[0] -replace '^M:', ''
     $reason       = if ($parts.Count -gt 1) { $parts[1] } else { '' }
 
-    # Derive a simple class.method search term from the full signature
-    $searchTerm = $apiSignature -replace '\(.*\)', '' -replace '^.*\.(?=[A-Z])', ''
+    # Derive a "Class.Method" search term to avoid false-positives on partial name matches
+    # (e.g., Process.Start should NOT match StartAsync).
+    $apiBase = $apiSignature -replace '\(.*\)', ''
+    $apParts = $apiBase.Split('.')
+    $searchTerm = if ($apParts.Count -ge 2) { "$($apParts[-2]).$($apParts[-1])" } else { $apParts[-1] }
 
     # Check if this project is allowed to use the API
     $allowedProject = $null
@@ -93,7 +96,7 @@ foreach ($entry in $bannedLines) {
 
 if ($violations.Count -gt 0) {
     Write-Host ""
-    Write-Host "Banned API violations found in $Project:" -ForegroundColor Red
+    Write-Host "Banned API violations found in ${Project}:" -ForegroundColor Red
     foreach ($v in $violations) {
         Write-Host "  $($v.File):$($v.Line) — $($v.BannedApi)" -ForegroundColor Red
         Write-Host "    $($v.Content)" -ForegroundColor DarkRed

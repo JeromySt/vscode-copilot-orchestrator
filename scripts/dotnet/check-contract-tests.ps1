@@ -91,7 +91,7 @@ foreach ($testName in $testNames) {
 
 if ($missing.Count -gt 0) {
     Write-Host ""
-    Write-Host "Contract test check FAILED for $Project:" -ForegroundColor Red
+    Write-Host "Contract test check FAILED for ${Project}:" -ForegroundColor Red
     foreach ($m in $missing) {
         Write-Host "  $m" -ForegroundColor Red
     }

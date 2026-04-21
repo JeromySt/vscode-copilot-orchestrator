@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-{ "sdk": { "version": "10.0.100", "rollForward": "latestFeature" } }
-=======
 {
-  "sdk": { "version": "10.0.100", "rollForward": "latestFeature" }
+  "sdk": { "version": "10.0.202", "rollForward": "latestPatch" }
 }
->>>>>>> e0af89bb3cb7f407f8692f58f0a50ea31a122da8
