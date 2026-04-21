@@ -50,6 +50,9 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
         this.logger = logger;
     }
 
+    /// <summary>Gets the tool registry (internal, consumed by the VS Code transport in job 040).</summary>
+    internal McpToolRegistry Registry => this.registry;
+
     /// <inheritdoc/>
     public Task StartAsync(CancellationToken ct)
     {

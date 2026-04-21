@@ -19,6 +19,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="AiOrchestrator.Mcp.Tests" />
     <InternalsVisibleTo Include="AiOrchestrator.Composition" />
+    <InternalsVisibleTo Include="AiOrchestrator.VsCode.Transport" />
   </ItemGroup>
 
   <ItemGroup>
