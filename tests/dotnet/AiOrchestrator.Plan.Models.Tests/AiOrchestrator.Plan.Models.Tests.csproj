@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Plan.Models.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Plan.Models.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
+  </ItemGroup>
+
+</Project>
