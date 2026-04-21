@@ -29,6 +29,10 @@
     <ProjectReference Include="..\AiOrchestrator.Redaction\AiOrchestrator.Redaction.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Shell\AiOrchestrator.Shell.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Agent\AiOrchestrator.Agent.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.FileSystem\AiOrchestrator.FileSystem.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Git\AiOrchestrator.Git.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.WorktreeLease\AiOrchestrator.WorktreeLease.csproj" />
   </ItemGroup>
 
 </Project>

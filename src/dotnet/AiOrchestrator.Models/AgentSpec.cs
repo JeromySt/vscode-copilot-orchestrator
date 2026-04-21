@@ -2,8 +2,6 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
-using System;
-
 namespace AiOrchestrator.Models;
 
 /// <summary>Specifies work to be performed by an AI coding agent.</summary>
