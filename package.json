@@ -538,7 +538,7 @@
     "diff": "^8.0.4",
     "markdown-it": "^14.1.1",
     "micromatch": "^4.0.8",
-    "uuid": "^13.0.0"
+    "uuid": "^14.0.0"
   },
   "overrides": {
     "mocha": {
