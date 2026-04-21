@@ -4,31 +4,39 @@
 
 using System;
 using System.IO;
+using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.Models.Paths;
 
-/// <summary>A validated absolute filesystem path.</summary>
+/// <summary>Represents a validated absolute filesystem path.</summary>
 public readonly record struct AbsolutePath
 {
     /// <summary>Initializes a new instance of the <see cref="AbsolutePath"/> struct.</summary>
-    /// <param name="value">The absolute path string.</param>
-    /// <exception cref="ArgumentException">The value is not a rooted path.</exception>
+    /// <param name="value">The rooted filesystem path to wrap.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="value"/> is null, empty, or not a rooted path.
+    /// </exception>
     public AbsolutePath(string value)
     {
-        if (string.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value))
+        if (string.IsNullOrEmpty(value))
         {
-            throw new ArgumentException("AbsolutePath must be a rooted path.", nameof(value));
+            throw new ArgumentException("Path must not be null or empty.", nameof(value));
+        }
+
+        if (!Path.IsPathRooted(value))
+        {
+            throw new ArgumentException($"Path must be absolute (rooted). Got: '{value}'", nameof(value));
         }
 
         this.Value = value;
     }
 
-    /// <summary>Gets the underlying path string.</summary>
+    /// <summary>Gets the raw path value.</summary>
     public string Value { get; }
 
-    /// <summary>Combines this absolute path with a relative path segment.</summary>
-    /// <param name="rel">The relative path to append.</param>
-    /// <returns>A new <see cref="AbsolutePath"/> representing the combined path.</returns>
+    /// <summary>Combines this path with a relative path.</summary>
+    /// <param name="rel">The relative segment to append.</param>
+    /// <returns>A new <see cref="AbsolutePath"/> formed by joining this path with <paramref name="rel"/>.</returns>
     public AbsolutePath Combine(RelativePath rel) => new(Path.Combine(this.Value, rel.Value));
 
     /// <inheritdoc/>
