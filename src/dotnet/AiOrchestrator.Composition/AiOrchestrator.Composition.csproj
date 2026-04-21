@@ -17,4 +17,9 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Time\AiOrchestrator.Time.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Eventing\AiOrchestrator.Eventing.csproj" />
+  </ItemGroup>
+
 </Project>
