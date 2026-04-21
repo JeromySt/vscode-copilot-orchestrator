@@ -530,7 +530,7 @@
     "npm-run-all2": "^8.0.4",
     "sharp": "^0.34.5",
     "sinon": "^21.0.2",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@types/markdown-it": "^14.1.2",
