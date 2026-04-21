@@ -1,0 +1,6 @@
+copilot-session: copilot-msft-77
+input_tokens: 60
+output_tokens: 30
+turns: 1
+context_pct: 62
+copilot: task complete
