@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Configuration\AiOrchestrator.Configuration.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
     <ProjectReference Include="..\AiOrchestrator.Audit\AiOrchestrator.Audit.csproj" />
     <ProjectReference Include="..\AiOrchestrator.EventLog\AiOrchestrator.EventLog.csproj" />

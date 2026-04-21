@@ -15,7 +15,7 @@ namespace AiOrchestrator.Configuration.Sources;
 /// </summary>
 public sealed class CliFlagSource : IConfigurationSource
 {
-    private readonly IEnumerable<string>? _args;
+    private readonly IEnumerable<string>? args;
 
     /// <summary>Initializes a new instance of the <see cref="CliFlagSource"/> class.</summary>
     /// <param name="args">
@@ -23,12 +23,12 @@ public sealed class CliFlagSource : IConfigurationSource
     /// </param>
     public CliFlagSource(IEnumerable<string>? args)
     {
-        this._args = args;
+        this.args = args;
     }
 
     /// <inheritdoc />
     public IConfigurationProvider Build(IConfigurationBuilder builder)
     {
-        return new CommandLineConfigurationProvider(this._args ?? []);
+        return new CommandLineConfigurationProvider(this.args ?? []);
     }
 }

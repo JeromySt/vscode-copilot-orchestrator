@@ -16,7 +16,7 @@ namespace AiOrchestrator.Configuration;
 /// </summary>
 public sealed class LayeredConfigurationProvider : AiOrchestrator.Abstractions.Configuration.IConfigurationProvider
 {
-    private readonly IConfiguration _root;
+    private readonly IConfiguration root;
 
     /// <summary>Initializes a new instance of the <see cref="LayeredConfigurationProvider"/> class.</summary>
     /// <param name="root">
@@ -25,7 +25,7 @@ public sealed class LayeredConfigurationProvider : AiOrchestrator.Abstractions.C
     /// </param>
     public LayeredConfigurationProvider(IConfiguration root)
     {
-        this._root = root ?? throw new ArgumentNullException(nameof(root));
+        this.root = root ?? throw new ArgumentNullException(nameof(root));
     }
 
     /// <inheritdoc />
@@ -33,7 +33,7 @@ public sealed class LayeredConfigurationProvider : AiOrchestrator.Abstractions.C
         where T : class, new()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(section);
-        return this._root.GetSection(section).Get<T>() ?? new T();
+        return this.root.GetSection(section).Get<T>() ?? new T();
     }
 
     /// <inheritdoc />
@@ -44,7 +44,7 @@ public sealed class LayeredConfigurationProvider : AiOrchestrator.Abstractions.C
         ArgumentNullException.ThrowIfNull(handler);
 
         return ChangeToken.OnChange(
-            () => this._root.GetReloadToken(),
+            () => this.root.GetReloadToken(),
             () => handler(this.Get<T>(section)));
     }
 }
