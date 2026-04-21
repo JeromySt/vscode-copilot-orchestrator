@@ -2,30 +2,35 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+using System.IO;
+using AiOrchestrator.Models.Paths;
+
 namespace AiOrchestrator.Models.Paths;
 
-/// <summary>A validated absolute filesystem path.</summary>
+/// <summary>Represents a validated absolute filesystem path.</summary>
 public readonly record struct AbsolutePath
 {
-    /// <summary>Initializes a new instance of the <see cref="AbsolutePath"/> struct.</summary>
-    /// <param name="value">The absolute path string.</param>
-    /// <exception cref="ArgumentException">The value is not a rooted path.</exception>
+    /// <summary>Gets the raw path value.</summary>
+    public string Value { get; }
+
+    /// <summary>Initializes a new absolute path, throwing if the path is not rooted.</summary>
     public AbsolutePath(string value)
     {
-        if (string.IsNullOrWhiteSpace(value) || !Path.IsPathRooted(value))
+        if (string.IsNullOrEmpty(value))
         {
-            throw new ArgumentException("AbsolutePath must be a rooted path.", nameof(value));
+            throw new ArgumentException("Path must not be null or empty.", nameof(value));
+        }
+
+        if (!Path.IsPathRooted(value))
+        {
+            throw new ArgumentException($"Path must be absolute (rooted). Got: '{value}'", nameof(value));
         }
 
         Value = value;
     }
 
-    /// <summary>Gets the underlying path string.</summary>
-    public string Value { get; }
-
-    /// <summary>Combines this absolute path with a relative path segment.</summary>
-    /// <param name="rel">The relative path to append.</param>
-    /// <returns>A new <see cref="AbsolutePath"/> representing the combined path.</returns>
+    /// <summary>Combines this path with a relative path.</summary>
     public AbsolutePath Combine(RelativePath rel) => new(Path.Combine(Value, rel.Value));
 
     /// <inheritdoc/>
