@@ -1,0 +1,14 @@
+#nullable enable
+namespace AiOrchestrator.Eventing;
+public sealed class EventBus : IEventBus, IAsyncDisposable
+public EventBus(IClock clock, IRedactor redactor, ILogger<EventBus> logger, IOptionsMonitor<EventBusOptions> opts);
+public ValueTask PublishAsync<TEvent>(TEvent @event, CancellationToken ct) where TEvent : notnull;
+public IAsyncDisposable Subscribe<TEvent>(EventFilter filter, Func<TEvent, CancellationToken, ValueTask> handler) where TEvent : notnull;
+public ValueTask DisposeAsync();
+public sealed record EventBusOptions { [Range(1, 1_000_000)] public int PerSubscriptionBufferSize { get; init; } = 1024; public BackpressureMode Backpressure { get; init; } = BackpressureMode.Wait; public bool EnableDedup { get; init; } = false; public TimeSpan DedupWindow { get; init; } = TimeSpan.FromSeconds(5); }
+public enum BackpressureMode { Wait, DropOldest, DropNewest, Throw }
+internal sealed class Subscription<TEvent> : IAsyncDisposable
+public Subscription(AuthContext principal, EventFilter filter, Func<TEvent, CancellationToken, ValueTask> handler, Channel<TEvent> channel);
+public AuthContext PrincipalAtSubscribe { get; }   // EVT-AUTH-1: pinned at subscribe time
+internal sealed class AuthContextFilter
+public bool Matches(EventFilter filter, EventEnvelope envelope, AuthContext currentPrincipal);
