@@ -1,0 +1,52 @@
+name: Main
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET build, test, pack, sign
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4.2.0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@4d6c8fcf3c8f7a60068d26b594648e99df24cee3 # v4.0.1
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: dotnet restore
+        run: dotnet restore src/dotnet/AiOrchestrator.sln
+
+      - name: dotnet build
+        run: dotnet build src/dotnet/AiOrchestrator.sln -warnaserror --no-restore
+
+      - name: dotnet test
+        run: dotnet test src/dotnet/AiOrchestrator.sln --no-build --collect:"XPlat Code Coverage"
+
+      - name: dotnet pack
+        run: dotnet pack src/dotnet/AiOrchestrator.sln -c Release --no-build -o ./nupkgs
+
+      - name: Sign packages with RFC 3161 timestamp
+        run: |
+          for nupkg in ./nupkgs/*.nupkg; do
+            dotnet nuget sign "$nupkg" \
+              --certificate-path "$BUILD_CERT_PATH" \
+              --certificate-password "$BUILD_CERT_PASSWORD" \
+              --timestamper http://timestamp.digicert.com
+          done
+        env:
+          BUILD_CERT_PATH: ${{ secrets.BUILD_CERT_PATH }}
+          BUILD_CERT_PASSWORD: ${{ secrets.BUILD_CERT_PASSWORD }}
+
+      - name: Upload signed packages (staging feed)
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: signed-nupkgs
+          path: ./nupkgs/*.nupkg
+          retention-days: 30
