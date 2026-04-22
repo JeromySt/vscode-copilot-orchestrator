@@ -55,7 +55,12 @@ if ($coberturaFiles.Count -eq 0) {
     Write-Host "Running dotnet test for $Project to collect coverage..." -ForegroundColor Cyan
     $testProj = Join-Path $repoRoot 'tests' 'dotnet' "$Project.Tests"
     if (-not (Test-Path $testProj)) {
-        $testProj = Join-Path $repoRoot 'src' 'dotnet' $Project
+        $altTestProj = Join-Path $repoRoot 'tests' 'dotnet' "AiOrchestrator.$Project.Tests"
+        if (Test-Path $altTestProj) {
+            $testProj = $altTestProj
+        } else {
+            $testProj = Join-Path $repoRoot 'src' 'dotnet' $Project
+        }
     }
 
     $logFile = Join-Path $tmpDir "aio-cov-run-$Project.log"

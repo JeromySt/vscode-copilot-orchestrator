@@ -1,0 +1,8 @@
+# Premium-tier security reviewers (job 043 J43-PC-5)
+/src/dotnet/AiOrchestrator.Audit/                     @JeromySt
+/src/dotnet/AiOrchestrator.Credentials/Ipc/           @JeromySt
+/src/dotnet/AiOrchestrator.HookGate/Redirection/      @JeromySt
+/src/dotnet/AiOrchestrator.SkewManifest/Verification/ @JeromySt
+/tools/key-ceremony/                                   @JeromySt
+/.github/workflows/                                    @JeromySt
+/.github/CODEOWNERS                                    @JeromySt

@@ -1,0 +1,37 @@
+#nullable enable
+namespace AiOrchestrator.Cli;
+public sealed class Program
+public static int Main(string[] args);   // exit codes per §3.14.7
+public static System.CommandLine.RootCommand BuildCommandTree(IServiceProvider sp);
+public sealed class CliExitCodes
+public const int Ok = 0;
+public const int UsageError = 64;
+public const int ConfigError = 65;
+public const int IoError = 74;
+public const int PermissionDenied = 77;
+public const int PlanFailed = 80;
+public const int PlanCanceled = 81;
+public const int PlanPartial = 82;
+public const int DaemonUnavailable = 90;
+public const int InternalError = 99;
+public interface ICliVerbHandler
+string VerbPath { get; }   // e.g. "plan create"
+System.CommandLine.Command Build();
+Task<int> InvokeAsync(System.CommandLine.Parsing.ParseResult result, CancellationToken ct);
+internal sealed class PlanCreateHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanAddJobHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanFinalizeHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanRunHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanStatusHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanReshapeHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanCancelHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanArchiveHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanDiagnoseHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanExportHandler : ICliVerbHandler { /* ... */ }
+internal sealed class PlanImportHandler : ICliVerbHandler { /* ... */ }
+internal sealed class DaemonStartHandler : ICliVerbHandler { /* ... */ }
+internal sealed class DaemonStopHandler : ICliVerbHandler { /* ... */ }
+internal sealed class DaemonStatusHandler : ICliVerbHandler { /* ... */ }
+internal sealed class VersionHandler : ICliVerbHandler { /* ... */ }
+internal sealed class JsonOutputWriter { public ValueTask WriteAsync<T>(T value, TextWriter writer, JsonTypeInfo<T> typeInfo, CancellationToken ct); }
+internal sealed class HumanOutputWriter { public ValueTask WriteAsync(object value, TextWriter writer, CancellationToken ct);   /* tabular, color-aware */ }

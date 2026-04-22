@@ -1,0 +1,8 @@
+{
+  "benchmarkId": "GitOp.MergeFastForward",
+  "p50Ns": 8500000,
+  "p99Ns": 18000000,
+  "allocatedBytes": 98000,
+  "capturedAt": "2026-04-21T00:00:00Z",
+  "runtime": ".NET 10 RyuJIT ServerGC"
+}

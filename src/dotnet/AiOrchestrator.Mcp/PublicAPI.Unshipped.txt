@@ -1,0 +1,50 @@
+#nullable enable
+AiOrchestrator.Mcp.IMcpTool
+AiOrchestrator.Mcp.IMcpTool.Description.get -> string!
+AiOrchestrator.Mcp.IMcpTool.InputSchema.get -> System.Text.Json.Nodes.JsonNode!
+AiOrchestrator.Mcp.IMcpTool.InvokeAsync(System.Text.Json.JsonElement parameters, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<System.Text.Json.Nodes.JsonNode!>
+AiOrchestrator.Mcp.IMcpTool.Name.get -> string!
+AiOrchestrator.Mcp.IMcpTransport
+AiOrchestrator.Mcp.IMcpTransport.ReceiveAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Mcp.JsonRpcEnvelope?>
+AiOrchestrator.Mcp.IMcpTransport.SendAsync(AiOrchestrator.Mcp.JsonRpcEnvelope! envelope, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Mcp.JsonRpcEnvelope
+AiOrchestrator.Mcp.JsonRpcEnvelope.Error.get -> AiOrchestrator.Mcp.JsonRpcError?
+AiOrchestrator.Mcp.JsonRpcEnvelope.Error.init -> void
+AiOrchestrator.Mcp.JsonRpcEnvelope.Id.get -> object?
+AiOrchestrator.Mcp.JsonRpcEnvelope.Id.init -> void
+AiOrchestrator.Mcp.JsonRpcEnvelope.JsonRpc.get -> string!
+AiOrchestrator.Mcp.JsonRpcEnvelope.JsonRpc.init -> void
+AiOrchestrator.Mcp.JsonRpcEnvelope.JsonRpcEnvelope() -> void
+AiOrchestrator.Mcp.JsonRpcEnvelope.Method.get -> string?
+AiOrchestrator.Mcp.JsonRpcEnvelope.Method.init -> void
+AiOrchestrator.Mcp.JsonRpcEnvelope.Params.get -> System.Text.Json.JsonElement?
+AiOrchestrator.Mcp.JsonRpcEnvelope.Params.init -> void
+AiOrchestrator.Mcp.JsonRpcEnvelope.Result.get -> System.Text.Json.JsonElement?
+AiOrchestrator.Mcp.JsonRpcEnvelope.Result.init -> void
+AiOrchestrator.Mcp.JsonRpcError
+AiOrchestrator.Mcp.JsonRpcError.Code.get -> int
+AiOrchestrator.Mcp.JsonRpcError.Code.init -> void
+AiOrchestrator.Mcp.JsonRpcError.Data.get -> System.Text.Json.JsonElement?
+AiOrchestrator.Mcp.JsonRpcError.Data.init -> void
+AiOrchestrator.Mcp.JsonRpcError.JsonRpcError() -> void
+AiOrchestrator.Mcp.JsonRpcError.Message.get -> string!
+AiOrchestrator.Mcp.JsonRpcError.Message.init -> void
+AiOrchestrator.Mcp.McpOptions
+AiOrchestrator.Mcp.McpOptions.McpOptions() -> void
+AiOrchestrator.Mcp.McpOptions.ToolInvokeTimeout.get -> System.TimeSpan
+AiOrchestrator.Mcp.McpOptions.ToolInvokeTimeout.init -> void
+AiOrchestrator.Mcp.McpOptions.Transport.get -> AiOrchestrator.Mcp.McpTransportKind
+AiOrchestrator.Mcp.McpOptions.Transport.init -> void
+AiOrchestrator.Mcp.McpServer
+AiOrchestrator.Mcp.McpServer.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Mcp.McpServer.McpServer(AiOrchestrator.Mcp.McpToolRegistry! registry, AiOrchestrator.Mcp.IMcpTransport! transport, Microsoft.Extensions.Options.IOptionsMonitor<AiOrchestrator.Mcp.McpOptions!>! opts, Microsoft.Extensions.Logging.ILogger<AiOrchestrator.Mcp.McpServer!>! logger) -> void
+AiOrchestrator.Mcp.McpServer.StartAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+AiOrchestrator.Mcp.McpServer.StopAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task!
+AiOrchestrator.Mcp.McpToolRegistry
+AiOrchestrator.Mcp.McpToolRegistry.InvokeAsync(string! toolName, System.Text.Json.JsonElement parameters, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<System.Text.Json.Nodes.JsonNode!>
+AiOrchestrator.Mcp.McpToolRegistry.McpToolRegistry(System.Collections.Generic.IEnumerable<AiOrchestrator.Mcp.IMcpTool!>! tools) -> void
+AiOrchestrator.Mcp.McpToolRegistry.Tools.get -> System.Collections.Generic.IReadOnlyDictionary<string!, AiOrchestrator.Mcp.IMcpTool!>!
+AiOrchestrator.Mcp.McpTransportKind
+AiOrchestrator.Mcp.McpTransportKind.NamedPipe = 1 -> AiOrchestrator.Mcp.McpTransportKind
+AiOrchestrator.Mcp.McpTransportKind.Stdio = 0 -> AiOrchestrator.Mcp.McpTransportKind
+AiOrchestrator.Mcp.McpTransportKind.UnixSocket = 2 -> AiOrchestrator.Mcp.McpTransportKind

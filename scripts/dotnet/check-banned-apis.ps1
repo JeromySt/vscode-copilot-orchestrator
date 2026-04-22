@@ -35,6 +35,12 @@ $ErrorActionPreference = 'Stop'
 $repoRoot   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $bannedFile = Join-Path $repoRoot 'src' 'dotnet' 'build' 'banned.txt'
 $srcDir     = Join-Path $repoRoot 'src' 'dotnet' $Project
+if (-not (Test-Path $srcDir)) {
+    $toolsPath = if ($Project -eq 'Tools.KeyCeremony') { Join-Path $repoRoot 'tools' 'key-ceremony' } else { $null }
+    if ($toolsPath -and (Test-Path $toolsPath)) {
+        $srcDir = $toolsPath
+    }
+}
 
 if (-not (Test-Path $bannedFile)) {
     Write-Error "banned.txt not found at: $bannedFile"

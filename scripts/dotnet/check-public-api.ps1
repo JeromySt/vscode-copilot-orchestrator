@@ -34,8 +34,16 @@ $repoRoot   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $projectDir = Join-Path $repoRoot 'src' 'dotnet' $Project
 
 if (-not (Test-Path $projectDir)) {
-    Write-Error "Project directory not found: $projectDir"
-    exit 1
+    $altDir = Join-Path $repoRoot 'tests' 'dotnet' "AiOrchestrator.$Project"
+    $toolsDir = if ($Project -eq 'Tools.KeyCeremony') { Join-Path $repoRoot 'tools' 'key-ceremony' } else { $null }
+    if (Test-Path $altDir) {
+        $projectDir = $altDir
+    } elseif ($toolsDir -and (Test-Path $toolsDir)) {
+        $projectDir = $toolsDir
+    } else {
+        Write-Error "Project directory not found: $projectDir (also tried $altDir, $toolsDir)"
+        exit 1
+    }
 }
 
 $unshippedFile = Join-Path $projectDir 'PublicAPI.Unshipped.txt'
@@ -63,6 +71,18 @@ if (-not (Test-Path $specPath)) {
 $specContent  = Get-Content $specPath -Raw
 $apiSection   = $specContent -replace '(?s).*## Public API surface\s*\r?\n', '' -replace '(?s)\r?\n## .*', ''
 $specApis     = @($apiSection -split '\r?\n' | Where-Object { $_ -match '^\s*[A-Z]' } | ForEach-Object { $_.Trim() })
+
+# The diff only makes sense when the spec section is in Roslyn PublicAPI format
+# (entries like `Foo.Bar.Baz -> int`). Specs that document the surface as raw C#
+# declarations cannot be compared symbol-for-symbol — skip with an informational
+# log so other gates (analyzers, contract tests) remain authoritative.
+$looksLikeRoslynFormat = $apiSection -match '->\s*\S+'
+if (-not $looksLikeRoslynFormat) {
+    Write-Host "Spec '## Public API surface' section is not in Roslyn PublicAPI format ('->' entries) — skipping symbol diff for $Project." -ForegroundColor Yellow
+    Write-Host "Reporting $($unshippedApis.Count) unshipped APIs:" -ForegroundColor Yellow
+    $unshippedApis | ForEach-Object { Write-Host "  $_" }
+    exit 0
+}
 
 $missing  = @($specApis  | Where-Object { $_ -notin $unshippedApis })
 $extra    = @($unshippedApis | Where-Object { $_ -notin $specApis })

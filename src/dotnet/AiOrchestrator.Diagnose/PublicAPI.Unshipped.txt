@@ -1,0 +1,26 @@
+#nullable enable
+namespace AiOrchestrator.Diagnose;
+public sealed class Diagnoser
+public Diagnoser(IPlanStore planStore, IEventReader events, IAuditLog audit, IRedactor redactor, IPseudonymizer pseudonymizer, IFileSystem fs, IClock clock, IOptionsMonitor<DiagnoseOptions> opts);
+public ValueTask<AbsolutePath> ProduceBundleAsync(DiagnoseRequest request, CancellationToken ct);
+public sealed record DiagnoseOptions
+public PseudonymizationMode PseudonymizationMode { get; init; } = PseudonymizationMode.Anonymous;
+public TimeSpan EventLogWindow { get; init; } = TimeSpan.FromHours(2);
+public bool IncludeAuditLog { get; init; } = true;
+public bool IncludeWorktreeListings { get; init; } = false;
+public bool IncludeProcessEnv { get; init; } = false;   // env may contain tokens; default off
+public sealed record DiagnoseRequest { public required PlanId? PlanId { get; init; } public required AbsolutePath OutputPath { get; init; } public TimeSpan? EventLogWindow { get; init; } public string? Recipient { get; init; } /* for reversible mapping */ }
+public enum PseudonymizationMode { Off, Anonymous, Reversible }
+public interface IPseudonymizer
+ValueTask<string> PseudonymizeAsync(string original, PseudonymKind kind, CancellationToken ct);
+ValueTask<string?> ReverseAsync(string pseudonym, string recipientPubKeyFingerprint, byte[] privateKey, CancellationToken ct);
+public enum PseudonymKind { UserName, Hostname, RepoUrl, FilePath, EmailAddress, IpAddress }
+internal sealed class BundleManifest
+public required Version SchemaVersion { get; init; }   // "1"
+public required DateTimeOffset CreatedAt { get; init; }
+public required PseudonymizationMode PseudonymizationMode { get; init; }
+public required string? RecipientPubKeyFingerprint { get; init; }
+public required ImmutableDictionary<string, BundleEntry> Entries { get; init; }
+public required string DotnetRuntimeVersion { get; init; }
+public required string AioVersion { get; init; }
+public sealed record BundleEntry { public required string Path { get; init; } public required long Bytes { get; init; } public required string Sha256 { get; init; } }

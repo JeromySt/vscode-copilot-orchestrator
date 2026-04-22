@@ -28,6 +28,12 @@ $srcDir      = Join-Path $repoRoot 'src' 'dotnet' $Project
 $compRootDir = Join-Path $repoRoot 'src' 'dotnet' 'AiOrchestrator.Composition'
 
 if (-not (Test-Path $srcDir)) {
+    $toolsPath = if ($Project -eq 'Tools.KeyCeremony') { Join-Path $repoRoot 'tools' 'key-ceremony' } else { $null }
+    if ($toolsPath -and (Test-Path $toolsPath)) {
+        # Tools projects do not register into the central CompositionRoot — they are standalone binaries.
+        Write-Host "Composition check skipped for standalone tool: $Project" -ForegroundColor Yellow
+        exit 0
+    }
     Write-Error "Source directory not found: $srcDir"
     exit 1
 }

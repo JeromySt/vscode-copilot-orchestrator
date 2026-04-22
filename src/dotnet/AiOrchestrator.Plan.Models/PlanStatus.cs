@@ -27,4 +27,7 @@ public enum PlanStatus
 
     /// <summary>Plan failed due to errors.</summary>
     Failed = 6,
+
+    /// <summary>Plan has been archived (terminal, read-only, opt-in for portability overwrite).</summary>
+    Archived = 7,
 }

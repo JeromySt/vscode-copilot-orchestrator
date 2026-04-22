@@ -41,16 +41,27 @@ $scriptsDir = $PSScriptRoot
 $tmpDir    = Join-Path $repoRoot '.orchestrator' 'tmp'
 $null = New-Item -ItemType Directory -Force -Path $tmpDir
 
-$checks = [ordered]@{
-    'PC-1-analyzers'        = @{ Script = 'check-analyzers.ps1';       Args = @('-Project', $Project) }
-    'PC-2-banned-apis'      = @{ Script = 'check-banned-apis.ps1';     Args = @('-Project', $Project) }
-    'PC-3-composition'      = @{ Script = 'check-composition.ps1';     Args = @('-Project', $Project) }
-    'PC-4-contract-tests'   = @{ Script = 'check-contract-tests.ps1';  Args = @('-Project', $Project) + $(if ($SpecFile) { @('-SpecFile', $SpecFile) } else { @() }) }
-    'PC-5-public-api'       = @{ Script = 'check-public-api.ps1';      Args = @('-Project', $Project) + $(if ($SpecFile) { @('-SpecFile', $SpecFile) } else { @() }) }
-}
+if ($Project -eq 'Benchmarks') {
+    # Benchmarks project lives under tests/dotnet/AiOrchestrator.Benchmarks and is not
+    # a regular service — composition / banned-API / coverage checks don't apply.
+    # PC-1 here just asserts the project compiles cleanly with analyzers.
+    $checks = [ordered]@{
+        'PC-B1-analyzers'  = @{ Script = 'check-analyzers.ps1';         Args = @('-Project', $Project) }
+        'PC-B2-baselines'  = @{ Script = 'check-baselines-present.ps1'; Args = @() }
+        'PC-B3-public-api' = @{ Script = 'check-public-api.ps1';        Args = @('-Project', $Project) + $(if ($SpecFile) { @('-SpecFile', $SpecFile) } else { @() }) }
+    }
+} else {
+    $checks = [ordered]@{
+        'PC-1-analyzers'        = @{ Script = 'check-analyzers.ps1';       Args = @('-Project', $Project) }
+        'PC-2-banned-apis'      = @{ Script = 'check-banned-apis.ps1';     Args = @('-Project', $Project) }
+        'PC-3-composition'      = @{ Script = 'check-composition.ps1';     Args = @('-Project', $Project) }
+        'PC-4-contract-tests'   = @{ Script = 'check-contract-tests.ps1';  Args = @('-Project', $Project) + $(if ($SpecFile) { @('-SpecFile', $SpecFile) } else { @() }) }
+        'PC-5-public-api'       = @{ Script = 'check-public-api.ps1';      Args = @('-Project', $Project) + $(if ($SpecFile) { @('-SpecFile', $SpecFile) } else { @() }) }
+    }
 
-if (-not $SkipCoverage) {
-    $checks['PC-6-coverage'] = @{ Script = 'check-coverage.ps1'; Args = @('-Project', $Project) }
+    if (-not $SkipCoverage) {
+        $checks['PC-6-coverage'] = @{ Script = 'check-coverage.ps1'; Args = @('-Project', $Project) }
+    }
 }
 
 $results  = [ordered]@{}

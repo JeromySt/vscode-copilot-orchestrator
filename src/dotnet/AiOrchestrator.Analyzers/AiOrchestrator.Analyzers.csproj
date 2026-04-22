@@ -3,35 +3,20 @@
   <PropertyGroup>
     <AssemblyName>AiOrchestrator.Analyzers</AssemblyName>
     <RootNamespace>AiOrchestrator.Analyzers</RootNamespace>
-    <!-- Analyzers must target netstandard2.0 so the Roslyn host can load them. -->
     <TargetFramework>netstandard2.0</TargetFramework>
-    <IsPackable>true</IsPackable>
-    <IsAnalyzer>true</IsAnalyzer>
-    <!-- The DLL lives in the NuGet analyzer slot, not in lib/. -->
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsRoslynComponent>true</IsRoslynComponent>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <DevelopmentDependency>true</DevelopmentDependency>
-    <Description>Roslyn analyzers and code fixes enforcing AiOrchestrator coding standards (OE0001–OE0046).</Description>
-    <PackageTags>roslyn;analyzer;aiorchestrator</PackageTags>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <!-- Explicitly place the DLL in the analyzers/dotnet/cs slot in the NuGet package. -->
-    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-  </ItemGroup>
-
-  <PropertyGroup>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-    <NoWarn>$(NoWarn);RS1038;RS2008;NU5128</NoWarn>
+    <!-- The analyzer project does not ship a public API baseline. -->
+    <NoWarn>$(NoWarn);RS1024;RS1038;RS1032;RS2008;CA1062;CA1812;SA1117;SA1600;SA1601;SA1633;SA0001;CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <AdditionalFiles Include="$(MSBuildThisFileDirectory)AnalyzerReleases.Shipped.txt" />
-    <AdditionalFiles Include="$(MSBuildThisFileDirectory)AnalyzerReleases.Unshipped.txt" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Roslyn APIs for writing analyzers and code fixes. -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

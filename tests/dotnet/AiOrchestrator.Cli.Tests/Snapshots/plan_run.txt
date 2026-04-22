@@ -1,0 +1,24 @@
+aio plan run
+
+Run a plan and block until it terminates.
+
+Usage: aio plan run [options]
+
+Options:
+  --json        Emit machine-readable JSON output.
+  --no-color    Disable ANSI color output (also respects NO_COLOR env var).
+  --help        Show this help.
+  --plan-id <id>  Plan id (required).
+  --detach        Return immediately without waiting for terminal state.
+
+Exit codes:
+  0   OK
+  64  Usage error
+  65  Config error
+  74  I/O error
+  77  Permission denied
+  80  Plan failed
+  81  Plan canceled
+  82  Plan partial
+  90  Daemon unavailable
+  99  Internal error
