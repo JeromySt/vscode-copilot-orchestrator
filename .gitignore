@@ -45,6 +45,13 @@ yarn-error.log*
 # TypeScript incremental compilation
 *.tsbuildinfo
 
+# .NET build artifacts
+**/bin/
+**/obj/
+*.user
+*.suo
+.vs/
+
 
 # Copilot Orchestrator
 .orchestrator/
