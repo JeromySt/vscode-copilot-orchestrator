@@ -40,8 +40,13 @@ if (-not (Test-Path $specPath)) {
 
 $testDir = Join-Path $repoRoot 'tests' 'dotnet' "$Project.Tests"
 if (-not (Test-Path $testDir)) {
-    Write-Error "Test directory not found: $testDir"
-    exit 1
+    $altTestDir = Join-Path $repoRoot 'tests' 'dotnet' "AiOrchestrator.$Project.Tests"
+    if (Test-Path $altTestDir) {
+        $testDir = $altTestDir
+    } else {
+        Write-Error "Test directory not found: $testDir (also tried $altTestDir)"
+        exit 1
+    }
 }
 
 # Parse the ## Acceptance tests section from the markdown
