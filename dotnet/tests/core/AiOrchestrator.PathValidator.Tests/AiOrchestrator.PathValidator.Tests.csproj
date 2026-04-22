@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Foundation.Tests\AiOrchestrator.Foundation.Tests.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.PathValidator.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.PathValidator.Tests</RootNamespace>
+  </PropertyGroup></Project>

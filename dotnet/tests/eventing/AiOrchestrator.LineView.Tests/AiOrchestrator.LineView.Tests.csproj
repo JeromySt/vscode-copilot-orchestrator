@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\eventing\AiOrchestrator.LineView\AiOrchestrator.LineView.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.LineView.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.LineView.Tests</RootNamespace>
+  </PropertyGroup></Project>

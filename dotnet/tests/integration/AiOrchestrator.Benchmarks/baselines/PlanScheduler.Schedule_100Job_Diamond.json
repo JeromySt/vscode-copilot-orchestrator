@@ -1,0 +1,8 @@
+{
+  "benchmarkId": "PlanScheduler.Schedule_100Job_Diamond",
+  "p50Ns": 185000,
+  "p99Ns": 380000,
+  "allocatedBytes": 82000,
+  "capturedAt": "2026-04-21T00:00:00Z",
+  "runtime": ".NET 10 RyuJIT ServerGC"
+}

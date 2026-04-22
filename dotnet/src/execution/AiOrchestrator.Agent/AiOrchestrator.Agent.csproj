@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Agent</AssemblyName>
+    <RootNamespace>AiOrchestrator.Agent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiOrchestrator.Agent.Tests" />
+    <InternalsVisibleTo Include="AiOrchestrator.Composition" />
+  </ItemGroup><ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\core\AiOrchestrator.Process\AiOrchestrator.Process.csproj" />
+  </ItemGroup>
+</Project>

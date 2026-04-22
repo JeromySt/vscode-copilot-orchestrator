@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Audit.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Audit.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1812;CA1859;CA1303;SA1011;SA1116;SA1117;SA1118;SA1515;CA5394;CA5350;SA1201;SA1204;SA1203;SA1642;IDE0058;CA1031;CA1822;CA1716;SA1101;SA1413;SA1009;SA1010;SA1413;CA1851</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\trust\AiOrchestrator.Audit\AiOrchestrator.Audit.csproj" />
+    <ProjectReference Include="..\..\..\src\hosting\AiOrchestrator.Composition\AiOrchestrator.Composition.csproj" />
+    <ProjectReference Include="..\..\core\AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.FileSystem\AiOrchestrator.FileSystem.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

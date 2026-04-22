@@ -1,0 +1,18 @@
+#nullable enable
+AiOrchestrator.Acceptance.ContractTestAttribute
+AiOrchestrator.Acceptance.ContractTestAttribute.ContractTestAttribute(string! id) -> void
+AiOrchestrator.Acceptance.ContractTestAttribute.Id.get -> string!
+AiOrchestrator.Acceptance.CoverageReport
+AiOrchestrator.Acceptance.CoverageReport.AllRuleIds.get -> System.Collections.Immutable.ImmutableArray<string!>
+AiOrchestrator.Acceptance.CoverageReport.AllRuleIds.init -> void
+AiOrchestrator.Acceptance.CoverageReport.CoverageReport() -> void
+AiOrchestrator.Acceptance.CoverageReport.CoveredRuleIds.get -> System.Collections.Immutable.ImmutableArray<string!>
+AiOrchestrator.Acceptance.CoverageReport.CoveredRuleIds.init -> void
+AiOrchestrator.Acceptance.CoverageReport.ExtraTestRuleIds.get -> System.Collections.Immutable.ImmutableArray<string!>
+AiOrchestrator.Acceptance.CoverageReport.ExtraTestRuleIds.init -> void
+AiOrchestrator.Acceptance.CoverageReport.Ok.get -> bool
+AiOrchestrator.Acceptance.CoverageReport.UncoveredRuleIds.get -> System.Collections.Immutable.ImmutableArray<string!>
+AiOrchestrator.Acceptance.CoverageReport.UncoveredRuleIds.init -> void
+AiOrchestrator.Acceptance.RuleIdCoverageGate
+AiOrchestrator.Acceptance.RuleIdCoverageGate.RuleIdCoverageGate(AiOrchestrator.Abstractions.Io.IFileSystem! fs) -> void
+AiOrchestrator.Acceptance.RuleIdCoverageGate.RunAsync(AiOrchestrator.Models.Paths.AbsolutePath designDocPath, AiOrchestrator.Models.Paths.AbsolutePath solutionRoot, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Acceptance.CoverageReport!>

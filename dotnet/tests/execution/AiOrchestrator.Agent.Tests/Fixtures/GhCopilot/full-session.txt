@@ -1,0 +1,6 @@
+gh-copilot-session: gh-cop-123
+input_tokens: 80
+output_tokens: 20
+turns: 1
+context_pct: 63
+gh copilot: task complete

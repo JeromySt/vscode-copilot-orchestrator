@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Plan.PhaseExec</AssemblyName>
+    <RootNamespace>AiOrchestrator.Plan.PhaseExec</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>AiOrchestrator.Plan.PhaseExec.Tests</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>AiOrchestrator.Composition</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Plan.Store\AiOrchestrator.Plan.Store.csproj" />
+    <ProjectReference Include="..\..\trust\AiOrchestrator.HookGate\AiOrchestrator.HookGate.csproj" />
+    <ProjectReference Include="..\..\trust\AiOrchestrator.WorktreeLease\AiOrchestrator.WorktreeLease.csproj" />
+    <ProjectReference Include="..\..\execution\AiOrchestrator.Shell\AiOrchestrator.Shell.csproj" />
+    <ProjectReference Include="..\..\execution\AiOrchestrator.Agent\AiOrchestrator.Agent.csproj" />
+  </ItemGroup>
+</Project>
