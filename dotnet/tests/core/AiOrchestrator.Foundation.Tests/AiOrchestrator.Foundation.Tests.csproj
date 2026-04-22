@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Foundation.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Foundation.Tests</RootNamespace>  </PropertyGroup>
+
+</Project>

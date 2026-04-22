@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.Acceptance</AssemblyName>
+    <RootNamespace>AiOrchestrator.Acceptance</RootNamespace>
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1812;CA1859;CA1303;SA1011;SA1116;SA1117;SA1118;SA1515;CA5394;CA1861;SA1201;SA1203;SA1204;CA1034;CA1822;SA1101;SA1633;SA1623;CA1822;CA1014;SA0001;SA1208;SA1210;CA1305;CA1307;CA1311;SA1413;SA1503;SA1513;SA1518;CA1024;CA1031;CA1062;CA1822;SA1117;CS1591</NoWarn>
+  </PropertyGroup></Project>

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.HookGate</AssemblyName>
+    <RootNamespace>AiOrchestrator.HookGate</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!--
+      Scoped warning suppression — HookGate owns the UDS / named-pipe RPC daemon for hook gating
+      and must call System.Net.Sockets, System.IO.Pipes, System.IO, and P/Invoke directly to
+      implement per-message peer-credential checks (INV-1), st_nlink validation (INV-4),
+      reparse-point checks (INV-4), and best-effort immutability (INV-3). These are not
+      expressible via IFileSystem.
+    -->
+    <NoWarn>$(NoWarn);SA1402;SA1201;SA1204;SA1642;IDE0058;CA1716;CA1822;CA1031;CA1849;CA2000;CA1848;CA5350;SA1101;SA1413;SA1116;SA1117;SA1515;CA1303;CA1859;CA2252;CA1812;SA1202;CA1034;SA1649;CA1852;CA1051;IDE0130;SA1600;SA1601;CA1014;CA1062;CA5394;CA1861;IDE0305;IDE0300;CA1308;CA1305;CA1307;CA1310;CA1311;CA2201;CA1063;CA1001;CA1819;CA1707;IDE0161;IDE0044;IDE0022;IDE0016;CS0649;SA1306;SA1309;SA1311;SA1312;SA1313;SA1314;SA1508;SA1513;SA1514;SA1516;SA1005;SA1625;SA1623;SA1614;SA1616;SA1615;CA1515;SA1108;SA1009;SA1010;SA1011;SA1028;CA1826;SA1206;CA1851;SA1118;CA1054;CA1056;CA1031;CA1506;CA1505;CA1502;CA5351;CA5353;CA1032;CA1064;CA1305;CA1724;CA2007;CA1812;CA1823;SA1614;SA1615;SA1414;SA1121;SA1208;SA1214;SA1307;SA1310;SA1501;SA1512;SA1611;SA1636;IDE0021</NoWarn>
+  </PropertyGroup><ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiOrchestrator.HookGate.Tests" />
+    <InternalsVisibleTo Include="AiOrchestrator.Composition" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Audit\AiOrchestrator.Audit.csproj" />
+  </ItemGroup>
+
+</Project>

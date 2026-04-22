@@ -1,0 +1,6 @@
+qwen-session: qwen-run-A
+input_tokens: 500
+output_tokens: 200
+turns: 1
+context_pct: 68
+qwen: task complete

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Eventing.Generators.SampleConsumer</AssemblyName>
+    <RootNamespace>AiOrchestrator.Eventing.Generators.SampleConsumer</RootNamespace>
+    <OutputType>Library</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1707;CA1812;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1062;CA1303;CA1305;CA1307;CA1310;CA1311;CA1822;SA1633;SA1101;SA1309;SA1310;SA1413</NoWarn>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\eventing\AiOrchestrator.Eventing.Generators\AiOrchestrator.Eventing.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\eventing\AiOrchestrator.Eventing\AiOrchestrator.Eventing.csproj" />
+  </ItemGroup>
+</Project>

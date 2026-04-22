@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.Cli.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Cli.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1812;CA1859;CA1303;SA1011;SA1116;SA1117;SA1118;SA1515;CA5394;CA1861;SA1201;SA1203;SA1204;CA1034;CA1822;CA1515;CA1031</NoWarn>
+  </PropertyGroup><ItemGroup>
+    <None Update="Snapshots\*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup><ItemGroup>
+  <ProjectReference Include="..\..\..\src\hosting\AiOrchestrator.Cli\AiOrchestrator.Cli.csproj" />
+  <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+  <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+</ItemGroup>
+
+</Project>

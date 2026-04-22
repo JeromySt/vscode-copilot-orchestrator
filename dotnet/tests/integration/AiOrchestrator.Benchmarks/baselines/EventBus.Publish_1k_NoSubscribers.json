@@ -1,0 +1,8 @@
+{
+  "benchmarkId": "EventBus.Publish_1k_NoSubscribers",
+  "p50Ns": 2500,
+  "p99Ns": 4500,
+  "allocatedBytes": 0,
+  "capturedAt": "2026-04-21T00:00:00Z",
+  "runtime": ".NET 10 RyuJIT ServerGC"
+}

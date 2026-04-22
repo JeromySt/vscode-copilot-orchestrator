@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\tests\core\AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.TestKit.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.TestKit.Tests</RootNamespace>
+  </PropertyGroup></Project>

@@ -1,0 +1,21 @@
+#nullable enable
+namespace AiOrchestrator.Logging;
+public sealed class CompactJsonFormatter : ConsoleFormatter
+public CompactJsonFormatter(IOptionsMonitor<CompactJsonFormatterOptions> options, IRedactor redactor);
+public override void Write<TState>(in LogEntry<TState> entry, IExternalScopeProvider? scopes, TextWriter writer);
+public sealed record CompactJsonFormatterOptions { public bool IncludeScopes { get; init; } = true; public bool IndentJson { get; init; } = false; }
+public static class AmbientContext
+public static IDisposable Push(string key, object value);
+public static IReadOnlyDictionary<string, object> Snapshot();
+public static T? Get<T>(string key);
+public static class LoggerCategory<T> { public static readonly string Name = typeof(T).FullName!; }
+namespace AiOrchestrator.Logging.Telemetry;
+public sealed class OtlpTelemetrySink : ITelemetrySink, IDisposable
+public OtlpTelemetrySink(IOptions<OtlpOptions> options);
+public void RecordCounter(string name, long delta, IReadOnlyDictionary<string, object>? tags = null);
+public void RecordHistogram(string name, double value, IReadOnlyDictionary<string, object>? tags = null);
+public IDisposable StartActivity(string name, IReadOnlyDictionary<string, object>? tags = null);
+public void Dispose();
+public sealed record OtlpOptions { public string? Endpoint { get; init; } public bool Enabled { get; init; } = false; public TimeSpan ExportInterval { get; init; } = TimeSpan.FromSeconds(10); }
+namespace AiOrchestrator.Composition;
+public static partial class CompositionRoot { public static IServiceCollection AddLogging(this IServiceCollection services, IConfiguration config); }
