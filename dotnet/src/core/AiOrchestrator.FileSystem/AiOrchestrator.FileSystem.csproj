@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.FileSystem</AssemblyName>
+    <RootNamespace>AiOrchestrator.FileSystem</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!--
+      OE0011 suppression — scoped to this project only.
+      This project IS the implementation behind IFileSystem (per job 009 INV-8),
+      so it is the SOLE allowed consumer of System.IO.File / System.IO.Directory.
+    -->
+    <WarningsNotAsErrors>OE0011</WarningsNotAsErrors>
+  </PropertyGroup></Project>

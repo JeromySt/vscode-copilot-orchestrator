@@ -1,0 +1,69 @@
+#nullable enable
+AiOrchestrator.Tools.KeyCeremony.BatchSigningException
+AiOrchestrator.Tools.KeyCeremony.BatchSigningException.BatchSigningException() -> void
+AiOrchestrator.Tools.KeyCeremony.BatchSigningException.BatchSigningException(string! message) -> void
+AiOrchestrator.Tools.KeyCeremony.BatchSigningException.BatchSigningException(string! message, System.Exception! inner) -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.AllowNetwork.get -> bool
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.AllowNetwork.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.CeremonyRequest() -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.CeremonyTranscriptPath.get -> string!
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.CeremonyTranscriptPath.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.OutputSignedPath.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.OutputSignedPath.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.RequiredSigners.get -> System.Collections.Immutable.ImmutableArray<AiOrchestrator.Tools.KeyCeremony.HsmOperatorId>
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.RequiredSigners.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.SubmitToTransparencyLog.get -> bool
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.SubmitToTransparencyLog.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.TransparencyLogUrl.get -> string?
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.TransparencyLogUrl.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.UnsignedManifestPath.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Tools.KeyCeremony.CeremonyRequest.UnsignedManifestPath.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.ActualSigners.get -> System.Collections.Immutable.ImmutableArray<AiOrchestrator.Tools.KeyCeremony.HsmOperatorId>
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.ActualSigners.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.CeremonyResult() -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.SignedManifestPath.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.SignedManifestPath.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.TranscriptPath.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.TranscriptPath.init -> void
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.TransparencyLogReceipt.get -> string?
+AiOrchestrator.Tools.KeyCeremony.CeremonyResult.TransparencyLogReceipt.init -> void
+AiOrchestrator.Tools.KeyCeremony.DefaultNetworkProbe
+AiOrchestrator.Tools.KeyCeremony.DefaultNetworkProbe.DefaultNetworkProbe() -> void
+AiOrchestrator.Tools.KeyCeremony.DefaultNetworkProbe.NetworkUp.get -> bool
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.DeviceSerial.get -> string!
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.DeviceSerial.init -> void
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.FirmwareVersion.get -> string!
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.FirmwareVersion.init -> void
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.HsmDeviceInfo() -> void
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.KeyId.get -> string!
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.KeyId.init -> void
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.PublicKey.get -> byte[]!
+AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo.PublicKey.init -> void
+AiOrchestrator.Tools.KeyCeremony.HsmOperatorId
+AiOrchestrator.Tools.KeyCeremony.HsmOperatorId.HsmOperatorId() -> void
+AiOrchestrator.Tools.KeyCeremony.HsmOperatorId.HsmOperatorId(string! Value) -> void
+AiOrchestrator.Tools.KeyCeremony.HsmOperatorId.Value.get -> string!
+AiOrchestrator.Tools.KeyCeremony.HsmOperatorId.Value.init -> void
+AiOrchestrator.Tools.KeyCeremony.IHsmClient
+AiOrchestrator.Tools.KeyCeremony.IHsmClient.ConnectAsync(AiOrchestrator.Tools.KeyCeremony.HsmOperatorId operator_, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Tools.KeyCeremony.HsmDeviceInfo!>
+AiOrchestrator.Tools.KeyCeremony.IHsmClient.DisconnectAsync(AiOrchestrator.Tools.KeyCeremony.HsmOperatorId operator_, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Tools.KeyCeremony.IHsmClient.SignAsync(AiOrchestrator.Tools.KeyCeremony.HsmOperatorId operator_, byte[]! payloadHash, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<byte[]!>
+AiOrchestrator.Tools.KeyCeremony.INetworkProbe
+AiOrchestrator.Tools.KeyCeremony.INetworkProbe.NetworkUp.get -> bool
+AiOrchestrator.Tools.KeyCeremony.ITransparencyLogClient
+AiOrchestrator.Tools.KeyCeremony.ITransparencyLogClient.SubmitAsync(byte[]! payload, string? logUrl, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<string!>
+AiOrchestrator.Tools.KeyCeremony.KeyCeremonyProgram
+AiOrchestrator.Tools.KeyCeremony.KeyCeremonyProgram.KeyCeremonyProgram() -> void
+AiOrchestrator.Tools.KeyCeremony.StubTransparencyLogClient
+AiOrchestrator.Tools.KeyCeremony.StubTransparencyLogClient.StubTransparencyLogClient() -> void
+AiOrchestrator.Tools.KeyCeremony.StubTransparencyLogClient.StubTransparencyLogClient(string! fixedReceipt) -> void
+AiOrchestrator.Tools.KeyCeremony.StubTransparencyLogClient.SubmitAsync(byte[]! payload, string? logUrl, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<string!>
+AiOrchestrator.Tools.KeyCeremony.Transcript.CeremonyTranscriptWriter
+AiOrchestrator.Tools.KeyCeremony.Transcript.CeremonyTranscriptWriter.Append(string! action, AiOrchestrator.Tools.KeyCeremony.HsmOperatorId operatorId, string! deviceSerial, string! payloadSha256Hex) -> void
+AiOrchestrator.Tools.KeyCeremony.Transcript.CeremonyTranscriptWriter.CeremonyTranscriptWriter(string! path, AiOrchestrator.Abstractions.Time.IClock! clock) -> void
+AiOrchestrator.Tools.KeyCeremony.Transcript.ITranscriptWriter
+AiOrchestrator.Tools.KeyCeremony.Transcript.ITranscriptWriter.Append(string! action, AiOrchestrator.Tools.KeyCeremony.HsmOperatorId operatorId, string! deviceSerial, string! payloadSha256Hex) -> void
+static AiOrchestrator.Tools.KeyCeremony.KeyCeremonyProgram.Main(string![]! args) -> System.Threading.Tasks.Task<int>

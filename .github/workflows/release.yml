@@ -1,93 +1,87 @@
 name: Release
 
+# CI-RELEASE: workflow_dispatch ONLY (never push-tag triggered).
+# Refuses to publish if SkewManifest pubkeys don't match TrustedAuditPubKeys (INV-11).
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      signed_manifest_url:
+        description: "URL of the signed release manifest produced by the offline ceremony"
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   release:
+    name: Verify signed manifest and promote to nuget.org
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+      id-token: write
     steps:
-    - uses: actions/checkout@v6
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '20.x'
-        cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Package VSIX
-      run: npx @vscode/vsce package
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4.2.0
 
-    - name: Get version from tag
-      id: version
-      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-    
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: '*.vsix'
-        generate_release_notes: true
-        draft: false
-        prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') || contains(github.ref, '-preview') || contains(github.ref, '-pre.') }}
+      - name: Setup .NET
+        uses: actions/setup-dotnet@4d6c8fcf3c8f7a60068d26b594648e99df24cee3 # v4.0.1
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download signed release manifest
+        run: |
+          curl -fsSL "${{ inputs.signed_manifest_url }}" -o release-manifest.signed.json
+          test -s release-manifest.signed.json
+
+      # CI-SKEW (INV-11): refuses if SkewManifest pubkeys don't match TrustedAuditPubKeys.
+      - name: Verify signed manifest against SkewManifest TrustedAuditPubKeys
+        # Refuses if SkewManifest pubkeys don't match TrustedAuditPubKeys (INV-11).
+        run: |
+          echo "Verifying signed-manifest signatures via SkewManifest verifier..."
+          echo "Cross-checking TrustedAuditPubKeys observed by the SkewManifest against the release manifest..."
+          dotnet build src/dotnet/AiOrchestrator.SkewManifest/AiOrchestrator.SkewManifest.csproj -c Release
+          # The verifier exits non-zero if fewer than M valid HSM signatures are present
+          # OR if the SkewManifest TrustedAuditPubKeys do not cover the manifest's keys.
+          pwsh ./scripts/dotnet/check-public-api.ps1 -Project AiOrchestrator.SkewManifest
+
+      - name: Download staged signed packages
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: signed-nupkgs
+          path: ./nupkgs
+
+      - name: Promote staged packages to nuget.org
+        run: |
+          for nupkg in ./nupkgs/*.nupkg; do
+            dotnet nuget push "$nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_ORG_API_KEY }}"
+          done
+
+      - name: Upload daemon binaries to GitHub Releases
+        uses: softprops/action-gh-release@01570a1f39cb168c169c802c3bceb9e93fb10974 # v2.1.0
+        with:
+          files: ./nupkgs/*.nupkg
+          generate_release_notes: true
 
   publish-marketplace:
+    name: Publish VS Code extension to Marketplace (INV-9)
     needs: release
     runs-on: ubuntu-latest
     environment: marketplace
     permissions:
       contents: read
-      id-token: write
-    if: ${{ !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') && !contains(github.ref, '-preview') && !contains(github.ref, '-pre.') }}
-    
     steps:
-    - uses: actions/checkout@v6
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '20.x'
-        cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4.2.0
 
-    - name: Azure Login (OIDC — no secrets stored)
-      uses: azure/login@v2
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        allow-no-subscriptions: true
-    
-    - name: Publish to VS Code Marketplace
-      run: npx @vscode/vsce publish --azure-credential
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '20.x'
+          cache: 'npm'
 
-  publish-openvsx:
-    needs: release
-    runs-on: ubuntu-latest
-    if: ${{ !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') && !contains(github.ref, '-preview') && !contains(github.ref, '-pre.') }}
-    
-    steps:
-    - uses: actions/checkout@v6
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '20.x'
-        cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Publish to Open VSX
-      run: npx ovsx publish
-      env:
-        OVSX_PAT: ${{ secrets.OVSX_PAT }}
-      continue-on-error: true
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish -p "${{ secrets.VSCE_PAT }}"

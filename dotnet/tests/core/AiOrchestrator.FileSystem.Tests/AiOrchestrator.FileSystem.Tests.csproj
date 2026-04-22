@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.FileSystem.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.FileSystem.Tests</RootNamespace>
+  </PropertyGroup><ItemGroup>
+    <None Update="Fixtures\mountinfo-nfs.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\mountinfo-cifs.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\mountinfo-local.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.PathValidator\AiOrchestrator.PathValidator.csproj" />
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.FileSystem\AiOrchestrator.FileSystem.csproj" />
+    <ProjectReference Include="..\..\..\src\hosting\AiOrchestrator.Composition\AiOrchestrator.Composition.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Foundation.Tests\AiOrchestrator.Foundation.Tests.csproj" />
+  </ItemGroup>
+
+</Project>

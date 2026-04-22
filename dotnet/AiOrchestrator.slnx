@@ -1,0 +1,122 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/core/">
+    <Project Path="src/core/AiOrchestrator.Abstractions/AiOrchestrator.Abstractions.csproj" />
+    <Project Path="src/core/AiOrchestrator.Configuration/AiOrchestrator.Configuration.csproj" />
+    <Project Path="src/core/AiOrchestrator.FileSystem/AiOrchestrator.FileSystem.csproj" />
+    <Project Path="src/core/AiOrchestrator.Logging/AiOrchestrator.Logging.csproj" />
+    <Project Path="src/core/AiOrchestrator.Models/AiOrchestrator.Models.csproj" />
+    <Project Path="src/core/AiOrchestrator.PathValidator/AiOrchestrator.PathValidator.csproj" />
+    <Project Path="src/core/AiOrchestrator.Process/AiOrchestrator.Process.csproj" />
+    <Project Path="src/core/AiOrchestrator.Redaction/AiOrchestrator.Redaction.csproj" />
+    <Project Path="tests/core/AiOrchestrator.TestKit/AiOrchestrator.TestKit.csproj" />
+    <Project Path="src/core/AiOrchestrator.Time/AiOrchestrator.Time.csproj" />
+  </Folder>
+  <Folder Name="/src/eventing/">
+    <Project Path="src/eventing/AiOrchestrator.Eventing.Generators/AiOrchestrator.Eventing.Generators.csproj" />
+    <Project Path="src/eventing/AiOrchestrator.Eventing/AiOrchestrator.Eventing.csproj" />
+    <Project Path="src/eventing/AiOrchestrator.EventLog/AiOrchestrator.EventLog.csproj" />
+    <Project Path="src/eventing/AiOrchestrator.LineView/AiOrchestrator.LineView.csproj" />
+  </Folder>
+  <Folder Name="/src/execution/">
+    <Project Path="src/execution/AiOrchestrator.Agent/AiOrchestrator.Agent.csproj" />
+    <Project Path="src/execution/AiOrchestrator.Concurrency.Broker/AiOrchestrator.Concurrency.Broker.csproj" />
+    <Project Path="src/execution/AiOrchestrator.Concurrency.User/AiOrchestrator.Concurrency.User.csproj" />
+    <Project Path="src/execution/AiOrchestrator.Output/AiOrchestrator.Output.csproj" />
+    <Project Path="src/execution/AiOrchestrator.Plugins/AiOrchestrator.Plugins.csproj" />
+    <Project Path="src/execution/AiOrchestrator.Shell/AiOrchestrator.Shell.csproj" />
+  </Folder>
+  <Folder Name="/src/hosting/">
+    <Project Path="src/hosting/AiOrchestrator.Cli/AiOrchestrator.Cli.csproj" />
+    <Project Path="src/hosting/AiOrchestrator.Composition/AiOrchestrator.Composition.csproj" />
+    <Project Path="src/hosting/AiOrchestrator.Daemon/AiOrchestrator.Daemon.csproj" />
+    <Project Path="src/hosting/AiOrchestrator.Diagnose/AiOrchestrator.Diagnose.csproj" />
+    <Project Path="src/hosting/AiOrchestrator.Hosting/AiOrchestrator.Hosting.csproj" />
+    <Project Path="src/hosting/AiOrchestrator.Mcp/AiOrchestrator.Mcp.csproj" />
+    <Project Path="src/hosting/AiOrchestrator.VsCode.Transport/AiOrchestrator.VsCode.Transport.csproj" />
+  </Folder>
+  <Folder Name="/src/plan/">
+    <Project Path="src/plan/AiOrchestrator.Plan.Models/AiOrchestrator.Plan.Models.csproj" />
+    <Project Path="src/plan/AiOrchestrator.Plan.PhaseExec/AiOrchestrator.Plan.PhaseExec.csproj" />
+    <Project Path="src/plan/AiOrchestrator.Plan.Portability/AiOrchestrator.Plan.Portability.csproj" />
+    <Project Path="src/plan/AiOrchestrator.Plan.Reshape/AiOrchestrator.Plan.Reshape.csproj" />
+    <Project Path="src/plan/AiOrchestrator.Plan.Scheduler/AiOrchestrator.Plan.Scheduler.csproj" />
+    <Project Path="src/plan/AiOrchestrator.Plan.Store/AiOrchestrator.Plan.Store.csproj" />
+  </Folder>
+  <Folder Name="/src/tooling/">
+    <Project Path="src/tooling/AiOrchestrator.Analyzers/AiOrchestrator.Analyzers.csproj" />
+    <Project Path="src/tooling/AiOrchestrator.Bindings.Node/AiOrchestrator.Bindings.Node.csproj" />
+  </Folder>
+  <Folder Name="/src/trust/">
+    <Project Path="src/trust/AiOrchestrator.Audit/AiOrchestrator.Audit.csproj" />
+    <Project Path="src/trust/AiOrchestrator.Credentials/AiOrchestrator.Credentials.csproj" />
+    <Project Path="src/trust/AiOrchestrator.Git/AiOrchestrator.Git.csproj" />
+    <Project Path="src/trust/AiOrchestrator.HookGate/AiOrchestrator.HookGate.csproj" />
+    <Project Path="src/trust/AiOrchestrator.SkewManifest/AiOrchestrator.SkewManifest.csproj" />
+    <Project Path="src/trust/AiOrchestrator.WorktreeLease/AiOrchestrator.WorktreeLease.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/core/">
+    <Project Path="tests/core/AiOrchestrator.Configuration.Tests/AiOrchestrator.Configuration.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.FileSystem.Tests/AiOrchestrator.FileSystem.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.Foundation.Tests/AiOrchestrator.Foundation.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.Logging.Tests/AiOrchestrator.Logging.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.PathValidator.Tests/AiOrchestrator.PathValidator.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.Process.Tests/AiOrchestrator.Process.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.Redaction.Tests/AiOrchestrator.Redaction.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.TestKit.Tests/AiOrchestrator.TestKit.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.Time.Tests/AiOrchestrator.Time.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/eventing/">
+    <Project Path="tests/eventing/AiOrchestrator.Eventing.Generators.SampleConsumer/AiOrchestrator.Eventing.Generators.SampleConsumer.csproj" />
+    <Project Path="tests/eventing/AiOrchestrator.Eventing.Generators.Tests/AiOrchestrator.Eventing.Generators.Tests.csproj" />
+    <Project Path="tests/eventing/AiOrchestrator.Eventing.Tests/AiOrchestrator.Eventing.Tests.csproj" />
+    <Project Path="tests/eventing/AiOrchestrator.EventLog.Tests/AiOrchestrator.EventLog.Tests.csproj" />
+    <Project Path="tests/eventing/AiOrchestrator.LineView.Tests/AiOrchestrator.LineView.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/execution/">
+    <Project Path="tests/execution/AiOrchestrator.Agent.Tests/AiOrchestrator.Agent.Tests.csproj" />
+    <Project Path="tests/execution/AiOrchestrator.Concurrency.Broker.Tests/AiOrchestrator.Concurrency.Broker.Tests.csproj" />
+    <Project Path="tests/execution/AiOrchestrator.Concurrency.User.Tests/AiOrchestrator.Concurrency.User.Tests.csproj" />
+    <Project Path="tests/execution/AiOrchestrator.Output.Tests/AiOrchestrator.Output.Tests.csproj" />
+    <Project Path="tests/execution/AiOrchestrator.Plugins.Tests/AiOrchestrator.Plugins.Tests.csproj" />
+    <Project Path="tests/execution/AiOrchestrator.Shell.Tests/AiOrchestrator.Shell.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/hosting/">
+    <Project Path="tests/hosting/AiOrchestrator.Cli.Tests/AiOrchestrator.Cli.Tests.csproj" />
+    <Project Path="tests/hosting/AiOrchestrator.Daemon.Tests/AiOrchestrator.Daemon.Tests.csproj" />
+    <Project Path="tests/hosting/AiOrchestrator.Diagnose.Tests/AiOrchestrator.Diagnose.Tests.csproj" />
+    <Project Path="tests/hosting/AiOrchestrator.Hosting.Tests/AiOrchestrator.Hosting.Tests.csproj" />
+    <Project Path="tests/hosting/AiOrchestrator.Mcp.Tests/AiOrchestrator.Mcp.Tests.csproj" />
+    <Project Path="tests/hosting/AiOrchestrator.VsCode.Transport.Tests/AiOrchestrator.VsCode.Transport.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/integration/">
+    <Project Path="tests/integration/AiOrchestrator.Acceptance/AiOrchestrator.Acceptance.csproj" />
+    <Project Path="tests/integration/AiOrchestrator.Benchmarks/AiOrchestrator.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/tests/plan/">
+    <Project Path="tests/plan/AiOrchestrator.Plan.Models.Tests/AiOrchestrator.Plan.Models.Tests.csproj" />
+    <Project Path="tests/plan/AiOrchestrator.Plan.PhaseExec.Tests/AiOrchestrator.Plan.PhaseExec.Tests.csproj" />
+    <Project Path="tests/plan/AiOrchestrator.Plan.Portability.Tests/AiOrchestrator.Plan.Portability.Tests.csproj" />
+    <Project Path="tests/plan/AiOrchestrator.Plan.Reshape.Tests/AiOrchestrator.Plan.Reshape.Tests.csproj" />
+    <Project Path="tests/plan/AiOrchestrator.Plan.Scheduler.Tests/AiOrchestrator.Plan.Scheduler.Tests.csproj" />
+    <Project Path="tests/plan/AiOrchestrator.Plan.Store.Tests/AiOrchestrator.Plan.Store.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/tooling/">
+    <Project Path="tests/tooling/AiOrchestrator.Analyzers.Tests/AiOrchestrator.Analyzers.Tests.csproj" />
+    <Project Path="tests/tooling/AiOrchestrator.Bindings.Node.Tests/AiOrchestrator.Bindings.Node.Tests.csproj" />
+    <Project Path="tests/tooling/AiOrchestrator.Tools.KeyCeremony.Tests/AiOrchestrator.Tools.KeyCeremony.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/trust/">
+    <Project Path="tests/trust/AiOrchestrator.Audit.Tests/AiOrchestrator.Audit.Tests.csproj" />
+    <Project Path="tests/trust/AiOrchestrator.Credentials.Tests/AiOrchestrator.Credentials.Tests.csproj" />
+    <Project Path="tests/trust/AiOrchestrator.Git.Tests/AiOrchestrator.Git.Tests.csproj" />
+    <Project Path="tests/trust/AiOrchestrator.HookGate.Tests/AiOrchestrator.HookGate.Tests.csproj" />
+    <Project Path="tests/trust/AiOrchestrator.SkewManifest.Tests/AiOrchestrator.SkewManifest.Tests.csproj" />
+    <Project Path="tests/trust/AiOrchestrator.WorktreeLease.Tests/AiOrchestrator.WorktreeLease.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/" />
+  <Folder Name="/tools/key-ceremony/">
+    <Project Path="tools/key-ceremony/AiOrchestrator.Tools.KeyCeremony.csproj" />
+  </Folder>
+</Solution>

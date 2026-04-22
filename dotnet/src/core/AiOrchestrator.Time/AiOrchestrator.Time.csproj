@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Time</AssemblyName>
+    <RootNamespace>AiOrchestrator.Time</RootNamespace>
+  </PropertyGroup></Project>

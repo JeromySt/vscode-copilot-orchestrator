@@ -1,0 +1,74 @@
+name: PR
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dotnet:
+    name: .NET build, test, gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4.2.0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@4d6c8fcf3c8f7a60068d26b594648e99df24cee3 # v4.0.1
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: dotnet restore
+        run: dotnet restore src/dotnet/AiOrchestrator.sln
+
+      - name: dotnet build
+        run: dotnet build src/dotnet/AiOrchestrator.sln -warnaserror --no-restore
+
+      - name: dotnet test (with coverage)
+        run: dotnet test src/dotnet/AiOrchestrator.sln --no-build --collect:"XPlat Code Coverage"
+
+      - name: Coverage gate
+        run: pwsh ./scripts/dotnet/check-coverage.ps1 -Project AiOrchestrator.Daemon
+
+      - name: Analyzer gate
+        run: pwsh ./scripts/dotnet/check-analyzers.ps1 -Project AiOrchestrator.Daemon
+
+      - name: Banned APIs gate
+        run: pwsh ./scripts/dotnet/check-banned-apis.ps1 -Project AiOrchestrator.Daemon
+
+      - name: Public API gate
+        run: pwsh ./scripts/dotnet/check-public-api.ps1 -Project AiOrchestrator.Daemon
+
+      - name: Composition gate
+        run: pwsh ./scripts/dotnet/check-composition.ps1 -Project AiOrchestrator.Daemon
+
+      - name: Pinned actions gate
+        run: pwsh ./scripts/dotnet/check-actions-pinned.ps1
+
+      - name: CODEOWNERS gate
+        run: pwsh ./scripts/dotnet/check-codeowners.ps1
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v4.2.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@662472033e021d55d94146f66f6058822b0b39fd # v3.27.0
+        with:
+          languages: csharp, javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@662472033e021d55d94146f66f6058822b0b39fd # v3.27.0
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@662472033e021d55d94146f66f6058822b0b39fd # v3.27.0

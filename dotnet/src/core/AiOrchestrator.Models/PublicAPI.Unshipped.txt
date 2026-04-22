@@ -1,0 +1,7 @@
+#nullable enable
+AiOrchestrator.Models.Eventing.EventVAttribute
+AiOrchestrator.Models.Eventing.EventVAttribute.EventTypeName.get -> string!
+AiOrchestrator.Models.Eventing.EventVAttribute.EventVAttribute(string! eventTypeName, int version) -> void
+AiOrchestrator.Models.Eventing.EventVAttribute.Version.get -> int
+AiOrchestrator.Models.Eventing.IEventMigration<TFrom, TTo>
+AiOrchestrator.Models.Eventing.IEventMigration<TFrom, TTo>.Migrate(TFrom from) -> TTo

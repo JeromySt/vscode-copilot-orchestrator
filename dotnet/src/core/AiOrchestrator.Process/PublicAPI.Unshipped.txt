@@ -1,0 +1,47 @@
+#nullable enable
+AiOrchestrator.Process.EnvScope
+AiOrchestrator.Process.EnvScope.Allowed.get -> System.Collections.Immutable.ImmutableDictionary<string!, string!>!
+AiOrchestrator.Process.EnvScope.Allowed.init -> void
+AiOrchestrator.Process.EnvScope.InheritOther.get -> bool
+AiOrchestrator.Process.EnvScope.InheritOther.init -> void
+AiOrchestrator.Process.EnvScope.Inherited(System.Collections.Immutable.ImmutableDictionary<string!, string!>? additions = null) -> AiOrchestrator.Process.EnvScope!
+AiOrchestrator.Process.EnvScope.Restricted(System.Collections.Immutable.ImmutableDictionary<string!, string!>! vars) -> AiOrchestrator.Process.EnvScope!
+AiOrchestrator.Process.ProcessHandle
+AiOrchestrator.Process.ProcessHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Process.ProcessHandle.ProcessId.get -> int
+AiOrchestrator.Process.ProcessHandle.SignalAsync(AiOrchestrator.Abstractions.Process.ProcessSignal signal, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Process.ProcessHandle.StandardError.get -> System.IO.Pipelines.PipeReader!
+AiOrchestrator.Process.ProcessHandle.StandardIn.get -> System.IO.Pipelines.PipeWriter!
+AiOrchestrator.Process.ProcessHandle.StandardOut.get -> System.IO.Pipelines.PipeReader!
+AiOrchestrator.Process.ProcessHandle.WaitForExitAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
+AiOrchestrator.Process.ProcessSpawner
+AiOrchestrator.Process.ProcessSpawner.ApplyLimits(int pid, AiOrchestrator.Process.ResourceLimits! limits) -> void
+AiOrchestrator.Process.ProcessSpawner.ProcessSpawner(AiOrchestrator.Process.Lifecycle.IProcessLifecycle! lifecycle, AiOrchestrator.Abstractions.Time.IClock! clock, AiOrchestrator.Abstractions.Telemetry.ITelemetrySink! telemetry) -> void
+AiOrchestrator.Process.ProcessSpawner.SpawnAsync(AiOrchestrator.Models.ProcessSpec! spec, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Abstractions.Process.IProcessHandle!>
+AiOrchestrator.Process.ResourceLimits
+AiOrchestrator.Process.ResourceLimits.MaxCpuTime.get -> System.TimeSpan?
+AiOrchestrator.Process.ResourceLimits.MaxCpuTime.init -> void
+AiOrchestrator.Process.ResourceLimits.MaxMemoryBytes.get -> long?
+AiOrchestrator.Process.ResourceLimits.MaxMemoryBytes.init -> void
+AiOrchestrator.Process.ResourceLimits.MaxOpenFiles.get -> int?
+AiOrchestrator.Process.ResourceLimits.MaxOpenFiles.init -> void
+AiOrchestrator.Process.ResourceLimits.MaxProcesses.get -> int?
+AiOrchestrator.Process.ResourceLimits.MaxProcesses.init -> void
+AiOrchestrator.Process.Lifecycle.IProcessLifecycle
+AiOrchestrator.Process.Lifecycle.IProcessLifecycle.CaptureCrashDumpAsync(int pid, AiOrchestrator.Models.Paths.AbsolutePath outputPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Process.Lifecycle.CrashDumpCollector
+AiOrchestrator.Process.Lifecycle.CrashDumpCollector.CrashDumpCollector(Microsoft.Extensions.Logging.ILogger<AiOrchestrator.Process.Lifecycle.CrashDumpCollector!>! logger) -> void
+AiOrchestrator.Process.Lifecycle.CrashDumpCollector.CaptureCrashDumpAsync(int pid, AiOrchestrator.Models.Paths.AbsolutePath outputPath, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Process.Pty.IPtyAllocator
+AiOrchestrator.Process.Pty.IPtyAllocator.AllocateAsync(int rows, int cols, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Process.Pty.PtyPair!>
+AiOrchestrator.Process.Pty.PtyPair
+AiOrchestrator.Process.Pty.PtyPair.Dispose() -> void
+AiOrchestrator.Process.Pty.PtyPair.Master.get -> Microsoft.Win32.SafeHandles.SafeFileHandle!
+AiOrchestrator.Process.Pty.PtyPair.PtyPair(Microsoft.Win32.SafeHandles.SafeFileHandle! Master, Microsoft.Win32.SafeHandles.SafeFileHandle! Slave) -> void
+AiOrchestrator.Process.Pty.PtyPair.Slave.get -> Microsoft.Win32.SafeHandles.SafeFileHandle!
+AiOrchestrator.Process.Pty.PtyAllocatorPosix
+AiOrchestrator.Process.Pty.PtyAllocatorPosix.AllocateAsync(int rows, int cols, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Process.Pty.PtyPair!>
+AiOrchestrator.Process.Pty.PtyAllocatorPosix.PtyAllocatorPosix() -> void
+AiOrchestrator.Process.Pty.ConPtyAllocatorWindows
+AiOrchestrator.Process.Pty.ConPtyAllocatorWindows.AllocateAsync(int rows, int cols, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Process.Pty.PtyPair!>
+AiOrchestrator.Process.Pty.ConPtyAllocatorWindows.ConPtyAllocatorWindows() -> void

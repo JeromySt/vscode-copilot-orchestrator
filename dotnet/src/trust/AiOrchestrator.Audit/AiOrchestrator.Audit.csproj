@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Audit</AssemblyName>
+    <RootNamespace>AiOrchestrator.Audit</RootNamespace>
+    <!--
+      OE0011 suppression — scoped to this project only.
+      AiOrchestrator.Audit owns the on-disk segment file format and performs
+      atomic append (write-temp + fsync + rename) directly via System.IO.File
+      because IFileSystem does not expose append/fsync semantics.
+    -->
+    <WarningsNotAsErrors>OE0011</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);SA1402;SA1201;SA1203;SA1204;SA1642;IDE0058;CA1716;CA1822;CA1031;CA5350;IL2026;IL2070;IL2075;IL2090;IL3050;CA2000;CA1849</NoWarn>
+  </PropertyGroup><ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiOrchestrator.Audit.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+  </ItemGroup>
+
+</Project>

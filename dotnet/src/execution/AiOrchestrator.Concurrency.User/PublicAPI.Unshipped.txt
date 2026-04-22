@@ -1,0 +1,39 @@
+#nullable enable
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.At.get -> System.DateTimeOffset
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.At.init -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.ConcurrencyUserAdmitted() -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.JobId.get -> AiOrchestrator.Models.Ids.JobId
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.JobId.init -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.WaitTime.get -> System.TimeSpan
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserAdmitted.WaitTime.init -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.At.get -> System.DateTimeOffset
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.At.init -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.ConcurrencyUserQueued() -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.JobId.get -> AiOrchestrator.Models.Ids.JobId
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.JobId.init -> void
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.QueuePosition.get -> int
+AiOrchestrator.Concurrency.User.Events.ConcurrencyUserQueued.QueuePosition.init -> void
+AiOrchestrator.Concurrency.User.Exceptions.UserConcurrencyQueueFullException
+AiOrchestrator.Concurrency.User.Exceptions.UserConcurrencyQueueFullException.QueueDepth.get -> int
+AiOrchestrator.Concurrency.User.Exceptions.UserConcurrencyQueueFullException.UserConcurrencyQueueFullException(int queueDepth) -> void
+AiOrchestrator.Concurrency.User.IPerUserConcurrency
+AiOrchestrator.Concurrency.User.IPerUserConcurrency.AcquireAsync(AiOrchestrator.Models.Auth.AuthContext! principal, AiOrchestrator.Models.Ids.JobId jobId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Concurrency.User.UserAdmission!>
+AiOrchestrator.Concurrency.User.IPerUserConcurrency.GetActiveCountAsync(AiOrchestrator.Models.Auth.AuthContext! principal, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<int>
+AiOrchestrator.Concurrency.User.PerUserConcurrencyLimiter
+AiOrchestrator.Concurrency.User.PerUserConcurrencyLimiter.AcquireAsync(AiOrchestrator.Models.Auth.AuthContext! principal, AiOrchestrator.Models.Ids.JobId jobId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Concurrency.User.UserAdmission!>
+AiOrchestrator.Concurrency.User.PerUserConcurrencyLimiter.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Concurrency.User.PerUserConcurrencyLimiter.GetActiveCountAsync(AiOrchestrator.Models.Auth.AuthContext! principal, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<int>
+AiOrchestrator.Concurrency.User.PerUserConcurrencyLimiter.PerUserConcurrencyLimiter(AiOrchestrator.Abstractions.Time.IClock! clock, AiOrchestrator.Abstractions.Eventing.IEventBus! bus, Microsoft.Extensions.Options.IOptionsMonitor<AiOrchestrator.Concurrency.User.UserConcurrencyOptions!>! opts) -> void
+AiOrchestrator.Concurrency.User.UserAdmission
+AiOrchestrator.Concurrency.User.UserAdmission.AdmittedAt.get -> System.DateTimeOffset
+AiOrchestrator.Concurrency.User.UserAdmission.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Concurrency.User.UserAdmission.JobId.get -> AiOrchestrator.Models.Ids.JobId
+AiOrchestrator.Concurrency.User.UserAdmission.Principal.get -> AiOrchestrator.Models.Auth.AuthContext!
+AiOrchestrator.Concurrency.User.UserConcurrencyOptions
+AiOrchestrator.Concurrency.User.UserConcurrencyOptions.FifoQueueDepth.get -> int
+AiOrchestrator.Concurrency.User.UserConcurrencyOptions.FifoQueueDepth.set -> void
+AiOrchestrator.Concurrency.User.UserConcurrencyOptions.MaxConcurrentPerUser.get -> int
+AiOrchestrator.Concurrency.User.UserConcurrencyOptions.MaxConcurrentPerUser.set -> void
+AiOrchestrator.Concurrency.User.UserConcurrencyOptions.UserConcurrencyOptions() -> void

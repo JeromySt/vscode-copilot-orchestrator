@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>    <AssemblyName>AiOrchestrator.Analyzers.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Analyzers.Tests</RootNamespace>
+    <!-- Suppress rules that are inappropriate for test code. -->
+    <NoWarn>$(NoWarn);OE0001;OE0002;OE0004;OE0007;OE0011</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference the analyzer project so tests can instantiate analyzer types. -->
+    <ProjectReference Include="..\..\..\src\tooling\AiOrchestrator.Analyzers\AiOrchestrator.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="true" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+  </ItemGroup>
+
+</Project>

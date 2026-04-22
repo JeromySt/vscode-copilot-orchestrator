@@ -1,0 +1,77 @@
+#nullable enable
+AiOrchestrator.Daemon.DaemonOptions
+AiOrchestrator.Daemon.DaemonOptions.DaemonExecutable.get -> AiOrchestrator.Models.Paths.AbsolutePath?
+AiOrchestrator.Daemon.DaemonOptions.DaemonExecutable.init -> void
+AiOrchestrator.Daemon.DaemonOptions.DaemonOptions() -> void
+AiOrchestrator.Daemon.DaemonOptions.InstallRoot.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Daemon.DaemonOptions.InstallRoot.init -> void
+AiOrchestrator.Daemon.DaemonOptions.MinValidSignatures.get -> int
+AiOrchestrator.Daemon.DaemonOptions.MinValidSignatures.init -> void
+AiOrchestrator.Daemon.DaemonOptions.OfflineRootPubKey.get -> byte[]!
+AiOrchestrator.Daemon.DaemonOptions.OfflineRootPubKey.init -> void
+AiOrchestrator.Daemon.DaemonOptions.PidFile.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Daemon.DaemonOptions.PidFile.init -> void
+AiOrchestrator.Daemon.DaemonOptions.ReleaseManifestUrl.get -> string!
+AiOrchestrator.Daemon.DaemonOptions.ReleaseManifestUrl.init -> void
+AiOrchestrator.Daemon.DaemonOptions.RequireOfflineRootSignature.get -> bool
+AiOrchestrator.Daemon.DaemonOptions.RequireOfflineRootSignature.init -> void
+AiOrchestrator.Daemon.DaemonOptions.ShutdownDrainTimeout.get -> System.TimeSpan
+AiOrchestrator.Daemon.DaemonOptions.ShutdownDrainTimeout.init -> void
+AiOrchestrator.Daemon.DaemonOptions.UpdateCheckInterval.get -> System.TimeSpan
+AiOrchestrator.Daemon.DaemonOptions.UpdateCheckInterval.init -> void
+AiOrchestrator.Daemon.DaemonOptions.UpdateStagingRoot.get -> AiOrchestrator.Models.Paths.AbsolutePath
+AiOrchestrator.Daemon.DaemonOptions.UpdateStagingRoot.init -> void
+AiOrchestrator.Daemon.DaemonProgram
+AiOrchestrator.Daemon.DaemonProgram.DaemonProgram() -> void
+AiOrchestrator.Daemon.DaemonServiceCollectionExtensions
+AiOrchestrator.Daemon.Update.DaemonArtifact
+AiOrchestrator.Daemon.Update.DaemonArtifact.Bytes.get -> long
+AiOrchestrator.Daemon.Update.DaemonArtifact.Bytes.init -> void
+AiOrchestrator.Daemon.Update.DaemonArtifact.DaemonArtifact() -> void
+AiOrchestrator.Daemon.Update.DaemonArtifact.DownloadUrl.get -> System.Uri!
+AiOrchestrator.Daemon.Update.DaemonArtifact.DownloadUrl.init -> void
+AiOrchestrator.Daemon.Update.DaemonArtifact.Filename.get -> string!
+AiOrchestrator.Daemon.Update.DaemonArtifact.Filename.init -> void
+AiOrchestrator.Daemon.Update.DaemonArtifact.Sha256.get -> string!
+AiOrchestrator.Daemon.Update.DaemonArtifact.Sha256.init -> void
+AiOrchestrator.Daemon.Update.HealthResult
+AiOrchestrator.Daemon.Update.HealthResult.FailureReason.get -> string?
+AiOrchestrator.Daemon.Update.HealthResult.FailureReason.init -> void
+AiOrchestrator.Daemon.Update.HealthResult.HealthResult() -> void
+AiOrchestrator.Daemon.Update.HealthResult.Ok.get -> bool
+AiOrchestrator.Daemon.Update.HealthResult.Ok.init -> void
+AiOrchestrator.Daemon.Update.HsmSignature
+AiOrchestrator.Daemon.Update.HsmSignature.HsmSignature() -> void
+AiOrchestrator.Daemon.Update.HsmSignature.KeyId.get -> string!
+AiOrchestrator.Daemon.Update.HsmSignature.KeyId.init -> void
+AiOrchestrator.Daemon.Update.HsmSignature.Signature.get -> byte[]!
+AiOrchestrator.Daemon.Update.HsmSignature.Signature.init -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.Artifacts.get -> System.Collections.Immutable.ImmutableArray<AiOrchestrator.Daemon.Update.DaemonArtifact>
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.Artifacts.init -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.MinSupportedVersion.get -> System.Version!
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.MinSupportedVersion.init -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.SignedAt.get -> System.DateTimeOffset
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.SignedAt.init -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.SignedReleaseManifest() -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.Signatures.get -> System.Collections.Immutable.ImmutableArray<AiOrchestrator.Daemon.Update.HsmSignature!>
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.Signatures.init -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.TrustedAuditPubKeys.get -> System.Collections.Immutable.ImmutableArray<byte[]!>
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.TrustedAuditPubKeys.init -> void
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.Version.get -> System.Version!
+AiOrchestrator.Daemon.Update.SignedReleaseManifest.Version.init -> void
+AiOrchestrator.Daemon.Update.UpdateController
+AiOrchestrator.Daemon.Update.UpdateController.CheckAndApplyAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Daemon.Update.UpdateOutcome>
+AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.Applied = 1 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.Failed_Disk = 6 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.Failed_Network = 5 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.NoUpdate = 0 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.Rejected_BadSignature = 2 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.Rejected_DowngradeBlocked = 4 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.Rejected_VersionRegression = 3 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+AiOrchestrator.Daemon.Update.UpdateOutcome.RolledBack = 7 -> AiOrchestrator.Daemon.Update.UpdateOutcome
+static AiOrchestrator.Daemon.DaemonProgram.BuildHost(string![]! args) -> Microsoft.Extensions.Hosting.IHost!
+static AiOrchestrator.Daemon.DaemonProgram.Main(string![]! args) -> System.Threading.Tasks.Task<int>!
+static AiOrchestrator.Daemon.DaemonServiceCollectionExtensions.AddDaemon(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+override AiOrchestrator.Daemon.Update.UpdateController.ExecuteAsync(System.Threading.CancellationToken stoppingToken) -> System.Threading.Tasks.Task!

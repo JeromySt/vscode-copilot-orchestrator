@@ -1,0 +1,6 @@
+{"session_id":"codex-sess-9999"}
+input_tokens: 200
+output_tokens: 80
+turns: 1
+context_pct: 61
+{"type":"task_complete"}
