@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.VsCode.Transport</AssemblyName>
+    <RootNamespace>AiOrchestrator.VsCode.Transport</RootNamespace>
+    <!--
+      INV-1 exemption. This project is the SOLE allowed consumer of Microsoft.VisualStudio.*
+      packages (see job 040 / OE0044). No other .NET project in the repo may reference them.
+      The OE0044 analyzer and scripts/dotnet/check-vs-references.ps1 enforce this invariant.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiOrchestrator.Bindings.Node\AiOrchestrator.Bindings.Node.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Mcp\AiOrchestrator.Mcp.csproj" />
+    <ProjectReference Include="..\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiOrchestrator.VsCode.Transport.Tests" />
+    <InternalsVisibleTo Include="AiOrchestrator.Composition" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,3 @@
+26 27 0:24 / / rw,relatime shared:1 - btrfs /dev/sda1 rw
+27 26 0:25 / /home rw,relatime shared:2 - ext4 /dev/sda2 rw
+30 27 0:30 / /mnt/winshare rw,relatime shared:5 - cifs //fileserver/share rw,vers=3.0

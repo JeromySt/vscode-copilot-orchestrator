@@ -1040,3 +1040,26 @@ The system auto-detects changes:
 - [Architecture: Release Pipeline](ARCHITECTURE.md#release-architecture) — Component diagrams and data flow
 - [Copilot Integration: Release MCP Tools](COPILOT_INTEGRATION.md#release-management-api) — MCP tool reference
 - [DI Guide: Release Tokens](DI_GUIDE.md) — DI container registration for release services
+
+
+## Key ceremony procedure
+
+The release manifest signing ceremony is performed offline on an air-gapped host. M-of-N (3 of 5) HSM operators are required to sign each release.
+
+1. **Air-gap the host.** Ensure no non-loopback network interface is up. The ceremony binary refuses to start otherwise (INV-1). Pass `--allow-network` only for staging rehearsals.
+2. **Stage inputs.** Copy `release-manifest.unsigned.json` (produced by main.yml) and the published `AiOrchestrator.Tools.KeyCeremony` binary onto the air-gapped host (e.g. via a write-once USB).
+3. **Run the ceremony**:
+
+   ``
+   AiOrchestrator.Tools.KeyCeremony \
+     --unsigned release-manifest.unsigned.json \
+     --out release-manifest.signed.json \
+     --transcript /var/log/ceremony-2025-01-02.log \
+     --signers op1,op2,op3
+   ``
+
+   Each operator inserts their HSM, confirms the device serial and payload SHA-256 on the prompt, then signs. Each signature is requested individually with operator confirmation; batch signing is rejected (INV-2).
+4. **Audit.** A timestamped JSON-line transcript is appended on every step (operator id, device serial, payload hash) and flushed on each write to a separate filesystem path so a crash mid-ceremony preserves audit (INV-3).
+5. **Optional transparency log.** If `--transparency-log <url>` is supplied (or omitted; default is on), a Sigstore-style Merkle inclusion receipt is embedded in the signed manifest as `TransparencyLogProof` (INV-5). Use `--no-transparency-log` to skip.
+6. **Carry off.** Copy `release-manifest.signed.json` and the transcript off the air-gapped host. Provide the signed manifest URL to the GitHub `release.yml` workflow via `workflow_dispatch` (CI-RELEASE).
+

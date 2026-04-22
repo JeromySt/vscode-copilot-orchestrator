@@ -1,0 +1,8 @@
+{
+  "benchmarkId": "ShellRunner.PipeStdout_1MB",
+  "p50Ns": 11500000,
+  "p99Ns": 24000000,
+  "allocatedBytes": 140000,
+  "capturedAt": "2026-04-21T00:00:00Z",
+  "runtime": ".NET 10 RyuJIT ServerGC"
+}

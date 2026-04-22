@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Output.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Output.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1812;CA1822</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Output\AiOrchestrator.Output.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.LineView\AiOrchestrator.LineView.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+</Project>

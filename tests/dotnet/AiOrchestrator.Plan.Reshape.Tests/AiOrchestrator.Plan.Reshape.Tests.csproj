@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Plan.Reshape.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Plan.Reshape.Tests</RootNamespace>
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1812;CA1859;CA1303;SA1011;SA1116;SA1117;SA1118;SA1515;CA5394;CA1861;SA1201;SA1203;SA1204;CA1034;CA1822;SA1309</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Plan.Reshape\AiOrchestrator.Plan.Reshape.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Plan.Store\AiOrchestrator.Plan.Store.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Composition\AiOrchestrator.Composition.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+</Project>

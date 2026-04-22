@@ -1,0 +1,6 @@
+gemini session: gemini-run-42
+input_tokens: 300
+output_tokens: 150
+turns: 1
+context_pct: 75
+[gemini] done

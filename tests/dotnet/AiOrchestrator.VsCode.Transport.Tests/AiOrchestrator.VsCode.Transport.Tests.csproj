@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.VsCode.Transport.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.VsCode.Transport.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1600;SA1601;SA1602;SA1402;SA1649;SA1124;CA1812;CA1859;CA1303;SA1011;SA1116;SA1117;SA1118;SA1515;CA5394;CA1861;SA1201;SA1203;SA1204;CA1034;CA1822;CA1515;CA1054;CA1849;CA1031;CA1515;CA1848;IDE0058;SA1128;SA1000;SA1502;CA1001;CA2000</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.VsCode.Transport\AiOrchestrator.VsCode.Transport.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Composition\AiOrchestrator.Composition.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Mcp\AiOrchestrator.Mcp.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Bindings.Node\AiOrchestrator.Bindings.Node.csproj" />
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

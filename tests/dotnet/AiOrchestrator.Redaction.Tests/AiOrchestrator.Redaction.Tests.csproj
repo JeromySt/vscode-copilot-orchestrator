@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Redaction.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Redaction.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\dotnet\AiOrchestrator.Redaction\AiOrchestrator.Redaction.csproj" />
+  </ItemGroup>
+
+</Project>
