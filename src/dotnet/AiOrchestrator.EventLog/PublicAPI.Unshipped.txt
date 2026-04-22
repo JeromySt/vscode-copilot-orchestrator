@@ -1,0 +1,36 @@
+#nullable enable
+namespace AiOrchestrator.EventLog;
+public sealed class TieredEventLog : IEventStore, IEventReader, IAsyncDisposable
+public TieredEventLog(AbsolutePath logRoot, IFileSystem fs, IClock clock, IRedactor redactor, IOptionsMonitor<EventLogOptions> opts, ITelemetrySink telemetry);
+public ValueTask AppendAsync(EventEnvelope envelope, CancellationToken ct);
+public IAsyncEnumerable<EventEnvelope> ReadFromAsync(long fromRecordSeq, CancellationToken ct);
+public IAsyncEnumerable<EventEnvelope> ReadReplayAndLiveAsync(EventFilter filter, CancellationToken ct);
+namespace AiOrchestrator.EventLog.Tier1;
+internal sealed class HotRingBuffer { /* MemoryMappedFile + atomic seq counters */ }
+namespace AiOrchestrator.EventLog.Tier2;
+internal sealed class AppendOnlyFile : IAsyncDisposable
+public ValueTask AppendAsync(ReadOnlyMemory<byte> framedRecord, CancellationToken ct);   // length-prefix + CRC32C suffix
+public IAsyncEnumerable<RawRecord> ReadFromAsync(long startOffset, CancellationToken ct);
+internal sealed class RecordFramer
+public static int Frame(ReadOnlySpan<byte> payload, Span<byte> output, long recordSeq);  // [u32 length][u64 recordSeq][payload][u32 crc32c]
+public static bool TryUnframe(ReadOnlySequence<byte> input, out RawRecord record, out SequencePosition consumed, out FrameError error);
+public enum FrameError { None, IncompleteHeader, IncompleteBody, CrcMismatch, RecordSeqRegression }
+internal sealed class TieredReader
+public TieredReader(AppendOnlyFile t2, ReassemblyBuffer reassembly, IOptionsMonitor<EventLogOptions> opts);
+public IAsyncEnumerable<EventEnvelope> ReadAsync(long fromRecordSeq, CancellationToken ct);  // T2-READ-1..11 semantics
+internal sealed class ReassemblyBuffer
+public ReassemblyBuffer(int maxBytes, TimeSpan timeout, IClock clock);
+public bool TryAppend(ReadOnlySpan<byte> partial);
+public bool TryComplete(out ReadOnlyMemory<byte> framed);
+public void EmitAbandonedEventIfTimedOut(IEventBus bus);   // EventLogReassemblyAbandoned
+namespace AiOrchestrator.EventLog.Tier3;
+internal sealed class CompressedArchiver { /* zstd batch compress + retention policy */ }
+namespace AiOrchestrator.EventLog.Quota;
+internal sealed class PerPlanDiskCap
+public PerPlanDiskCap(long maxBytesPerPlan);
+public bool TryReserve(PlanId plan, long bytes);
+public void Release(PlanId plan, long bytes);
+public DiskQuotaExceededException CreateException(PlanId plan, long requested, long current, long cap);
+public sealed class DiskQuotaExceededException : Exception { public PlanId PlanId { get; } }
+namespace AiOrchestrator.Composition;
+public static partial class CompositionRoot { public static IServiceCollection AddEventLog(this IServiceCollection services); }
