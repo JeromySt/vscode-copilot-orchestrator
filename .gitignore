@@ -60,6 +60,10 @@ yarn-error.log*
 # Copilot CLI session state
 .copilot-cli/
 
+# .NET coverage results
+dotnet/coverage-results/
+coverage-results/
+
 # Auto-generated orchestrator instruction files (per-job UUID patterns)
 # Auto-generated healing instructions
 .github/instructions/orchestrator-*.instructions.md
