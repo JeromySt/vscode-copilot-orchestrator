@@ -42,8 +42,8 @@ public sealed class VsCodeTransportContractTests
     public void TRANSPORT_SOLE_VsRef_Analyzer()
     {
         string repoRoot = FindRepoRoot();
-        string srcDir = Path.Combine(repoRoot, "src", "dotnet");
-        Assert.True(Directory.Exists(srcDir), $"expected src/dotnet under {repoRoot}");
+        string srcDir = Path.Combine(repoRoot, "dotnet", "src");
+        Assert.True(Directory.Exists(srcDir), $"expected dotnet/src under {repoRoot}");
 
         string[] csprojFiles = Directory.GetFiles(srcDir, "*.csproj", SearchOption.AllDirectories);
 
@@ -212,7 +212,7 @@ public sealed class VsCodeTransportContractTests
         cts.Cancel();
 
         Func<Task> act = () => call;
-        await Assert.ThrowsAsync<OperationCanceledException>(act);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(act);
     }
 
     // -------------------------------------------------------------------------

@@ -14,8 +14,8 @@ internal static class RepoRoot
         DirectoryInfo? dir = new(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (Directory.Exists(Path.Combine(dir.FullName, "src", "dotnet"))
-                && Directory.Exists(Path.Combine(dir.FullName, "tests", "dotnet")))
+            if (Directory.Exists(Path.Combine(dir.FullName, "dotnet", "src"))
+                && Directory.Exists(Path.Combine(dir.FullName, "dotnet", "tests")))
             {
                 return dir.FullName;
             }

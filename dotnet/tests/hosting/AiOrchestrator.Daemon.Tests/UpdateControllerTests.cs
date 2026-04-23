@@ -289,8 +289,7 @@ public sealed class UpdateControllerTests : IDisposable
 
     private static (byte[] priv, byte[] pub) NewKeyPair()
     {
-        var priv = RandomNumberGenerator.GetBytes(32);
-        var pub = EcdsaSigner.DerivePublicKey(priv);
+        EcdsaSigner.GenerateKeyPair(out var priv, out var pub);
         return (priv, pub);
     }
 
@@ -347,7 +346,7 @@ public sealed class UpdateControllerTests : IDisposable
     private static string FindRepoRoot()
     {
         var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "src", "dotnet", "AiOrchestrator.sln")))
+        while (dir is not null && !File.Exists(Path.Combine(dir, "dotnet", "AiOrchestrator.slnx")))
         {
             dir = Path.GetDirectoryName(dir);
         }

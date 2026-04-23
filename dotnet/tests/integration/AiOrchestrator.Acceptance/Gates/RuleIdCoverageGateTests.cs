@@ -51,7 +51,7 @@ public sealed class RuleIdCoverageGateTests
 
         Assert.NotEmpty(report.AllRuleIds);
         Assert.True(report.Ok,
-            "every rule id named in §§3.27–3.33 must have a [ContractTest(\"<ID>\")] attribute somewhere under tests/dotnet/");
+            "every rule id named in §§3.27–3.33 must have a [ContractTest(\"<ID>\")] attribute somewhere under dotnet/tests/");
         Assert.Empty(report.UncoveredRuleIds);
     }
 

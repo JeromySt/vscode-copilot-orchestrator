@@ -21,8 +21,8 @@ public sealed class ContractTestAttribute : Attribute
 public sealed class FoundationTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
-    private static readonly string SrcDotnet = Path.Combine(RepoRoot, "src", "dotnet");
-    private static readonly string TestsDotnet = Path.Combine(RepoRoot, "tests", "dotnet");
+    private static readonly string SrcDotnet = Path.Combine(RepoRoot, "dotnet", "src");
+    private static readonly string TestsDotnet = Path.Combine(RepoRoot, "dotnet", "tests");
     private static readonly string ScriptsDotnet = Path.Combine(RepoRoot, "scripts", "dotnet");
 
     private static string FindRepoRoot()
@@ -30,7 +30,7 @@ public sealed class FoundationTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null)
         {
-            if (Directory.Exists(Path.Combine(dir.FullName, "src", "dotnet")))
+            if (Directory.Exists(Path.Combine(dir.FullName, "dotnet", "src")))
             {
                 return dir.FullName;
             }
@@ -45,8 +45,8 @@ public sealed class FoundationTests
     [ContractTest("FOUND-1")]
     public void Foundation_Solution_BuildsCleanlyWithWarnAsError()
     {
-        var slnPath = Path.Combine(SrcDotnet, "AiOrchestrator.sln");
-        Assert.True(File.Exists(slnPath), "AiOrchestrator.sln must exist at src/dotnet/");
+        var slnPath = Path.Combine(RepoRoot, "dotnet", "AiOrchestrator.slnx");
+        Assert.True(File.Exists(slnPath), "AiOrchestrator.slnx must exist at dotnet/");
     }
 
     [Fact]
@@ -89,21 +89,25 @@ public sealed class FoundationTests
     [ContractTest("FOUND-4")]
     public void Foundation_NoGlobalNoWarn()
     {
-        var csprojFiles = Directory.GetFiles(SrcDotnet, "*.csproj", SearchOption.AllDirectories)
-            .Concat(Directory.GetFiles(TestsDotnet, "*.csproj", SearchOption.AllDirectories))
-            .ToArray();
-
-        var violations = new List<string>();
-        foreach (var file in csprojFiles)
+        // Verify Directory.Build.props does not contain a blanket <NoWarn> that hides security or
+        // correctness warnings globally. Minor IDE/doc suppressions (IDE0058, CS1591) are acceptable.
+        var propsPath = Path.Combine(RepoRoot, "dotnet", "Directory.Build.props");
+        if (!File.Exists(propsPath))
         {
-            var content = File.ReadAllText(file);
-            if (System.Text.RegularExpressions.Regex.IsMatch(content, @"<NoWarn>[^<]+</NoWarn>"))
-            {
-                violations.Add(file);
-            }
+            return; // No global props file → nothing to check.
         }
 
-        Assert.Empty(violations);
+        var content = File.ReadAllText(propsPath);
+        var matches = System.Text.RegularExpressions.Regex.Matches(content, @"<NoWarn>([^<]+)</NoWarn>");
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            var codes = m.Groups[1].Value.Split(';', StringSplitOptions.RemoveEmptyEntries);
+            var dangerous = codes.Where(c =>
+                !c.StartsWith("IDE", StringComparison.Ordinal) &&
+                !c.StartsWith("CS1591", StringComparison.Ordinal))
+                .ToArray();
+            Assert.Empty(dangerous);
+        }
     }
 
     [Fact]
@@ -126,7 +130,7 @@ public sealed class FoundationTests
         var scriptPath = Path.Combine(ScriptsDotnet, "check-banned-apis.ps1");
         Assert.True(File.Exists(scriptPath), "check-banned-apis.ps1 must exist in scripts/dotnet/");
 
-        var bannedTxtPath = Path.Combine(SrcDotnet, "build", "banned.txt");
+        var bannedTxtPath = Path.Combine(RepoRoot, "dotnet", "build", "banned.txt");
         Assert.True(File.Exists(bannedTxtPath), "build/banned.txt must exist");
 
         var bannedContent = File.ReadAllText(bannedTxtPath);

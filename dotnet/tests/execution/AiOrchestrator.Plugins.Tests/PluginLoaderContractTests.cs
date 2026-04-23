@@ -445,6 +445,9 @@ public sealed class PluginLoaderContractTests : IDisposable
         // does not keep ALC-loaded type references alive in this method's frame.
         var weakRef = await LoadAndUnloadAlcAsync(loader);
 
+        // Dispose the loader so it releases any internal references to the ALC.
+        await loader.DisposeAsync();
+
         // Yield to force a new MoveNext() invocation of this outer state machine.
         // The local awaiter variable from the previous invocation held a strong
         // reference to the inner AsyncStateMachineBox (which contained results/plugin),
@@ -452,7 +455,7 @@ public sealed class PluginLoaderContractTests : IDisposable
         await Task.Yield();
 
         // Force multiple GC cycles to allow the collectible ALC to be reclaimed.
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 20; i++)
         {
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
@@ -461,6 +464,9 @@ public sealed class PluginLoaderContractTests : IDisposable
             {
                 break;
             }
+
+            // Give the finalizer thread more time between attempts.
+            await Task.Delay(10);
         }
 
         Assert.False(weakRef.TryGetTarget(out _),

@@ -238,13 +238,13 @@ public sealed class RedactionContractTests
     {
         // Walk up from the test binary to locate the repo root
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "src", "dotnet")))
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "dotnet", "src")))
         {
             dir = dir.Parent;
         }
 
         Assert.NotNull(dir);
-        var redactionSrc = Path.Combine(dir!.FullName, "src", "dotnet", "AiOrchestrator.Redaction");
+        var redactionSrc = Path.Combine(dir!.FullName, "dotnet", "src", "core", "AiOrchestrator.Redaction");
         Assert.True(Directory.Exists(redactionSrc), "AiOrchestrator.Redaction source directory must exist");
 
         var violations = Directory

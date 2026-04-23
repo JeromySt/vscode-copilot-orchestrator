@@ -545,10 +545,10 @@ public sealed class EventBusContractTests
         // Walk up from the test assembly to the repo and read EventBus.cs directly.
         var asmDir = Path.GetDirectoryName(typeof(EventBusContractTests).Assembly.Location)!;
         var dir = new DirectoryInfo(asmDir);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "AiOrchestrator.sln")))
+        while (dir is not null)
         {
             // climb until repo root
-            if (Directory.Exists(Path.Combine(dir.FullName, "src", "dotnet")))
+            if (Directory.Exists(Path.Combine(dir.FullName, "dotnet", "src")))
             {
                 break;
             }
@@ -561,7 +561,7 @@ public sealed class EventBusContractTests
             throw new FileNotFoundException("Could not locate repo root.");
         }
 
-        var path = Path.Combine(dir.FullName, "src", "dotnet", "AiOrchestrator.Eventing", fileName);
+        var path = Path.Combine(dir.FullName, "dotnet", "src", "eventing", "AiOrchestrator.Eventing", fileName);
         return File.ReadAllText(path);
     }
 

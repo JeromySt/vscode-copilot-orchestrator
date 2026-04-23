@@ -91,7 +91,7 @@ public sealed class CrashDumpTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            var candidate = Path.Combine(dir.FullName, "tests", "dotnet",
+            var candidate = Path.Combine(dir.FullName, "dotnet", "tests", "core",
                 "AiOrchestrator.Process.Tests", "Fixtures", "SegfaultFixture");
             if (Directory.Exists(candidate))
             {

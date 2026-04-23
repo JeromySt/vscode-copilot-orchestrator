@@ -285,7 +285,7 @@ public sealed class RunnerContractTests
     [ContractTest("RUNNER-PROC")]
     public void RUNNER_NEVER_PROCESS_START_DIRECTLY()
     {
-        // Roslyn-style source scan: no file under src/dotnet/AiOrchestrator.Agent may reference Process.Start.
+        // Roslyn-style source scan: no file under dotnet/src/execution/AiOrchestrator.Agent may reference Process.Start.
         var agentDir = LocateAgentSourceDir();
         var offenders = new List<string>();
         foreach (var file in Directory.EnumerateFiles(agentDir, "*.cs", SearchOption.AllDirectories))
@@ -349,11 +349,11 @@ public sealed class RunnerContractTests
 
     private static string LocateAgentSourceDir()
     {
-        // Walk up from the test binary until we find src/dotnet/AiOrchestrator.Agent.
+        // Walk up from the test binary until we find dotnet/src/execution/AiOrchestrator.Agent.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            var candidate = Path.Combine(dir.FullName, "src", "dotnet", "AiOrchestrator.Agent");
+            var candidate = Path.Combine(dir.FullName, "dotnet", "src", "execution", "AiOrchestrator.Agent");
             if (Directory.Exists(candidate))
             {
                 return candidate;
@@ -362,6 +362,6 @@ public sealed class RunnerContractTests
             dir = dir.Parent;
         }
 
-        throw new DirectoryNotFoundException("Could not locate src/dotnet/AiOrchestrator.Agent above " + AppContext.BaseDirectory);
+        throw new DirectoryNotFoundException("Could not locate dotnet/src/execution/AiOrchestrator.Agent above " + AppContext.BaseDirectory);
     }
 }

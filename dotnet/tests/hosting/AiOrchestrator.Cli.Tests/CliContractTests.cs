@@ -55,7 +55,7 @@ public sealed class CliContractTests
         string? dir = AppContext.BaseDirectory;
         for (int i = 0; i < 10 && dir is not null; i++)
         {
-            string candidate = Path.Combine(dir, "tests", "dotnet", "AiOrchestrator.Cli.Tests", "Snapshots");
+            string candidate = Path.Combine(dir, "dotnet", "tests", "hosting", "AiOrchestrator.Cli.Tests", "Snapshots");
             if (Directory.Exists(candidate))
             {
                 return candidate;
@@ -302,7 +302,7 @@ public sealed class CliContractTests
         string? dir = AppContext.BaseDirectory;
         for (int i = 0; i < 10 && dir is not null; i++)
         {
-            string candidate = Path.Combine(dir, "src", "dotnet", "AiOrchestrator.Cli");
+            string candidate = Path.Combine(dir, "dotnet", "src", "hosting", "AiOrchestrator.Cli");
             if (Directory.Exists(candidate))
             {
                 return candidate;

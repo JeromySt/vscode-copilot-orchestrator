@@ -66,6 +66,12 @@ public sealed class HostConcurrencyBrokerTests
     [ContractTest("CONC-BROKER-2")]
     public void CONC_BROKER_2_LinuxUdsIsPathBased()
     {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            // SocketPath defaults to a Unix path ("/run/...") — assertion is only meaningful on Unix.
+            return;
+        }
+
         // CONC-BROKER-2: UDS socket path must be filesystem-based (not abstract '\0' prefix)
         var opts = new BrokerOptions();
 

@@ -42,7 +42,7 @@ internal sealed class TempDir : IDisposable
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null)
         {
-            if (Directory.Exists(System.IO.Path.Combine(dir.FullName, "src", "dotnet")))
+            if (Directory.Exists(System.IO.Path.Combine(dir.FullName, "dotnet", "src")))
             {
                 return dir.FullName;
             }

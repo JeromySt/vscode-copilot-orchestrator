@@ -268,7 +268,7 @@ Assert.False(result.Ok, "an unsigned manifest cannot extend trust");
     public void TRUST_ROOT_4_DaemonNeverSignsWithBuildKey()
     {
         var srcRoot = LocateRepoRoot();
-        var srcDir = Path.Combine(srcRoot, "src", "dotnet");
+        var srcDir = Path.Combine(srcRoot, "dotnet", "src");
         var allCsFiles = Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories);
 
         var offenders = new System.Collections.Generic.List<string>();

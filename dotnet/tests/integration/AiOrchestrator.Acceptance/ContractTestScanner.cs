@@ -15,7 +15,7 @@ using AiOrchestrator.Models.Paths;
 namespace AiOrchestrator.Acceptance;
 
 /// <summary>
-/// Walks every <c>.cs</c> file under <c>tests/dotnet/</c> and returns the literal id strings
+/// Walks every <c>.cs</c> file under <c>dotnet/tests/</c> and returns the literal id strings
 /// passed to <c>[ContractTest("...")]</c> attributes.
 /// </summary>
 internal sealed partial class ContractTestScanner
@@ -30,7 +30,7 @@ internal sealed partial class ContractTestScanner
 
     public async ValueTask<ImmutableArray<string>> ScanAsync(AbsolutePath solutionRoot, CancellationToken ct)
     {
-        string testsRoot = Path.Combine(solutionRoot.Value, "tests", "dotnet");
+        string testsRoot = Path.Combine(solutionRoot.Value, "dotnet", "tests");
         if (!Directory.Exists(testsRoot))
         {
             return ImmutableArray<string>.Empty;
