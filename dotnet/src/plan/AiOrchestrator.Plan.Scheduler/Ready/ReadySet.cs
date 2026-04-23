@@ -28,10 +28,12 @@ internal sealed class ReadySet
     /// Returns the jobs that are ready to run given the current status snapshot.
     /// A job is ready if it is <see cref="JobStatus.Pending"/> and all predecessors are <see cref="JobStatus.Succeeded"/>.
     /// A job is blocked (never ready) if any predecessor is <see cref="JobStatus.Failed"/> or <see cref="JobStatus.Canceled"/>.
+    /// Results are sorted by priority: retries first, then most dependents, then alphabetical.
     /// </summary>
     /// <param name="currentStatuses">The current status of each job, keyed by <see cref="JobId"/>.</param>
-    /// <returns>The set of job IDs ready to execute.</returns>
-    public ImmutableArray<JobId> ComputeReady(IReadOnlyDictionary<JobId, JobStatus> currentStatuses)
+    /// <param name="plan">The plan used for priority sorting. When <see langword="null"/>, no sorting is applied.</param>
+    /// <returns>The set of job IDs ready to execute, sorted by scheduling priority.</returns>
+    public ImmutableArray<JobId> ComputeReady(IReadOnlyDictionary<JobId, JobStatus> currentStatuses, AiOrchestrator.Plan.Models.Plan? plan = null)
     {
         var ready = ImmutableArray.CreateBuilder<JobId>();
 
@@ -72,6 +74,11 @@ internal sealed class ReadySet
             {
                 ready.Add(jobId);
             }
+        }
+
+        if (plan is not null && ready.Count > 1)
+        {
+            ready.Sort(new ReadyJobPriorityComparer(plan));
         }
 
         return ready.ToImmutable();

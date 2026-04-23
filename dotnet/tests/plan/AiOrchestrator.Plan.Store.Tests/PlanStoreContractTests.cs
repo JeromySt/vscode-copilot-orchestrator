@@ -80,6 +80,16 @@ public sealed class PlanStoreContractTests : IDisposable
 
         await store.MutateAsync(
             id,
+            new JobStatusUpdated(0, default, default, "job-1", JobStatus.Ready),
+            IdempotencyKey.FromGuid(Guid.NewGuid()),
+            CancellationToken.None);
+        await store.MutateAsync(
+            id,
+            new JobStatusUpdated(0, default, default, "job-1", JobStatus.Scheduled),
+            IdempotencyKey.FromGuid(Guid.NewGuid()),
+            CancellationToken.None);
+        await store.MutateAsync(
+            id,
             new JobStatusUpdated(0, default, default, "job-1", JobStatus.Running),
             IdempotencyKey.FromGuid(Guid.NewGuid()),
             CancellationToken.None);
@@ -211,7 +221,7 @@ public sealed class PlanStoreContractTests : IDisposable
             await foreach (var snap in store.WatchAsync(id, cts.Token))
             {
                 received.Add(snap);
-                if (received.Count >= 3)
+                if (received.Count >= 5)
                 {
                     break;
                 }
@@ -229,6 +239,16 @@ public sealed class PlanStoreContractTests : IDisposable
 
         await store.MutateAsync(
             id,
+            new JobStatusUpdated(0, default, default, "j1", JobStatus.Ready),
+            IdempotencyKey.FromGuid(Guid.NewGuid()),
+            CancellationToken.None);
+        await store.MutateAsync(
+            id,
+            new JobStatusUpdated(0, default, default, "j1", JobStatus.Scheduled),
+            IdempotencyKey.FromGuid(Guid.NewGuid()),
+            CancellationToken.None);
+        await store.MutateAsync(
+            id,
             new JobStatusUpdated(0, default, default, "j1", JobStatus.Running),
             IdempotencyKey.FromGuid(Guid.NewGuid()),
             CancellationToken.None);
@@ -241,7 +261,7 @@ public sealed class PlanStoreContractTests : IDisposable
         // Subsequent snapshots reflect live mutations — no gap, no dup.
         Assert.True(received[1].Jobs.ContainsKey("j1"));
         Assert.True(received[1].Jobs.ContainsKey("j2"));
-        Assert.Equal(JobStatus.Running, received[2].Jobs["j1"].Status);
+        Assert.Equal(JobStatus.Running, received[4].Jobs["j1"].Status);
 
         // No duplicate snapshots — each is distinct.
         Assert.Equal(received.Count(), received.Distinct().Count());
@@ -454,6 +474,8 @@ public sealed class PlanStoreCoverageTests : IDisposable
         await store.MutateAsync(id, new JobAdded(0, default, default, node1), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
         await store.MutateAsync(id, new JobAdded(0, default, default, node2), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
         await store.MutateAsync(id, new JobDepsUpdated(0, default, default, "j2", ImmutableArray.Create("j1")), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
+        await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j1", JobStatus.Ready), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
+        await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j1", JobStatus.Scheduled), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
         await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j1", JobStatus.Running), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
         await store.MutateAsync(
             id,
@@ -551,7 +573,10 @@ public sealed class PlanStoreCoverageTests : IDisposable
         await store.MutateAsync(id, new JobAdded(0, default, default, new JobNode { Id = "j", Title = "J" }), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
         await store.CheckpointAsync(id, CancellationToken.None);
 
-        // Second mutation after checkpoint.
+        // Second mutations after checkpoint — follow valid state transitions.
+        await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j", JobStatus.Ready), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
+        await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j", JobStatus.Scheduled), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
+        await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j", JobStatus.Running), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
         await store.MutateAsync(id, new JobStatusUpdated(0, default, default, "j", JobStatus.Succeeded), IdempotencyKey.FromGuid(Guid.NewGuid()), CancellationToken.None);
 
         await store.DisposeAsync();

@@ -2,8 +2,8 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
-using AiOrchestrator.Models;
 using AiOrchestrator.Models.Ids;
+using AiOrchestrator.Plan.Models;
 
 namespace AiOrchestrator.Abstractions.Plan;
 

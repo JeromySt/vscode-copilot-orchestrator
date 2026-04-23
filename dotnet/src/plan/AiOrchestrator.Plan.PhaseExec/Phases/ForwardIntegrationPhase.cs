@@ -12,19 +12,19 @@ using Microsoft.Extensions.Logging;
 namespace AiOrchestrator.Plan.PhaseExec.Phases;
 
 /// <summary>
-/// ForwardIntegration phase: merges the target branch onto the worktree so downstream
+/// MergeReverseIntegration phase: merges the target branch onto the worktree so downstream
 /// dependent jobs see this job's changes integrated into their starting state.
 /// The lease (INV-7) is held until this phase completes.
 /// </summary>
-internal sealed class ForwardIntegrationPhase : IPhaseRunner
+internal sealed class MergeReverseIntegrationPhase : IPhaseRunner
 {
     private readonly IGitOperations git;
-    private readonly ILogger<ForwardIntegrationPhase> logger;
+    private readonly ILogger<MergeReverseIntegrationPhase> logger;
 
-    /// <summary>Initializes a new instance of the <see cref="ForwardIntegrationPhase"/> class.</summary>
+    /// <summary>Initializes a new instance of the <see cref="MergeReverseIntegrationPhase"/> class.</summary>
     /// <param name="git">The git operations facade.</param>
     /// <param name="logger">The component logger.</param>
-    public ForwardIntegrationPhase(IGitOperations git, ILogger<ForwardIntegrationPhase> logger)
+    public MergeReverseIntegrationPhase(IGitOperations git, ILogger<MergeReverseIntegrationPhase> logger)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(logger);
@@ -33,13 +33,13 @@ internal sealed class ForwardIntegrationPhase : IPhaseRunner
     }
 
     /// <inheritdoc/>
-    public JobPhase Phase => JobPhase.ForwardIntegration;
+    public JobPhase Phase => JobPhase.MergeReverseIntegration;
 
     /// <inheritdoc/>
     public ValueTask<CommitSha?> RunAsync(PhaseRunContext ctx, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(ctx);
-        this.logger.LogDebug("ForwardIntegration phase: jobId={JobId}", ctx.JobId);
+        this.logger.LogDebug("MergeReverseIntegration phase: jobId={JobId}", ctx.JobId);
         _ = this.git;
         return ValueTask.FromResult<CommitSha?>(null);
     }

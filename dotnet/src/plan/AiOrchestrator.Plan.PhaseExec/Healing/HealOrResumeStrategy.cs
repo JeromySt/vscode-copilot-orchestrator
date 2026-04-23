@@ -149,6 +149,24 @@ internal sealed class HealOrResumeStrategy
                     Reason = $"Timeout at {failedAt}.",
                 };
 
+            case PhaseFailureKind.ProcessCrash:
+                if (autoHealEnabled && prevHealAttempts < maxAutoHealAttempts)
+                {
+                    return new ResumeDecision
+                    {
+                        Mode = ResumeMode.AutoHeal,
+                        ResumeFromPhase = JobPhase.Work,
+                        Reason = $"Process crash at {failedAt} — auto-heal attempt {prevHealAttempts + 1}/{maxAutoHealAttempts}.",
+                    };
+                }
+
+                return new ResumeDecision
+                {
+                    Mode = ResumeMode.GiveUp,
+                    ResumeFromPhase = failedAt,
+                    Reason = "ProcessCrash — auto-heal exhausted or disabled.",
+                };
+
             case PhaseFailureKind.Internal:
             default:
                 return new ResumeDecision

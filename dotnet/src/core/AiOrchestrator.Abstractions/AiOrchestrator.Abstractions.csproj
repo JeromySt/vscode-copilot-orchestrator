@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
+    <ProjectReference Include="..\..\plan\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
   </ItemGroup>
 
 </Project>

@@ -6,12 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using AiOrchestrator.Models.Ids;
+using AiOrchestrator.Plan.Models;
 using AiOrchestrator.Plan.Scheduler.Channels;
 using AiOrchestrator.Plan.Scheduler.Events;
 using AiOrchestrator.Plan.Scheduler.Race;
 using AiOrchestrator.Plan.Scheduler.Ready;
 using JobNode = AiOrchestrator.Plan.Models.JobNode;
-using JobStatus = AiOrchestrator.Plan.Models.JobStatus;
 using PlanRecord = AiOrchestrator.Plan.Models.Plan;
 using Xunit;
 

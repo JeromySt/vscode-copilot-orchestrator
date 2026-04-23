@@ -66,3 +66,9 @@ AiOrchestrator.Plan.Scheduler.SchedulerOptions.ReadyChannelCapacity.get -> int
 AiOrchestrator.Plan.Scheduler.SchedulerOptions.ReadyChannelCapacity.init -> void
 AiOrchestrator.Plan.Scheduler.SchedulerOptions.ScheduledChannelCapacity.get -> int
 AiOrchestrator.Plan.Scheduler.SchedulerOptions.ScheduledChannelCapacity.init -> void
+AiOrchestrator.Plan.Scheduler.SvNodeBuilder
+static AiOrchestrator.Plan.Scheduler.SvNodeBuilder.Build(System.Collections.Generic.IEnumerable<string!>! leafJobIds, string? verifyInstructions = null) -> AiOrchestrator.Plan.Models.JobNode!
+static AiOrchestrator.Plan.Scheduler.SvNodeBuilder.ComputeLeafJobIds(AiOrchestrator.Plan.Models.Plan! plan) -> System.Collections.Generic.IReadOnlyList<string!>!
+static AiOrchestrator.Plan.Scheduler.SvNodeBuilder.FindSvNodeId(AiOrchestrator.Plan.Models.Plan! plan) -> string?
+static AiOrchestrator.Plan.Scheduler.SvNodeBuilder.SvTitlePrefix -> string!
+static AiOrchestrator.Plan.Scheduler.SvNodeBuilder.SyncDependencies(AiOrchestrator.Plan.Models.Plan! plan) -> System.Collections.Generic.IReadOnlyList<string!>?

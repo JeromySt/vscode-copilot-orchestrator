@@ -50,7 +50,8 @@
       "aiorchestrator.abstractions": {
         "type": "Project",
         "dependencies": {
-          "AiOrchestrator.Models": "[1.0.0, )"
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )"
         }
       },
       "aiorchestrator.audit": {
@@ -63,6 +64,9 @@
         }
       },
       "aiorchestrator.models": {
+        "type": "Project"
+      },
+      "aiorchestrator.plan.models": {
         "type": "Project"
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {

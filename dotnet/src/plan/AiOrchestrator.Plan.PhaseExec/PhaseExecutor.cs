@@ -20,7 +20,7 @@ using Microsoft.Extensions.Options;
 namespace AiOrchestrator.Plan.PhaseExec;
 
 /// <summary>
-/// Runs the per-job phase machine (Setup → Prechecks → Work → Postchecks → Commit → ForwardIntegration → Done)
+/// Runs the per-job phase machine (MergeFI → Setup → Prechecks → Work → Commit → Postchecks → MergeRI → Done)
 /// per §3.12.6, with HEAL-RESUME-* recovery (§3.31.4.3) and DISK-PLAN-* enforcement (§3.31.3.3).
 /// </summary>
 public sealed class PhaseExecutor : IPhaseExecutor
@@ -28,12 +28,13 @@ public sealed class PhaseExecutor : IPhaseExecutor
     /// <summary>The fixed phase pipeline order (INV-1).</summary>
     public static readonly IReadOnlyList<JobPhase> PhaseOrder = new[]
     {
+        JobPhase.MergeForwardIntegration,
         JobPhase.Setup,
         JobPhase.Prechecks,
         JobPhase.Work,
-        JobPhase.Postchecks,
         JobPhase.Commit,
-        JobPhase.ForwardIntegration,
+        JobPhase.Postchecks,
+        JobPhase.MergeReverseIntegration,
     };
 
     private readonly IPlanStore store;
@@ -112,8 +113,8 @@ public sealed class PhaseExecutor : IPhaseExecutor
         var attemptCount = 0;
         var healAttempts = 0;
         var phaseResumeAttempts = 0;
-        var startPhase = JobPhase.Setup;
-        var lastEndedAtPhase = JobPhase.Setup;
+        var startPhase = JobPhase.MergeForwardIntegration;
+        var lastEndedAtPhase = JobPhase.MergeForwardIntegration;
         var autoHealEnabled = this.autoHealEnabledSelector(job);
 
         while (true)
@@ -345,12 +346,13 @@ public sealed class PhaseExecutor : IPhaseExecutor
     {
         var timeout = phase switch
         {
+            JobPhase.MergeForwardIntegration => options.MergeFiTimeout,
             JobPhase.Setup => options.SetupTimeout,
             JobPhase.Prechecks => options.PrechecksTimeout,
             JobPhase.Work => options.WorkTimeout,
-            JobPhase.Postchecks => options.PostchecksTimeout,
             JobPhase.Commit => options.CommitTimeout,
-            JobPhase.ForwardIntegration => options.FiTimeout,
+            JobPhase.Postchecks => options.PostchecksTimeout,
+            JobPhase.MergeReverseIntegration => options.MergeRiTimeout,
             _ => TimeSpan.FromMinutes(5),
         };
 

@@ -30,6 +30,9 @@
       },
       "aiorchestrator.models": {
         "type": "Project"
+      },
+      "aiorchestrator.plan.models": {
+        "type": "Project"
       }
     }
   }

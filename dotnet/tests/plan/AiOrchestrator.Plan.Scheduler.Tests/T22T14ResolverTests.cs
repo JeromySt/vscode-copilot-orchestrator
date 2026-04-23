@@ -7,9 +7,9 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using AiOrchestrator.Models.Ids;
+using AiOrchestrator.Plan.Models;
 using AiOrchestrator.Plan.Scheduler.Race;
 using JobNode = AiOrchestrator.Plan.Models.JobNode;
-using JobStatus = AiOrchestrator.Plan.Models.JobStatus;
 using PlanRecord = AiOrchestrator.Plan.Models.Plan;
 using Xunit;
 

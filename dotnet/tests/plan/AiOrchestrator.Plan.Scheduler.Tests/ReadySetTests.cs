@@ -4,10 +4,10 @@
 
 using System.Collections.Generic;
 using AiOrchestrator.Models.Ids;
+using AiOrchestrator.Plan.Models;
 using AiOrchestrator.Plan.Scheduler.Ready;
 using PlanRecord = AiOrchestrator.Plan.Models.Plan;
 using JobNode = AiOrchestrator.Plan.Models.JobNode;
-using JobStatus = AiOrchestrator.Plan.Models.JobStatus;
 using Xunit;
 
 namespace AiOrchestrator.Plan.Scheduler.Tests;

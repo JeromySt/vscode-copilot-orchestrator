@@ -39,4 +39,7 @@ public enum PhaseFailureKind
 
     /// <summary>An internal invariant violation; never auto-healed.</summary>
     Internal = 9,
+
+    /// <summary>Process crashed with OS-level fault code (NTSTATUS on Windows, signal on Unix).</summary>
+    ProcessCrash = 10,
 }

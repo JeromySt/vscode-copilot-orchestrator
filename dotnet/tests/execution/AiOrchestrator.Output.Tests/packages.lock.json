@@ -130,7 +130,8 @@
       "aiorchestrator.abstractions": {
         "type": "Project",
         "dependencies": {
-          "AiOrchestrator.Models": "[1.0.0, )"
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )"
         }
       },
       "aiorchestrator.lineview": {
@@ -153,6 +154,9 @@
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.7, )",
           "Microsoft.Extensions.Options": "[10.0.7, )"
         }
+      },
+      "aiorchestrator.plan.models": {
+        "type": "Project"
       },
       "aiorchestrator.testkit": {
         "type": "Project",

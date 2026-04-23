@@ -190,12 +190,13 @@ internal static class Fixtures
 
     public static IEnumerable<IPhaseRunner> AllPassRunners(out FakePhaseRunner commit, CommitSha? sha = null)
     {
+        var mergeFi = new FakePhaseRunner(JobPhase.MergeForwardIntegration);
         var setup = new FakePhaseRunner(JobPhase.Setup);
         var pre = new FakePhaseRunner(JobPhase.Prechecks);
         var work = new FakePhaseRunner(JobPhase.Work);
         var post = new FakePhaseRunner(JobPhase.Postchecks);
         commit = new FakePhaseRunner(JobPhase.Commit, sha ?? new CommitSha("0000000000000000000000000000000000000000"));
-        var fi = new FakePhaseRunner(JobPhase.ForwardIntegration);
-        return new IPhaseRunner[] { setup, pre, work, post, commit, fi };
+        var mergeRi = new FakePhaseRunner(JobPhase.MergeReverseIntegration);
+        return new IPhaseRunner[] { mergeFi, setup, pre, work, commit, post, mergeRi };
     }
 }

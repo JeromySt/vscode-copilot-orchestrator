@@ -51,12 +51,13 @@ public sealed class PhaseExecutorContractTests
 
         var runners = new[]
         {
+            Make(JobPhase.MergeForwardIntegration),
             Make(JobPhase.Setup),
             Make(JobPhase.Prechecks),
             Make(JobPhase.Work),
-            Make(JobPhase.Postchecks),
             Make(JobPhase.Commit, SampleSha),
-            Make(JobPhase.ForwardIntegration),
+            Make(JobPhase.Postchecks),
+            Make(JobPhase.MergeReverseIntegration),
         };
 
         var exec = MakeExecutor(store, runners);
@@ -67,12 +68,13 @@ public sealed class PhaseExecutorContractTests
         Assert.Equal(JobPhase.Done, result.EndedAtPhase);
         Assert.Equal(
             new[] {
+                JobPhase.MergeForwardIntegration,
                 JobPhase.Setup,
                 JobPhase.Prechecks,
                 JobPhase.Work,
-                JobPhase.Postchecks,
                 JobPhase.Commit,
-                JobPhase.ForwardIntegration,
+                JobPhase.Postchecks,
+                JobPhase.MergeReverseIntegration,
             },
             seenOrder);
         Assert.Equal(SampleSha, result.CommitSha);
@@ -93,7 +95,7 @@ public sealed class PhaseExecutorContractTests
         var work = new FakePhaseRunner(JobPhase.Work, failureSelector: n => n == 1
             ? () => throw new PhaseExecutionException(PhaseFailureKind.TransientNetwork, JobPhase.Work, "net glitch")
             : null);
-        runners[2] = work;
+        runners[3] = work;
 
         var exec = MakeExecutor(store, runners);
 
@@ -117,7 +119,7 @@ public sealed class PhaseExecutorContractTests
         var work = new FakePhaseRunner(JobPhase.Work, failureSelector: n => n == 1
             ? () => throw new PhaseExecutionException(PhaseFailureKind.AgentNonZeroExit, JobPhase.Work, "agent died")
             : null);
-        runners[2] = work;
+        runners[3] = work;
 
         var exec = MakeExecutor(store, runners);
         var result = await exec.ExecuteAsync(planId, jobId, RunId.New(), default);
@@ -136,15 +138,15 @@ public sealed class PhaseExecutorContractTests
         var store = new StubPlanStore(plan);
 
         var runners = Fixtures.AllPassRunners(out _).ToList();
-        var fi = new FakePhaseRunner(JobPhase.ForwardIntegration, failureSelector: _ =>
-            () => throw new PhaseExecutionException(PhaseFailureKind.RemoteRejected, JobPhase.ForwardIntegration, "rejected"));
-        runners[5] = fi;
+        var fi = new FakePhaseRunner(JobPhase.MergeReverseIntegration, failureSelector: _ =>
+            () => throw new PhaseExecutionException(PhaseFailureKind.RemoteRejected, JobPhase.MergeReverseIntegration, "rejected"));
+        runners[6] = fi;
 
         var exec = MakeExecutor(store, runners);
         var result = await exec.ExecuteAsync(planId, jobId, RunId.New(), default);
 
         Assert.Equal(JobStatus.Failed, result.FinalStatus);
-        Assert.Equal(JobPhase.ForwardIntegration, result.EndedAtPhase);
+        Assert.Equal(JobPhase.MergeReverseIntegration, result.EndedAtPhase);
         Assert.Equal(1, result.AttemptCount);
         Assert.Equal(1, fi.Calls.Count);
     }
@@ -158,6 +160,7 @@ public sealed class PhaseExecutorContractTests
         var plan = Fixtures.MakePlan(planId, jobId);
         var store = new StubPlanStore(plan);
 
+        var mergeFi = new FakePhaseRunner(JobPhase.MergeForwardIntegration);
         var setup = new FakePhaseRunner(JobPhase.Setup);
         var pre = new FakePhaseRunner(JobPhase.Prechecks);
         var work = new FakePhaseRunner(JobPhase.Work, failureSelector: n => n == 1
@@ -165,9 +168,9 @@ public sealed class PhaseExecutorContractTests
             : null);
         var post = new FakePhaseRunner(JobPhase.Postchecks);
         var commit = new FakePhaseRunner(JobPhase.Commit, SampleSha);
-        var fi = new FakePhaseRunner(JobPhase.ForwardIntegration);
+        var mergeRi = new FakePhaseRunner(JobPhase.MergeReverseIntegration);
 
-        var exec = MakeExecutor(store, new IPhaseRunner[] { setup, pre, work, post, commit, fi });
+        var exec = MakeExecutor(store, new IPhaseRunner[] { mergeFi, setup, pre, work, commit, post, mergeRi });
         var result = await exec.ExecuteAsync(planId, jobId, RunId.New(), default);
 
         Assert.Equal(JobStatus.Succeeded, result.FinalStatus);
@@ -176,7 +179,7 @@ public sealed class PhaseExecutorContractTests
         Assert.Equal(2, work.Calls.Count);
         Assert.Equal(1, post.Calls.Count);
         Assert.Equal(1, commit.Calls.Count);
-        Assert.Equal(1, fi.Calls.Count);
+        Assert.Equal(1, mergeRi.Calls.Count);
     }
 
     [Fact]
@@ -191,7 +194,7 @@ public sealed class PhaseExecutorContractTests
         var runners = Fixtures.AllPassRunners(out _).ToList();
         var work = new FakePhaseRunner(JobPhase.Work, failureSelector: _ =>
             () => throw new PhaseExecutionException(PhaseFailureKind.AgentNonZeroExit, JobPhase.Work, "always fails"));
-        runners[2] = work;
+        runners[3] = work;
 
         var opts = new PhaseOptions { MaxAutoHealAttempts = 2 };
         var exec = MakeExecutor(store, runners, opts);
@@ -213,21 +216,22 @@ public sealed class PhaseExecutorContractTests
         var store = new StubPlanStore(plan);
 
         var quota = new RecordingDiskQuota(allowReserve: false);
+        var mergeFi = new FakePhaseRunner(JobPhase.MergeForwardIntegration);
         var setup = new FakePhaseRunner(JobPhase.Setup);
         var pre = new FakePhaseRunner(JobPhase.Prechecks);
         var work = new FakePhaseRunner(JobPhase.Work);
         var post = new FakePhaseRunner(JobPhase.Postchecks);
         var commit = new FakePhaseRunner(JobPhase.Commit, failureSelector: _ =>
             () => throw new DiskQuotaExceededException(planId, 1024L * 1024L, "quota exceeded"));
-        var fi = new FakePhaseRunner(JobPhase.ForwardIntegration);
+        var mergeRi = new FakePhaseRunner(JobPhase.MergeReverseIntegration);
 
-        var exec = MakeExecutor(store, new IPhaseRunner[] { setup, pre, work, post, commit, fi });
+        var exec = MakeExecutor(store, new IPhaseRunner[] { mergeFi, setup, pre, work, commit, post, mergeRi });
         var result = await exec.ExecuteAsync(planId, jobId, RunId.New(), default);
 
         Assert.Equal(JobStatus.Failed, result.FinalStatus);
         Assert.Equal(JobPhase.Commit, result.EndedAtPhase);
         Assert.Null(result.CommitSha);
-        Assert.Empty(fi.Calls);
+        Assert.Empty(mergeRi.Calls);
         _ = quota; // RecordingDiskQuota is exercised via a unit test of UnlimitedDiskQuota below
     }
 
@@ -320,7 +324,7 @@ public sealed class PhaseExecutorContractTests
         {
             OnRun = async ct => await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false),
         };
-        runners[2] = work;
+        runners[3] = work;
 
         var opts = new PhaseOptions { WorkTimeout = TimeSpan.FromMilliseconds(50), MaxAutoHealAttempts = 0 };
         var exec = MakeExecutor(store, runners, opts);
@@ -346,7 +350,7 @@ public sealed class PhaseExecutorContractTests
         {
             OnRun = async ct => await Task.Delay(TimeSpan.FromMinutes(5), ct).ConfigureAwait(false),
         };
-        runners[2] = work;
+        runners[3] = work;
 
         var exec = MakeExecutor(store, runners);
 
@@ -365,8 +369,8 @@ public sealed class PhaseExecutorContractTests
     }
 
     [Fact]
-    [ContractTest("PHASE-LEASE-FI")]
-    public async Task PHASE_LEASE_HeldThroughForwardIntegration()
+    [ContractTest("PHASE-LEASE-RI")]
+    public async Task PHASE_LEASE_HeldThroughMergeReverseIntegration()
     {
         var planId = PlanId.New();
         var jobId = JobId.New();
@@ -374,28 +378,29 @@ public sealed class PhaseExecutorContractTests
         var store = new StubPlanStore(plan);
 
         // Lease semantics are enforced by composition wiring (job 32). Here we verify the
-        // phase machine completes Setup..ForwardIntegration as one logical lease window:
-        // every phase from Setup through ForwardIntegration runs in the same attempt, in order.
+        // phase machine completes MergeFI..MergeRI as one logical lease window:
+        // every phase from MergeFI through MergeRI runs in the same attempt, in order.
         var seen = new List<JobPhase>();
         IPhaseRunner Make(JobPhase p, CommitSha? sha = null) => new TracingRunner(p, seen, sha);
 
         var runners = new[]
         {
+            Make(JobPhase.MergeForwardIntegration),
             Make(JobPhase.Setup),
             Make(JobPhase.Prechecks),
             Make(JobPhase.Work),
-            Make(JobPhase.Postchecks),
             Make(JobPhase.Commit, SampleSha),
-            Make(JobPhase.ForwardIntegration),
+            Make(JobPhase.Postchecks),
+            Make(JobPhase.MergeReverseIntegration),
         };
 
         var exec = MakeExecutor(store, runners);
         var result = await exec.ExecuteAsync(planId, jobId, RunId.New(), default);
 
         Assert.Equal(JobStatus.Succeeded, result.FinalStatus);
-        Assert.Equal(JobPhase.Setup, seen.First());
-        Assert.Equal(JobPhase.ForwardIntegration, seen.Last());
-        Assert.Equal(6, seen.Count);
+        Assert.Equal(JobPhase.MergeForwardIntegration, seen.First());
+        Assert.Equal(JobPhase.MergeReverseIntegration, seen.Last());
+        Assert.Equal(7, seen.Count);
     }
 
     [Fact]

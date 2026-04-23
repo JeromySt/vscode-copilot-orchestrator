@@ -13,18 +13,27 @@ public enum JobStatus
     /// <summary>All dependencies are satisfied; job is ready to execute.</summary>
     Ready = 1,
 
+    /// <summary>Job has been assigned to a runner but has not yet started.</summary>
+    Scheduled = 2,
+
     /// <summary>Job is currently executing.</summary>
-    Running = 2,
+    Running = 3,
+
+    /// <summary>Job completed but its output is being split across dependents.</summary>
+    CompletedSplit = 4,
 
     /// <summary>Job completed successfully.</summary>
-    Succeeded = 3,
+    Succeeded = 5,
 
     /// <summary>Job failed during execution.</summary>
-    Failed = 4,
+    Failed = 6,
+
+    /// <summary>Job cannot proceed because a dependency failed.</summary>
+    Blocked = 7,
 
     /// <summary>Job was canceled.</summary>
-    Canceled = 5,
+    Canceled = 8,
 
     /// <summary>Job was skipped due to plan-level decisions.</summary>
-    Skipped = 6,
+    Skipped = 9,
 }

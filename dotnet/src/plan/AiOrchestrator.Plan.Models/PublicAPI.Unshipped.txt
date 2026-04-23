@@ -39,13 +39,19 @@ AiOrchestrator.Plan.Models.JobNode.Transitions.init -> void
 AiOrchestrator.Plan.Models.JobNode.WorkSpec.get -> AiOrchestrator.Plan.Models.WorkSpec?
 AiOrchestrator.Plan.Models.JobNode.WorkSpec.init -> void
 AiOrchestrator.Plan.Models.JobStatus
-AiOrchestrator.Plan.Models.JobStatus.Canceled = 5 -> AiOrchestrator.Plan.Models.JobStatus
-AiOrchestrator.Plan.Models.JobStatus.Failed = 4 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Blocked = 7 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Canceled = 8 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.CompletedSplit = 4 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Failed = 6 -> AiOrchestrator.Plan.Models.JobStatus
 AiOrchestrator.Plan.Models.JobStatus.Pending = 0 -> AiOrchestrator.Plan.Models.JobStatus
 AiOrchestrator.Plan.Models.JobStatus.Ready = 1 -> AiOrchestrator.Plan.Models.JobStatus
-AiOrchestrator.Plan.Models.JobStatus.Running = 2 -> AiOrchestrator.Plan.Models.JobStatus
-AiOrchestrator.Plan.Models.JobStatus.Skipped = 6 -> AiOrchestrator.Plan.Models.JobStatus
-AiOrchestrator.Plan.Models.JobStatus.Succeeded = 3 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Running = 3 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Scheduled = 2 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Skipped = 9 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatus.Succeeded = 5 -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Models.JobStatusTransitions
+AiOrchestrator.Plan.Models.JobStatusTransitions.JobStatusTransitions() -> void
+static readonly AiOrchestrator.Plan.Models.JobStatusTransitions.AllowedTransitions -> System.Collections.Frozen.FrozenSet<(AiOrchestrator.Plan.Models.JobStatus From, AiOrchestrator.Plan.Models.JobStatus To)>!
 AiOrchestrator.Plan.Models.PhaseTiming
 AiOrchestrator.Plan.Models.PhaseTiming.CompletedAt.get -> System.DateTimeOffset?
 AiOrchestrator.Plan.Models.PhaseTiming.CompletedAt.init -> void
@@ -72,14 +78,18 @@ AiOrchestrator.Plan.Models.PlanJson
 static AiOrchestrator.Plan.Models.PlanJson.Deserialize(string! json) -> AiOrchestrator.Plan.Models.Plan?
 static AiOrchestrator.Plan.Models.PlanJson.Serialize(AiOrchestrator.Plan.Models.Plan! plan) -> string!
 AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Canceled = 5 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Archived = 7 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Failed = 6 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Partial = 4 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Paused = 2 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Pending = 0 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Running = 1 -> AiOrchestrator.Plan.Models.PlanStatus
-AiOrchestrator.Plan.Models.PlanStatus.Succeeded = 3 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Scaffolding = 0 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Pending = 1 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.PendingStart = 2 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Running = 3 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Pausing = 4 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Paused = 5 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Resumed = 6 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Succeeded = 7 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Partial = 8 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Canceled = 9 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Failed = 10 -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Models.PlanStatus.Archived = 11 -> AiOrchestrator.Plan.Models.PlanStatus
 AiOrchestrator.Plan.Models.StateTransition
 AiOrchestrator.Plan.Models.StateTransition.From.get -> AiOrchestrator.Plan.Models.JobStatus
 AiOrchestrator.Plan.Models.StateTransition.From.init -> void

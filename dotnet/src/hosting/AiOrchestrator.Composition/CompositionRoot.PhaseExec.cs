@@ -15,7 +15,7 @@ public static partial class CompositionRoot
     /// Registers the phase-executor services:
     /// <list type="bullet">
     ///   <item><see cref="PhaseExecutor"/> as the singleton <see cref="IPhaseExecutor"/>.</item>
-    ///   <item>The six per-phase runners (Setup/Prechecks/Work/Postchecks/Commit/ForwardIntegration).</item>
+    ///   <item>The seven per-phase runners (MergeFI/Setup/Prechecks/Work/Commit/Postchecks/MergeRI).</item>
     ///   <item><see cref="UnlimitedDiskQuota"/> as the default <see cref="IDiskQuota"/>.</item>
     ///   <item>A <see cref="NullCommitInputs"/> placeholder (replace at hosting time).</item>
     /// </list>
@@ -29,12 +29,13 @@ public static partial class CompositionRoot
         services.AddSingleton<IDiskQuota, UnlimitedDiskQuota>();
         services.AddSingleton<ICommitInputs, NullCommitInputs>();
 
+        services.AddSingleton<IPhaseRunner, MergeForwardIntegrationPhase>();
         services.AddSingleton<IPhaseRunner, SetupPhase>();
         services.AddSingleton<IPhaseRunner, PrechecksPhase>();
         services.AddSingleton<IPhaseRunner, WorkPhase>();
-        services.AddSingleton<IPhaseRunner, PostchecksPhase>();
         services.AddSingleton<IPhaseRunner, CommitPhase>();
-        services.AddSingleton<IPhaseRunner, ForwardIntegrationPhase>();
+        services.AddSingleton<IPhaseRunner, PostchecksPhase>();
+        services.AddSingleton<IPhaseRunner, MergeReverseIntegrationPhase>();
 
         services.AddSingleton<IPhaseExecutor, PhaseExecutor>();
 

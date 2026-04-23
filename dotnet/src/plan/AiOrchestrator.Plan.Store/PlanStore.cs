@@ -478,6 +478,7 @@ internal static class MutationApplier
             case JobStatusUpdated m:
                 if (jobs.TryGetValue(m.JobIdValue, out var ns))
                 {
+                    JobStatusTransitions.Validate(ns.Status, m.NewStatus);
                     jobs[m.JobIdValue] = ns with { Status = m.NewStatus };
                     return plan with { Jobs = jobs };
                 }
