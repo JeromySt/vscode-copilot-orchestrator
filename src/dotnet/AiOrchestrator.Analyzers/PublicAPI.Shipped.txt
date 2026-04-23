@@ -1,1 +1,0 @@
-#pragma warning disable RS0016 // PublicAPI.Unshipped.txt is the pending list.

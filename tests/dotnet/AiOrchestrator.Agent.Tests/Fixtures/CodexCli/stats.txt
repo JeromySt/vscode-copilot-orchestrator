@@ -1,4 +1,0 @@
-input_tokens: 200
-output_tokens: 80
-turns: 3
-cost_usd: 0.0050

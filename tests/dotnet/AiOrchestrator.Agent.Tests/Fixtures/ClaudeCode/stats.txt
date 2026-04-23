@@ -1,5 +1,0 @@
-input_tokens: 120
-output_tokens: 45
-turns: 2
-cost_usd: 0.0034
-raw.cache_read_tokens: 900

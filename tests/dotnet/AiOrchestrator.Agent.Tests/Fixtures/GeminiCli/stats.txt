@@ -1,3 +1,0 @@
-input_tokens: 300
-output_tokens: 150
-turns: 1

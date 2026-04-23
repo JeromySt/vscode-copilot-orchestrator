@@ -1,8 +1,0 @@
-{
-  "benchmarkId": "EventLog.Read_FullSegment",
-  "p50Ns": 620000,
-  "p99Ns": 1450000,
-  "allocatedBytes": 180000,
-  "capturedAt": "2026-04-21T00:00:00Z",
-  "runtime": ".NET 10 RyuJIT ServerGC"
-}

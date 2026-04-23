@@ -1,8 +1,0 @@
-{
-  "benchmarkId": "LineView.Project_1MB_AnsiHeavy",
-  "p50Ns": 1450000,
-  "p99Ns": 2900000,
-  "allocatedBytes": 180000,
-  "capturedAt": "2026-04-21T00:00:00Z",
-  "runtime": ".NET 10 RyuJIT ServerGC"
-}

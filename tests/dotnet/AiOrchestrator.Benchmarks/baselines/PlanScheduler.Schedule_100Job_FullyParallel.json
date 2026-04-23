@@ -1,8 +1,0 @@
-{
-  "benchmarkId": "PlanScheduler.Schedule_100Job_FullyParallel",
-  "p50Ns": 160000,
-  "p99Ns": 350000,
-  "allocatedBytes": 78000,
-  "capturedAt": "2026-04-21T00:00:00Z",
-  "runtime": ".NET 10 RyuJIT ServerGC"
-}

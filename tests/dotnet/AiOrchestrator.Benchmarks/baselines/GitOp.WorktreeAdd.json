@@ -1,8 +1,0 @@
-{
-  "benchmarkId": "GitOp.WorktreeAdd",
-  "p50Ns": 14000000,
-  "p99Ns": 29000000,
-  "allocatedBytes": 120000,
-  "capturedAt": "2026-04-21T00:00:00Z",
-  "runtime": ".NET 10 RyuJIT ServerGC"
-}

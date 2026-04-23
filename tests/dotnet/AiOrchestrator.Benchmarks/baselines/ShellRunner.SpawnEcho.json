@@ -1,8 +1,0 @@
-{
-  "benchmarkId": "ShellRunner.SpawnEcho",
-  "p50Ns": 4500000,
-  "p99Ns": 11000000,
-  "allocatedBytes": 64000,
-  "capturedAt": "2026-04-21T00:00:00Z",
-  "runtime": ".NET 10 RyuJIT ServerGC"
-}
