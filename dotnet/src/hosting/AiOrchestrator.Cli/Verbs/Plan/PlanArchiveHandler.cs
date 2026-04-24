@@ -20,6 +20,7 @@ internal sealed class PlanArchiveHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan archive";
 
     protected override string Description => "Archive a terminal plan.";

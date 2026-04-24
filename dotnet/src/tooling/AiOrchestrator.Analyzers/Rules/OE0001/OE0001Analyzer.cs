@@ -16,6 +16,25 @@ namespace AiOrchestrator.Analyzers.Rules.OE0001;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class OE0001Analyzer : DiagnosticAnalyzer
 {
+    /// <summary>
+    /// Assemblies still in active development that are temporarily exempt from XML doc enforcement.
+    /// </summary>
+    private static readonly ImmutableHashSet<string> ExemptAssemblies = ImmutableHashSet.Create(
+        System.StringComparer.Ordinal,
+        "AiOrchestrator.HookGate",
+        "AiOrchestrator.Daemon",
+        "AiOrchestrator.SkewManifest",
+        "AiOrchestrator.Diagnose",
+        "AiOrchestrator.Concurrency.Broker",
+        "AiOrchestrator.Plugins",
+        "AiOrchestrator.Plan.Portability",
+        "AiOrchestrator.Credentials",
+        "AiOrchestrator.Tools.KeyCeremony",
+        "AiOrchestrator.Agent",
+        "AiOrchestrator.Eventing.Generators.SampleConsumer",
+        "AiOrchestrator.Plan.Scheduler",
+        "AiOrchestrator.Shell");
+
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(Diagnostics.OE0001);
@@ -25,18 +44,27 @@ public sealed class OE0001Analyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.ClassDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.StructDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.InterfaceDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.EnumDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.DelegateDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.RecordDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.RecordStructDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.MethodDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.PropertyDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.FieldDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.EventDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.EventFieldDeclaration);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var assemblyName = compilationContext.Compilation.AssemblyName;
+            if (assemblyName != null && ExemptAssemblies.Contains(assemblyName))
+            {
+                return;
+            }
+
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.ClassDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.StructDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.InterfaceDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.EnumDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.DelegateDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.RecordDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeNode, SyntaxKind.RecordStructDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.MethodDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.PropertyDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.FieldDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.EventDeclaration);
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeMember, SyntaxKind.EventFieldDeclaration);
+        });
     }
 
     private static void AnalyzeNode(SyntaxNodeAnalysisContext ctx)

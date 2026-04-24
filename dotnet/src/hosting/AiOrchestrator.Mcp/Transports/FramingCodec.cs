@@ -11,6 +11,7 @@ namespace AiOrchestrator.Mcp.Transports;
 /// <summary>Encodes/decodes <see cref="JsonRpcEnvelope"/> values from UTF-8 byte payloads.</summary>
 internal static class FramingCodec
 {
+    /// <summary>Encodes a <see cref="JsonRpcEnvelope"/> into a UTF-8 JSON byte array.</summary>
     public static byte[] Encode(JsonRpcEnvelope env)
     {
         var dto = new JsonRpcEnvelopeDto
@@ -36,6 +37,7 @@ internal static class FramingCodec
         return JsonSerializer.SerializeToUtf8Bytes(dto, typeof(JsonRpcEnvelopeDto), McpJsonContext.Default);
     }
 
+    /// <summary>Decodes a UTF-8 JSON byte span into a <see cref="JsonRpcEnvelope"/>.</summary>
     public static JsonRpcEnvelope? Decode(ReadOnlySpan<byte> utf8)
     {
         var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });

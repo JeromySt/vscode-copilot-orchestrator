@@ -19,10 +19,12 @@ public static class AmbientContext
     /// Pushes a key/value pair into the ambient context for the current execution context.
     /// Disposing the returned scope restores the prior snapshot atomically.
     /// </summary>
+    /// <typeparam name="T">The type of the context value.</typeparam>
     /// <param name="key">The context key.</param>
     /// <param name="value">The context value.</param>
     /// <returns>A disposable that restores the ambient context to its prior state.</returns>
-    public static IDisposable Push(string key, object value)
+    public static IDisposable Push<T>(string key, T value)
+        where T : notnull
     {
         var prior = Current.Value ?? ImmutableDictionary<string, object>.Empty;
         Current.Value = prior.SetItem(key, value);
@@ -62,6 +64,7 @@ public static class AmbientContext
             this.snapshot = prior;
         }
 
+        /// <inheritdoc/>
         public void Dispose()
         {
             if (this.disposed)

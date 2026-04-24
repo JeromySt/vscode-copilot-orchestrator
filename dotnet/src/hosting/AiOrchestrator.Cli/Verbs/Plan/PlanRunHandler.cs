@@ -24,6 +24,7 @@ internal sealed class PlanRunHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan run";
 
     protected override string Description => "Run a plan and block until it terminates.";

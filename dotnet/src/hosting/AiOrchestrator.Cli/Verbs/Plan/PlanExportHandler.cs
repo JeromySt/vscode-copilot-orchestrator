@@ -23,6 +23,7 @@ internal sealed class PlanExportHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan export";
 
     protected override string Description => "Export a plan to a portable archive.";

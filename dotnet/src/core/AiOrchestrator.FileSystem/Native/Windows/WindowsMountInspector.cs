@@ -4,7 +4,6 @@
 
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using System.Text;
 using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.FileSystem.Mount;
 using AiOrchestrator.Models.Paths;
@@ -72,11 +71,11 @@ public sealed partial class WindowsMountInspector : IMountInspector
     private static MountKind ClassifyRemote(string root)
     {
         // For mapped network drives, query GetVolumeInformation for the FS type.
-        var volName = new StringBuilder(261);
-        var fsName = new StringBuilder(261);
-        if (GetVolumeInformation(root, volName, volName.Capacity, out _, out _, out _, fsName, fsName.Capacity))
+        var volName = new char[261];
+        var fsName = new char[261];
+        if (GetVolumeInformation(root, volName, volName.Length, out _, out _, out _, fsName, fsName.Length))
         {
-            var fs = fsName.ToString().ToUpperInvariant();
+            var fs = new string(fsName).TrimEnd('\0').ToUpperInvariant();
             if (fs.Contains("NFS", StringComparison.Ordinal))
             {
                 return MountKind.Nfs;
@@ -95,16 +94,16 @@ public sealed partial class WindowsMountInspector : IMountInspector
     [LibraryImport("kernel32.dll", EntryPoint = "GetDriveTypeW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial uint GetDriveType(string lpRootPathName);
 
-    [DllImport("kernel32.dll", EntryPoint = "GetVolumeInformationW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetVolumeInformationW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetVolumeInformation(
+    private static partial bool GetVolumeInformation(
         string lpRootPathName,
-        StringBuilder lpVolumeNameBuffer,
+        [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] char[] lpVolumeNameBuffer,
         int nVolumeNameSize,
         out uint lpVolumeSerialNumber,
         out uint lpMaximumComponentLength,
         out uint lpFileSystemFlags,
-        StringBuilder lpFileSystemNameBuffer,
+        [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 7)] char[] lpFileSystemNameBuffer,
         int nFileSystemNameSize);
 }
 #pragma warning restore SA1310

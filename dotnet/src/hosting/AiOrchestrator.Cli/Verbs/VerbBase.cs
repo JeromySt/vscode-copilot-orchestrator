@@ -25,6 +25,7 @@ internal abstract class VerbBase : ICliVerbHandler
         this.Services = services ?? throw new ArgumentNullException(nameof(services));
     }
 
+    /// <summary>Gets the CLI verb path (e.g. "plan create").</summary>
     public abstract string VerbPath { get; }
 
     /// <summary>Gets the short one-line description shown in help output.</summary>

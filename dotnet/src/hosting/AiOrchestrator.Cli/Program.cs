@@ -107,6 +107,7 @@ public sealed class Program
     {
         public static readonly EmptyServiceProvider Instance = new();
 
+        /// <inheritdoc/>
         public object? GetService(Type serviceType) => null;
     }
 }

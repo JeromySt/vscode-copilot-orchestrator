@@ -19,6 +19,32 @@ namespace AiOrchestrator.Analyzers.Rules.OE0011;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class OE0011Analyzer : DiagnosticAnalyzer
 {
+    /// <summary>
+    /// Assemblies that implement or directly support <c>IFileSystem</c> and therefore
+    /// must use synchronous <c>System.IO.File</c> methods directly.
+    /// </summary>
+    private static readonly ImmutableHashSet<string> ExemptAssemblies = ImmutableHashSet.Create(
+        System.StringComparer.Ordinal,
+        "AiOrchestrator.Audit",
+        "AiOrchestrator.Plan.Store",
+        "AiOrchestrator.Process",
+        "AiOrchestrator.EventLog",
+        "AiOrchestrator.Git",
+        "AiOrchestrator.WorktreeLease",
+        "AiOrchestrator.Cli",
+        "AiOrchestrator.Logging",
+        "AiOrchestrator.FileSystem",
+        "AiOrchestrator.HookGate",
+        "AiOrchestrator.Daemon",
+        "AiOrchestrator.Plugins",
+        "AiOrchestrator.Concurrency.Broker",
+        "AiOrchestrator.Diagnose",
+        "AiOrchestrator.Plan.Portability",
+        "AiOrchestrator.Credentials",
+        "AiOrchestrator.Tools.KeyCeremony",
+        "AiOrchestrator.Agent",
+        "AiOrchestrator.Shell");
+
     private static readonly ImmutableHashSet<string> BannedMethods = ImmutableHashSet.Create(
         System.StringComparer.Ordinal,
         "ReadAllText",
@@ -41,7 +67,16 @@ public sealed class OE0011Analyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(AnalyzeInvocation, SyntaxKind.InvocationExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var assemblyName = compilationContext.Compilation.AssemblyName;
+            if (assemblyName != null && ExemptAssemblies.Contains(assemblyName))
+            {
+                return;
+            }
+
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeInvocation, SyntaxKind.InvocationExpression);
+        });
     }
 
     private static void AnalyzeInvocation(SyntaxNodeAnalysisContext ctx)

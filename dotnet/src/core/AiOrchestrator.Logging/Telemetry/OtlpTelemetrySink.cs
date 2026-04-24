@@ -121,6 +121,7 @@ public sealed class OtlpTelemetrySink : ITelemetrySink, IDisposable
         {
         }
 
+        /// <inheritdoc/>
         public void Dispose()
         {
         }

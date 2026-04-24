@@ -20,6 +20,7 @@ internal sealed class PlanCancelHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan cancel";
 
     protected override string Description => "Cancel a running plan.";

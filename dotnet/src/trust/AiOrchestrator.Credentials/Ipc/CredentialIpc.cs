@@ -19,7 +19,7 @@ namespace AiOrchestrator.Credentials.Ipc;
 /// (INV-3 / CRED-IPC-2). See <c>docs/SECURITY.md</c> — "Same-uid threat model" — for scope
 /// limitations (INV-12).
 /// </summary>
-public sealed class CredentialIpc : IAsyncDisposable
+public sealed partial class CredentialIpc : IAsyncDisposable
 {
     private readonly AbsolutePath socketPath;
 #pragma warning disable CA1823, IDE0052
@@ -304,8 +304,8 @@ public sealed class CredentialIpc : IAsyncDisposable
         };
     }
 
-    [DllImport("libc", SetLastError = true, EntryPoint = "chmod")]
-    private static extern int ChmodNative(string pathname, uint mode);
+    [LibraryImport("libc", SetLastError = true, EntryPoint = "chmod", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int ChmodNative(string pathname, uint mode);
 
     private static void ChmodOwnerOnly(string path)
     {

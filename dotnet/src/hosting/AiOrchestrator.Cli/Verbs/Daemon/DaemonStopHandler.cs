@@ -17,6 +17,7 @@ internal sealed class DaemonStopHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "daemon stop";
 
     protected override string Description => "Stop the orchestrator daemon.";

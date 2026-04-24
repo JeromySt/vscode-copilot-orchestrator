@@ -26,10 +26,13 @@ internal sealed class NamedPipeTransport : IMcpTransport, IDisposable
         this.inner = new StdioTransport(pipe, pipe, ownsStreams: false);
     }
 
+    /// <inheritdoc/>
     public ValueTask<JsonRpcEnvelope?> ReceiveAsync(CancellationToken ct) => this.inner.ReceiveAsync(ct);
 
+    /// <inheritdoc/>
     public ValueTask SendAsync(JsonRpcEnvelope envelope, CancellationToken ct) => this.inner.SendAsync(envelope, ct);
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         this.inner.Dispose();

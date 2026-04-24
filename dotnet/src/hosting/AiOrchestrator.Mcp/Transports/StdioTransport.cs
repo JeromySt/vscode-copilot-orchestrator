@@ -38,6 +38,7 @@ internal sealed class StdioTransport : IMcpTransport, IDisposable
         this.ownsStreams = ownsStreams;
     }
 
+    /// <summary>Reads HTTP-style headers from the stream and extracts the Content-Length value.</summary>
     public static async Task<int?> ReadHeadersAsync(Stream stream, CancellationToken ct)
     {
         var sb = new StringBuilder(64);
@@ -81,6 +82,7 @@ internal sealed class StdioTransport : IMcpTransport, IDisposable
         return null;
     }
 
+    /// <inheritdoc/>
     public async ValueTask<JsonRpcEnvelope?> ReceiveAsync(CancellationToken ct)
     {
         int? contentLength = await ReadHeadersAsync(this.input, ct).ConfigureAwait(false);
@@ -112,6 +114,7 @@ internal sealed class StdioTransport : IMcpTransport, IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public async ValueTask SendAsync(JsonRpcEnvelope envelope, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(envelope);
@@ -132,6 +135,7 @@ internal sealed class StdioTransport : IMcpTransport, IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         this.writeLock.Dispose();

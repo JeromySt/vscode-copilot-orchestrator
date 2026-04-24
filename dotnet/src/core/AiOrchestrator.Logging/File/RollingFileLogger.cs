@@ -21,11 +21,14 @@ internal sealed class RollingFileLogger : ILogger
         this.provider = provider;
     }
 
+    /// <inheritdoc/>
     public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
 
+    /// <inheritdoc/>
     public IDisposable? BeginScope<TState>(TState state)
         where TState : notnull => null;
 
+    /// <inheritdoc/>
     public void Log<TState>(
         LogLevel logLevel,
         EventId eventId,

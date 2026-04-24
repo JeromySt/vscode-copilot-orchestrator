@@ -83,6 +83,32 @@ internal static class AnalyzerTestHelper
         var withAnalyzers = compilation.WithAnalyzers(ImmutableArray.Create(analyzer));
         return await withAnalyzers.GetAnalyzerDiagnosticsAsync();
     }
+
+    /// <summary>
+    /// Runs an analyzer against a consumer assembly that references a separate service assembly.
+    /// Use this when the analyzer distinguishes same-assembly vs cross-assembly instantiation.
+    /// </summary>
+    internal static async Task<ImmutableArray<Diagnostic>> GetCrossAssemblyDiagnosticsAsync(
+        string referencedSource, string referencedAssemblyName,
+        string consumerSource, DiagnosticAnalyzer analyzer)
+    {
+        var refTree = CSharpSyntaxTree.ParseText(referencedSource);
+        var refCompilation = CSharpCompilation.Create(
+            referencedAssemblyName,
+            new[] { refTree },
+            References,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var consumerTree = CSharpSyntaxTree.ParseText(consumerSource);
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { consumerTree },
+            References.Add(refCompilation.ToMetadataReference()),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var withAnalyzers = compilation.WithAnalyzers(ImmutableArray.Create(analyzer));
+        return await withAnalyzers.GetAnalyzerDiagnosticsAsync();
+    }
 }
 
 // OE0001 — Public type or member missing XML doc comment
@@ -125,12 +151,19 @@ public sealed class OE0002Tests
     [ContractTest("OE0002")]
     public async Task OE0002_PositiveCase_FlagsNewOutsideComposition()
     {
-        const string source = @"
+        // Service assembly: defines an AiOrchestrator interface and a class implementing it.
+        const string serviceSource = @"
+namespace AiOrchestrator.Contracts
+{
+    public interface IMyService { }
+}
 namespace AiOrchestrator.SomeService
 {
-    public class MyService { }
-}
-namespace AiOrchestrator.OtherService
+    public class MyService : AiOrchestrator.Contracts.IMyService { }
+}";
+        // Consumer assembly: instantiates the cross-assembly service outside a composition root.
+        const string consumerSource = @"
+namespace AiOrchestrator.OtherProject
 {
     using AiOrchestrator.SomeService;
     public class Consumer
@@ -138,7 +171,8 @@ namespace AiOrchestrator.OtherService
         public void Use() { var s = new MyService(); }
     }
 }";
-        var diags = await AnalyzerTestHelper.GetDiagnosticsAsync(source, new OE0002Analyzer());
+        var diags = await AnalyzerTestHelper.GetCrossAssemblyDiagnosticsAsync(
+            serviceSource, "ServiceAssembly", consumerSource, new OE0002Analyzer());
         Assert.Contains(diags, d => d.Id == DiagnosticIds.OE0002);
     }
 

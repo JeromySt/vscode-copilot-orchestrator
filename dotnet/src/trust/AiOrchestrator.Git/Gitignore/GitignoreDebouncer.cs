@@ -138,6 +138,7 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
         private CancellationTokenSource? pendingCts;
         private readonly object sync = new();
 
+        /// <summary>Schedules a debounced .gitignore commit after the specified delay.</summary>
         public void RequestWrite(string repoRoot, TimeSpan writeDelay, ILogger logger)
         {
             lock (this.sync)
@@ -179,6 +180,7 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
             }
         }
 
+        /// <summary>Cancels any pending debounced write.</summary>
         public void Cancel()
         {
             lock (this.sync)

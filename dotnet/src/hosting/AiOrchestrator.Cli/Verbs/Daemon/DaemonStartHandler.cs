@@ -17,6 +17,7 @@ internal sealed class DaemonStartHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "daemon start";
 
     protected override string Description => "Start the orchestrator daemon (job 34 provides the implementation).";

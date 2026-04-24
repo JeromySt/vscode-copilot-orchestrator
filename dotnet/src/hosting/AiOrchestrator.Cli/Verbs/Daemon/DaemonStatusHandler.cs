@@ -18,6 +18,7 @@ internal sealed class DaemonStatusHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "daemon status";
 
     protected override string Description => "Report the current daemon status.";

@@ -20,6 +20,7 @@ internal sealed class PlanFinalizeHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan finalize";
 
     protected override string Description => "Finalize a scaffolding plan into the PENDING state.";

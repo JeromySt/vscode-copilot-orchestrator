@@ -12,11 +12,37 @@ namespace AiOrchestrator.Analyzers.Rules.OE0004;
 
 /// <summary>
 /// OE0004 — Reports any use of <c>System.IO.File</c> or <c>System.IO.Directory</c> outside
-/// the <c>AiOrchestrator.FileSystem</c> project (identified by file path or namespace).
+/// the low-level infrastructure assemblies that <em>are</em> the filesystem abstraction layer.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class OE0004Analyzer : DiagnosticAnalyzer
 {
+    /// <summary>
+    /// Assemblies that implement or directly support <c>IFileSystem</c> and therefore
+    /// must use <c>System.IO.File</c> / <c>System.IO.Directory</c> directly.
+    /// </summary>
+    private static readonly ImmutableHashSet<string> ExemptAssemblies = ImmutableHashSet.Create(
+        System.StringComparer.Ordinal,
+        "AiOrchestrator.Audit",
+        "AiOrchestrator.Plan.Store",
+        "AiOrchestrator.Process",
+        "AiOrchestrator.EventLog",
+        "AiOrchestrator.Git",
+        "AiOrchestrator.WorktreeLease",
+        "AiOrchestrator.Cli",
+        "AiOrchestrator.Logging",
+        "AiOrchestrator.FileSystem",
+        "AiOrchestrator.HookGate",
+        "AiOrchestrator.Daemon",
+        "AiOrchestrator.Plugins",
+        "AiOrchestrator.Concurrency.Broker",
+        "AiOrchestrator.Diagnose",
+        "AiOrchestrator.Plan.Portability",
+        "AiOrchestrator.Credentials",
+        "AiOrchestrator.Tools.KeyCeremony",
+        "AiOrchestrator.Agent",
+        "AiOrchestrator.Shell");
+
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(Diagnostics.OE0004);
@@ -26,7 +52,16 @@ public sealed class OE0004Analyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(AnalyzeMemberAccess, SyntaxKind.SimpleMemberAccessExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var assemblyName = compilationContext.Compilation.AssemblyName;
+            if (assemblyName != null && ExemptAssemblies.Contains(assemblyName))
+            {
+                return;
+            }
+
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeMemberAccess, SyntaxKind.SimpleMemberAccessExpression);
+        });
     }
 
     private static void AnalyzeMemberAccess(SyntaxNodeAnalysisContext ctx)
@@ -57,11 +92,6 @@ public sealed class OE0004Analyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (IsInFileSystemProject(ctx.Node))
-        {
-            return;
-        }
-
         ctx.ReportDiagnostic(Diagnostic.Create(Diagnostics.OE0004, memberAccess.GetLocation(), fullName));
     }
 
@@ -75,12 +105,5 @@ public sealed class OE0004Analyzer : DiagnosticAnalyzer
             IFieldSymbol f => f.ContainingType,
             _ => null,
         };
-    }
-
-    private static bool IsInFileSystemProject(SyntaxNode node)
-    {
-        var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.IndexOf("AiOrchestrator.FileSystem", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-               filePath.IndexOf("FileSystem", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

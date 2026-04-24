@@ -22,6 +22,7 @@ internal sealed class PlanImportHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan import";
 
     protected override string Description => "Import a plan from a portable archive.";

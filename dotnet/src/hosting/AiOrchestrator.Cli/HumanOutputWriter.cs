@@ -31,11 +31,13 @@ internal sealed class HumanOutputWriter
     public bool ColorEnabled => this.colorEnabled;
 
     /// <summary>Writes <paramref name="value"/> to <paramref name="writer"/>.</summary>
+    /// <typeparam name="T">The type of the value to render.</typeparam>
     /// <param name="value">The value to render.</param>
     /// <param name="writer">The destination.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A completed <see cref="ValueTask"/>.</returns>
-    public async ValueTask WriteAsync(object value, TextWriter writer, CancellationToken ct)
+    public async ValueTask WriteAsync<T>(T value, TextWriter writer, CancellationToken ct)
+        where T : notnull
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(value);

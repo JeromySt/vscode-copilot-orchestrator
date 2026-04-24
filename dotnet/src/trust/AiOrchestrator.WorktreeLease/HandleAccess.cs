@@ -17,6 +17,7 @@ internal static class HandleAccess
     private static readonly PropertyInfo TokenProp = typeof(LeaseHandle).GetProperty(nameof(LeaseHandle.Token))!;
     private static readonly PropertyInfo ExpiresProp = typeof(LeaseHandle).GetProperty(nameof(LeaseHandle.ExpiresAt))!;
 
+    /// <summary>Updates the token and expiration of a <see cref="LeaseHandle"/> via reflection.</summary>
     public static void Update(LeaseHandle handle, FencingToken token, DateTimeOffset expiresAt)
     {
         TokenProp.SetValue(handle, token);

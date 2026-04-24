@@ -62,6 +62,13 @@ public sealed class OE0007Analyzer : DiagnosticAnalyzer
             return;
         }
 
+        // Only enforce on public and protected methods. Private/internal async methods
+        // often manage their own cancellation via captured tokens or their own CTS.
+        if (symbol.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Protected))
+        {
+            return;
+        }
+
         // Skip interface implementations where the interface itself lacks a CancellationToken.
         foreach (var iface in symbol.ContainingType.AllInterfaces)
         {

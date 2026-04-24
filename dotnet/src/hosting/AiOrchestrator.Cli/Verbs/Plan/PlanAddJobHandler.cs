@@ -21,6 +21,7 @@ internal sealed class PlanAddJobHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan add-job";
 
     protected override string Description => "Add a job to a scaffolding plan.";

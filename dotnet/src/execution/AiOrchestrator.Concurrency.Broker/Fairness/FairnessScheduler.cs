@@ -150,14 +150,15 @@ public sealed class FairnessScheduler
 
     /// <summary>Releases a previously admitted slot and potentially admits the next request.</summary>
     /// <param name="principalId">The principal releasing the slot.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>A <see cref="ValueTask"/> that completes when the release is processed.</returns>
-    public async ValueTask ReleaseAsync(string principalId)
+    public async ValueTask ReleaseAsync(string principalId, CancellationToken ct = default)
     {
         TaskCompletionSource<(DateTimeOffset, int)>? nextWaiter = null;
         DateTimeOffset admittedAt = default;
         int position = 0;
 
-        await this.slotLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        await this.slotLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             this.activeSlots--;
@@ -194,9 +195,10 @@ public sealed class FairnessScheduler
     /// A <see cref="ValueTask{TResult}"/> containing the list of pending waiters
     /// that the caller should cancel.
     /// </returns>
-    public async ValueTask<IReadOnlyList<TaskCompletionSource<(DateTimeOffset AdmittedAt, int Position)>>> DrainAsync()
+    /// <param name="ct">Cancellation token.</param>
+    public async ValueTask<IReadOnlyList<TaskCompletionSource<(DateTimeOffset AdmittedAt, int Position)>>> DrainAsync(CancellationToken ct = default)
     {
-        await this.slotLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        await this.slotLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var waiters = this.pendingRequests.Select(r => r.Waiter).ToList();

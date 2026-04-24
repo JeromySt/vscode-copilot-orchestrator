@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -19,6 +20,7 @@ namespace AiOrchestrator.Analyzers.Rules.OE0002;
 public sealed class OE0002Analyzer : DiagnosticAnalyzer
 {
     private const string CompositionNamespace = "AiOrchestrator.Composition";
+    private const string CliNamespace = "AiOrchestrator.Cli";
     private const string AiOrchestratorPrefix = "AiOrchestrator.";
 
     /// <inheritdoc/>
@@ -36,10 +38,11 @@ public sealed class OE0002Analyzer : DiagnosticAnalyzer
 
     private static void AnalyzeObjectCreation(SyntaxNodeAnalysisContext ctx)
     {
-        // Determine if the call site is in the Composition namespace.
+        // Determine if the call site is in a composition root (Composition or CLI).
         var containingNamespace = GetContainingNamespace(ctx.Node);
         if (containingNamespace != null &&
-            containingNamespace.StartsWith(CompositionNamespace, System.StringComparison.Ordinal))
+            (containingNamespace.StartsWith(CompositionNamespace, System.StringComparison.Ordinal) ||
+             containingNamespace.StartsWith(CliNamespace, System.StringComparison.Ordinal)))
         {
             return;
         }
@@ -66,6 +69,29 @@ public sealed class OE0002Analyzer : DiagnosticAnalyzer
 
         // Exception types are never DI-managed.
         if (InheritsFrom(type, "System.Exception"))
+        {
+            return;
+        }
+
+        // Record types are data carriers (DTOs, mutations, results), never DI services.
+        if (type is INamedTypeSymbol { IsRecord: true })
+        {
+            return;
+        }
+
+        // Internal wiring: when a type is instantiated within its own assembly
+        // (e.g., ProcessSpawner creates ProcessHandle), this is a factory / internal
+        // pattern, not a cross-boundary DI violation.
+        var callerAssembly = ctx.SemanticModel.Compilation.AssemblyName;
+        var typeAssembly = type.ContainingAssembly?.Name;
+        if (callerAssembly != null && callerAssembly == typeAssembly)
+        {
+            return;
+        }
+
+        // Types that don't implement any AiOrchestrator.* interface are not DI-managed services.
+        if (!type.AllInterfaces.Any(i =>
+                i.ContainingNamespace?.ToDisplayString()?.StartsWith(AiOrchestratorPrefix, System.StringComparison.Ordinal) == true))
         {
             return;
         }

@@ -323,26 +323,37 @@ public sealed class StreamRedirector : IAsyncDisposable
             this.StderrPump = Task.CompletedTask;
         }
 
+        /// <summary>Gets the job identifier.</summary>
         public JobId Job { get; }
 
+        /// <summary>Gets the run identifier.</summary>
         public RunId Run { get; }
 
+        /// <summary>Gets the cancellation token source for this job's output streams.</summary>
         public CancellationTokenSource Cancel { get; }
 
+        /// <summary>Gets or sets the linked cancellation token source.</summary>
         public CancellationTokenSource? LinkedCts { get; set; }
 
+        /// <summary>Gets the list of fanout subscriptions.</summary>
         public List<IAsyncDisposable> Subscriptions { get; }
 
+        /// <summary>Gets or sets the stdout pump task.</summary>
         public Task StdoutPump { get; set; }
 
+        /// <summary>Gets or sets the stderr pump task.</summary>
         public Task StderrPump { get; set; }
 
+        /// <summary>Gets the total number of stdout bytes received.</summary>
         public long TotalStdout => Interlocked.Read(ref this.totalStdout);
 
+        /// <summary>Gets the total number of stderr bytes received.</summary>
         public long TotalStderr => Interlocked.Read(ref this.totalStderr);
 
+        /// <summary>Atomically adds to the total stdout byte counter.</summary>
         public long AddStdout(long bytes) => Interlocked.Add(ref this.totalStdout, bytes);
 
+        /// <summary>Atomically adds to the total stderr byte counter.</summary>
         public long AddStderr(long bytes) => Interlocked.Add(ref this.totalStderr, bytes);
 
 #pragma warning disable SA1201
@@ -350,6 +361,7 @@ public sealed class StreamRedirector : IAsyncDisposable
         private long totalStderr;
 #pragma warning restore SA1201
 
+        /// <summary>Appends an output chunk to the appropriate ring buffer.</summary>
         public ValueTask RingAppend(OutputChunk chunk)
         {
             var span = chunk.Data.Span;
@@ -368,6 +380,7 @@ public sealed class StreamRedirector : IAsyncDisposable
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>Takes a snapshot of the current ring buffer contents and byte counters.</summary>
         public OutputSnapshot Snapshot()
         {
             byte[] outBytes;
@@ -391,7 +404,9 @@ public sealed class StreamRedirector : IAsyncDisposable
             };
         }
 
-        public async ValueTask ShutdownAsync()
+        /// <summary>Shuts down pumps and drains all subscriptions.</summary>
+        /// <param name="ct">Cancellation token.</param>
+        public async ValueTask ShutdownAsync(CancellationToken ct = default)
         {
             // INV-6 — drain pumps naturally. Pumps exit when the underlying
             // PipeReader is completed (writer side completed). Only cancel if
@@ -444,6 +459,7 @@ public sealed class StreamRedirector : IAsyncDisposable
             this.buffer = new byte[capacity];
         }
 
+        /// <summary>Appends data to the ring buffer, overwriting oldest bytes if full.</summary>
         public void Append(ReadOnlySpan<byte> data)
         {
             var cap = this.buffer.Length;
@@ -475,6 +491,7 @@ public sealed class StreamRedirector : IAsyncDisposable
             }
         }
 
+        /// <summary>Returns a copy of the current ring buffer contents.</summary>
         public byte[] Snapshot()
         {
             var result = new byte[this.count];
@@ -500,6 +517,7 @@ public sealed class StreamRedirector : IAsyncDisposable
     {
         public static readonly NullLineSink Instance = new();
 
+        /// <inheritdoc/>
         public void OnLine(ReadOnlySpan<byte> line)
         {
         }

@@ -31,6 +31,7 @@ internal sealed class PlanCreateHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan create";
 
     protected override string Description => "Create a new plan in SCAFFOLDING state.";

@@ -306,20 +306,28 @@ internal sealed class PlanState
         this.Checkpointer = new PlanCheckpointer(new AbsolutePath(Path.Combine(dir.Value, "checkpoint.json")), fs);
     }
 
+    /// <summary>Gets or sets the current in-memory plan snapshot.</summary>
     public AiOrchestrator.Plan.Models.Plan Plan { get; set; } = new();
 
+    /// <summary>Gets or sets the highest applied mutation sequence number.</summary>
     public long HighestSeq { get; set; } = -1;
 
+    /// <summary>Gets or sets the sequence number of the last checkpoint.</summary>
     public long LastCheckpointSeq { get; set; } = -1;
 
+    /// <summary>Gets or sets the timestamp of the last checkpoint.</summary>
     public DateTimeOffset LastCheckpointAt { get; set; }
 
+    /// <summary>Gets or sets the idempotency key used during plan creation.</summary>
     public IdempotencyKey CreateIdemKey { get; set; }
 
+    /// <summary>Gets the plan journal used for mutation append and replay.</summary>
     public PlanJournal Journal { get; }
 
+    /// <summary>Gets the plan checkpointer used for snapshot persistence.</summary>
     public PlanCheckpointer Checkpointer { get; }
 
+    /// <summary>Loads a plan state from disk by replaying the checkpoint and journal.</summary>
     public static async ValueTask<PlanState?> LoadAsync(AbsolutePath dir, IFileSystem fs, IClock clock, IOptionsMonitor<PlanStoreOptions> opts, CancellationToken ct)
     {
         var state = new PlanState(fs, clock, dir, opts);
@@ -348,6 +356,7 @@ internal sealed class PlanState
         return state;
     }
 
+    /// <summary>Writes the initial checkpoint to disk.</summary>
     public async ValueTask InitialCheckpointAsync(CancellationToken ct)
     {
         await this.gate.WaitAsync(ct).ConfigureAwait(false);
@@ -363,6 +372,7 @@ internal sealed class PlanState
         }
     }
 
+    /// <summary>Applies a mutation with idempotency checking and auto-checkpointing.</summary>
     public async ValueTask MutateAsync(PlanMutation mutation, IdempotencyKey idemKey, CancellationToken ct)
     {
         await this.gate.WaitAsync(ct).ConfigureAwait(false);
@@ -420,6 +430,7 @@ internal sealed class PlanState
         }
     }
 
+    /// <summary>Forces a checkpoint write to disk.</summary>
     public async ValueTask CheckpointAsync(CancellationToken ct)
     {
         await this.gate.WaitAsync(ct).ConfigureAwait(false);
@@ -435,8 +446,10 @@ internal sealed class PlanState
         }
     }
 
+    /// <summary>Returns the current in-memory plan snapshot.</summary>
     public AiOrchestrator.Plan.Models.Plan GetSnapshot() => this.Plan;
 
+    /// <summary>Registers a watcher that receives plan snapshots on each mutation.</summary>
     public async ValueTask<(AiOrchestrator.Plan.Models.Plan Snapshot, Channel<AiOrchestrator.Plan.Models.Plan> Channel)> RegisterWatcherAsync(CancellationToken ct)
     {
         await this.gate.WaitAsync(ct).ConfigureAwait(false);
@@ -456,6 +469,7 @@ internal sealed class PlanState
         }
     }
 
+    /// <summary>Unregisters a watcher channel and completes it.</summary>
     public void UnregisterWatcher(Channel<AiOrchestrator.Plan.Models.Plan> channel)
     {
         this.gate.Wait();
@@ -470,6 +484,7 @@ internal sealed class PlanState
         }
     }
 
+    /// <summary>Completes all registered watcher channels and clears the list.</summary>
     public void CompleteAllWatchers()
     {
         foreach (var w in this.watchers.ToArray())
@@ -495,6 +510,7 @@ internal sealed class PlanState
 /// <summary>Pure function that applies a mutation to an immutable Plan snapshot.</summary>
 internal static class MutationApplier
 {
+    /// <summary>Applies a single mutation to the plan snapshot and returns the updated plan.</summary>
     public static AiOrchestrator.Plan.Models.Plan Apply(AiOrchestrator.Plan.Models.Plan plan, PlanMutation mutation)
     {
         var jobs = new Dictionary<string, JobNode>(plan.Jobs, StringComparer.Ordinal);

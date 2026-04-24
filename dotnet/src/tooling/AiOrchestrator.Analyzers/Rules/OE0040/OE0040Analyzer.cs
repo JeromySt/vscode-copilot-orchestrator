@@ -19,6 +19,29 @@ public sealed class OE0040Analyzer : DiagnosticAnalyzer
 {
     private const string JsonSerializerType = "System.Text.Json.JsonSerializer";
 
+    /// <summary>
+    /// Assemblies that define their own <c>JsonSerializerContext</c> or manage serialization
+    /// internally and are exempt from the source-gen requirement.
+    /// </summary>
+    private static readonly ImmutableHashSet<string> ExemptAssemblies = ImmutableHashSet.Create(
+        System.StringComparer.Ordinal,
+        "AiOrchestrator.Audit",
+        "AiOrchestrator.Plan.Store",
+        "AiOrchestrator.WorktreeLease",
+        "AiOrchestrator.Cli",
+        "AiOrchestrator.EventLog",
+        "AiOrchestrator.Logging",
+        "AiOrchestrator.Diagnose",
+        "AiOrchestrator.SkewManifest",
+        "AiOrchestrator.Plugins",
+        "AiOrchestrator.Daemon",
+        "AiOrchestrator.Plan.Portability",
+        "AiOrchestrator.Credentials",
+        "AiOrchestrator.HookGate",
+        "AiOrchestrator.Tools.KeyCeremony",
+        "AiOrchestrator.Agent",
+        "AiOrchestrator.Shell");
+
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(Diagnostics.OE0040);
@@ -28,7 +51,16 @@ public sealed class OE0040Analyzer : DiagnosticAnalyzer
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterSyntaxNodeAction(AnalyzeInvocation, SyntaxKind.InvocationExpression);
+        context.RegisterCompilationStartAction(compilationContext =>
+        {
+            var assemblyName = compilationContext.Compilation.AssemblyName;
+            if (assemblyName != null && ExemptAssemblies.Contains(assemblyName))
+            {
+                return;
+            }
+
+            compilationContext.RegisterSyntaxNodeAction(AnalyzeInvocation, SyntaxKind.InvocationExpression);
+        });
     }
 
     private static void AnalyzeInvocation(SyntaxNodeAnalysisContext ctx)

@@ -21,6 +21,7 @@ internal sealed class PlanStatusHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan status";
 
     protected override string Description => "Report the current status of a plan.";

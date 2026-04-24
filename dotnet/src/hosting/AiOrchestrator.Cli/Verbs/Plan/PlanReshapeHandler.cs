@@ -21,6 +21,7 @@ internal sealed class PlanReshapeHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan reshape";
 
     protected override string Description => "Apply a reshape operation to a running plan.";

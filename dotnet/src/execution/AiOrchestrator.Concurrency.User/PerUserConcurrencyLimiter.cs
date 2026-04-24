@@ -184,16 +184,22 @@ public sealed class PerUserConcurrencyLimiter : IPerUserConcurrency, IAsyncDispo
         private readonly LinkedList<Waiter> queue = new();
         private int active;
 
+        /// <summary>Gets the number of currently active jobs for this user.</summary>
         public int ActiveCount => this.active;
 
+        /// <summary>Gets the number of queued waiters for this user.</summary>
         public int QueueCount => this.queue.Count;
 
+        /// <summary>Determines whether a new job can be admitted under the given limit.</summary>
         public bool CanAdmit(int max) => this.active < max;
 
+        /// <summary>Increments the active job count.</summary>
         public void IncrementActive() => this.active++;
 
+        /// <summary>Decrements the active job count.</summary>
         public void DecrementActive() => this.active--;
 
+        /// <summary>Enqueues a waiter and reports its queue position.</summary>
         public void Enqueue(Waiter waiter, out int position)
         {
             var node = this.queue.AddLast(waiter);
@@ -201,6 +207,7 @@ public sealed class PerUserConcurrencyLimiter : IPerUserConcurrency, IAsyncDispo
             position = this.queue.Count - 1;
         }
 
+        /// <summary>Dequeues the next waiter, or returns <c>null</c> if the queue is empty.</summary>
         public Waiter? TryDequeue()
         {
             if (this.queue.Count == 0)
@@ -214,6 +221,7 @@ public sealed class PerUserConcurrencyLimiter : IPerUserConcurrency, IAsyncDispo
             return waiter;
         }
 
+        /// <summary>Attempts to remove a specific waiter from the queue.</summary>
         public bool TryRemove(Waiter waiter)
         {
             if (waiter.Node == null)
@@ -237,14 +245,19 @@ public sealed class PerUserConcurrencyLimiter : IPerUserConcurrency, IAsyncDispo
             this.Tcs = new TaskCompletionSource<UserAdmission>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
+        /// <summary>Gets the job identifier for this waiter.</summary>
         public JobId JobId { get; }
 
+        /// <summary>Gets the time this waiter was enqueued.</summary>
         public DateTimeOffset QueuedAt { get; }
 
+        /// <summary>Gets the authenticated principal associated with this waiter.</summary>
         public AuthContext Principal { get; }
 
+        /// <summary>Gets the task completion source signaled on admission.</summary>
         public TaskCompletionSource<UserAdmission> Tcs { get; }
 
+        /// <summary>Gets or sets the linked list node for O(1) removal.</summary>
         public LinkedListNode<Waiter>? Node { get; set; }
     }
 }

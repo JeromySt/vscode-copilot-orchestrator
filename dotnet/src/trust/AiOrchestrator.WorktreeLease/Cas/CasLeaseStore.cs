@@ -280,16 +280,22 @@ internal sealed class CasLeaseStore
     /// <summary>Data-transfer object used for JSON (camelCase) (de)serialization.</summary>
     private sealed class LeaseFileDto
     {
+        /// <summary>Gets or sets the fencing token value.</summary>
         public long Token { get; set; }
 
+        /// <summary>Gets or sets the OS user name of the lease holder.</summary>
         public string? HolderUserName { get; set; }
 
+        /// <summary>Gets or sets the hash identifying the holder process.</summary>
         public string? HolderProcessHash { get; set; }
 
+        /// <summary>Gets or sets when the lease was acquired.</summary>
         public DateTimeOffset AcquiredAt { get; set; }
 
+        /// <summary>Gets or sets when the lease expires.</summary>
         public DateTimeOffset ExpiresAt { get; set; }
 
+        /// <summary>Gets or sets the schema version of the lease file format.</summary>
         public string? SchemaVersion { get; set; }
     }
 }

@@ -249,28 +249,40 @@ internal sealed class FanoutBroker
             this.Pump = Task.CompletedTask;
         }
 
+        /// <summary>Gets the unique subscription identifier.</summary>
         public Guid Id { get; }
 
+        /// <summary>Gets the job this subscription belongs to.</summary>
         public JobId Job { get; }
 
+        /// <summary>Gets the consumer kind.</summary>
         public OutputConsumerKind Kind { get; }
 
+        /// <summary>Gets the bounded channel for queuing output chunks.</summary>
         public Channel<OutputChunk> Channel { get; }
 
+        /// <summary>Gets the channel capacity.</summary>
         public int Capacity { get; }
 
+        /// <summary>Gets the handler delegate invoked for each output chunk.</summary>
         public Func<OutputChunk, CancellationToken, ValueTask> Handler { get; }
 
+        /// <summary>Gets the cancellation token source for this subscription.</summary>
         public CancellationTokenSource Cancel { get; }
 
+        /// <summary>Gets or sets the background pump task draining the channel.</summary>
         public Task Pump { get; set; }
 
+        /// <summary>Gets the channel writer endpoint.</summary>
         public ChannelWriter<OutputChunk> Writer => this.Channel.Writer;
 
+        /// <summary>Gets the channel reader endpoint.</summary>
         public ChannelReader<OutputChunk> Reader => this.Channel.Reader;
 
+        /// <summary>Gets the total number of bytes dropped due to back-pressure.</summary>
         public long DroppedBytes => Interlocked.Read(ref this.droppedBytes);
 
+        /// <summary>Atomically adds to the dropped byte counter and returns the new total.</summary>
         public long AddDropped(long bytes) => Interlocked.Add(ref this.droppedBytes, bytes);
 
 #pragma warning disable SA1201 // Field cannot follow property; isolated below for atomic counter only.
@@ -290,6 +302,7 @@ internal sealed class FanoutBroker
             this.sub = sub;
         }
 
+        /// <inheritdoc/>
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref this.disposed, 1) != 0)

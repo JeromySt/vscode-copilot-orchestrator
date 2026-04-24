@@ -26,6 +26,7 @@ internal sealed class PlanDiagnoseHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "plan diagnose";
 
     protected override string Description => "Produce a redacted diagnostic bundle for a plan.";

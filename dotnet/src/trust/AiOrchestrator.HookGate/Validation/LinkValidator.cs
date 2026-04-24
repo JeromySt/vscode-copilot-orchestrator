@@ -14,7 +14,7 @@ namespace AiOrchestrator.HookGate.Validation;
 /// tamper) or if the resolved canonical path is outside the worktree. Windows: rejects any
 /// reparse point whose resolved target leaves the worktree.
 /// </summary>
-internal sealed class LinkValidator
+internal sealed partial class LinkValidator
 {
     public ValueTask<LinkValidationResult> ValidateAsync(AbsolutePath hookFile, AbsolutePath worktreeRoot, CancellationToken ct)
     {
@@ -61,11 +61,11 @@ internal sealed class LinkValidator
         public long __unused_3;
     }
 
-    [DllImport("libc", SetLastError = true, EntryPoint = "__xstat64")]
-    private static extern int XStat64(int ver, string path, out LinuxStat64 buf);
+    [LibraryImport("libc", SetLastError = true, EntryPoint = "__xstat64", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int XStat64(int ver, string path, out LinuxStat64 buf);
 
-    [DllImport("libc", SetLastError = true, EntryPoint = "stat")]
-    private static extern int StatFallback(string path, out LinuxStat64 buf);
+    [LibraryImport("libc", SetLastError = true, EntryPoint = "stat", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int StatFallback(string path, out LinuxStat64 buf);
 
     [ExcludeFromCodeCoverage(Justification = "POSIX-only path; covered by Linux CI only.")]
     private static LinkValidationResult ValidatePosix(AbsolutePath hookFile, AbsolutePath worktreeRoot)

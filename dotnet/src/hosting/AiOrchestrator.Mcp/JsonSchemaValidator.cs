@@ -16,6 +16,7 @@ namespace AiOrchestrator.Mcp;
 /// </summary>
 internal static class JsonSchemaValidator
 {
+    /// <summary>Validates a JSON element against the given JSON Schema and returns a list of violations.</summary>
     public static IReadOnlyList<string> Validate(JsonNode schema, JsonElement instance)
     {
         var errors = new List<string>();

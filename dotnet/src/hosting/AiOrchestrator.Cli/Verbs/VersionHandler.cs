@@ -20,6 +20,7 @@ internal sealed class VersionHandler : VerbBase
     {
     }
 
+    /// <inheritdoc/>
     public override string VerbPath => "version";
 
     protected override string Description => "Print product, assembly, and runtime version information.";

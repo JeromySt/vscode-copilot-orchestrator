@@ -23,12 +23,16 @@ internal abstract class PlanToolBase : IMcpTool
         this.InputSchema = inputSchema;
     }
 
+    /// <summary>Gets the tool name.</summary>
     public string Name { get; }
 
+    /// <summary>Gets the tool description.</summary>
     public string Description { get; }
 
+    /// <summary>Gets the JSON Schema describing the tool's input parameters.</summary>
     public JsonNode InputSchema { get; }
 
+    /// <inheritdoc/>
     public ValueTask<JsonNode> InvokeAsync(JsonElement parameters, CancellationToken ct) =>
         this.InvokeCoreAsync(parameters, ct);
 
