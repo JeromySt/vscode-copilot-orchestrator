@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -460,6 +461,232 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
         Assert.NotNull(plan);
         Assert.All(plan!.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
         Assert.Equal(10, plan.Jobs.Count);
+    }
+
+    // ─────────────────── Test: Context Pressure Split ───────────────────
+
+    /// <summary>
+    /// Exercises the full <c>CompletedSplit</c> context-pressure lifecycle:
+    ///
+    /// <para>Initial DAG: <c>A → B → C</c></para>
+    ///
+    /// Job B's agent runs out of context window mid-work. The orchestrator:
+    /// <list type="number">
+    /// <item>Transitions B from <c>Running → CompletedSplit</c> (blocks C)</item>
+    /// <item>Reshapes the DAG: adds sub-jobs B1, B2 (depend on B) and fan-in BV
+    ///   (depends on B1+B2). C is rewired to depend on BV instead of B.</item>
+    /// <item>Transitions B from <c>CompletedSplit → Succeeded</c> (B1+B2 become ready)</item>
+    /// <item>Executes B1, B2 → BV → C.</item>
+    /// </list>
+    ///
+    /// Verifies:
+    /// <list type="bullet">
+    /// <item><c>CompletedSplit</c> blocks downstream (C stays Pending)</item>
+    /// <item>Sub-jobs are only ready after parent transitions to <c>Succeeded</c></item>
+    /// <item>Fan-in job waits for all sub-jobs</item>
+    /// <item>Original downstream C rewired through fan-in</item>
+    /// <item>Full plan succeeds with correct topology</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-CONTEXT-PRESSURE")]
+    public async Task DAG_LIFECYCLE_ContextPressure_SplitAndFanIn()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "context-pressure", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // Initial DAG: A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // ── Phase 1: Execute A normally ──
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        // B is now ready
+        var readyAfterA = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterA);
+        Assert.Contains(ids.Key("b"), readyAfterA);
+
+        // ── Phase 2: B runs but hits context pressure ──
+        // Manually drive B to Running (the orchestrator would do this)
+        await TransitionToRunning(store, planId, ids.Key("b"));
+
+        // Simulate: Work phase completes partially, agent reports context pressure.
+        // The orchestrator transitions B → CompletedSplit.
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.CompletedSplit));
+
+        // ── Verify: CompletedSplit blocks downstream ──
+        // C should NOT be ready because B is CompletedSplit (not Succeeded)
+        var readyDuringSplit = await ComputeReadySet(store, planId);
+        Assert.Empty(readyDuringSplit);
+
+        // Verify B is in CompletedSplit state
+        var planMidSplit = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(planMidSplit);
+        Assert.Equal(JobStatus.CompletedSplit, planMidSplit!.Jobs[ids.Key("b")].Status);
+        Assert.Equal(JobStatus.Pending, planMidSplit.Jobs[ids.Key("c")].Status);
+
+        // ── Phase 3: Reshape — fan-out sub-jobs + fan-in ──
+        // The orchestrator reads the checkpoint manifest and creates sub-jobs.
+        var b1Id = ids.Register("b1");
+        var b2Id = ids.Register("b2");
+        var bvId = ids.Register("bv"); // fan-in validation
+
+        // Add sub-jobs depending on B
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = b1Id.ToString(),
+                Title = "B-split-chunk-1",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("b") },
+                WorkSpec = new WorkSpec { Instructions = "Continue B's work: chunk 1 of 2" },
+            }));
+
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = b2Id.ToString(),
+                Title = "B-split-chunk-2",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("b") },
+                WorkSpec = new WorkSpec { Instructions = "Continue B's work: chunk 2 of 2" },
+            }));
+
+        // Fan-in validation depends on both sub-jobs
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = bvId.ToString(),
+                Title = "B-split-fanin-verify",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("b1"), ids.Key("b2") },
+                WorkSpec = new WorkSpec { Instructions = "Verify chunks B1+B2 are consistent" },
+            }));
+
+        // Rewire C: remove B dependency, add BV dependency
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("c"),
+            System.Collections.Immutable.ImmutableArray.Create(ids.Key("bv"))));
+
+        // ── Verify: sub-jobs not yet ready (B is CompletedSplit, not Succeeded) ──
+        var readyAfterReshape = await ComputeReadySet(store, planId);
+        Assert.Empty(readyAfterReshape);
+
+        // ── Phase 4: Finalize B → Succeeded ──
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.Succeeded));
+
+        // Now B1 and B2 should be ready (both depend only on B which is Succeeded)
+        var readyAfterBSucceeded = await ComputeReadySet(store, planId);
+        Assert.Equal(2, readyAfterBSucceeded.Count);
+        Assert.Contains(ids.Key("b1"), readyAfterBSucceeded);
+        Assert.Contains(ids.Key("b2"), readyAfterBSucceeded);
+
+        // C should NOT be ready (depends on BV which is Pending)
+        Assert.DoesNotContain(ids.Key("c"), readyAfterBSucceeded);
+        // BV should NOT be ready (depends on B1, B2 which are Pending)
+        Assert.DoesNotContain(ids.Key("bv"), readyAfterBSucceeded);
+
+        // ── Phase 5: Execute sub-jobs ──
+        await ExecuteJob(store, exec, planId, ids["b1"]);
+        await ExecuteJob(store, exec, planId, ids["b2"]);
+
+        // BV should now be ready (both B1 and B2 succeeded)
+        var readyAfterChunks = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterChunks);
+        Assert.Contains(ids.Key("bv"), readyAfterChunks);
+
+        await ExecuteJob(store, exec, planId, ids["bv"]);
+
+        // C should now be ready (BV succeeded)
+        var readyAfterFanIn = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterFanIn);
+        Assert.Contains(ids.Key("c"), readyAfterFanIn);
+
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        // ── Final verification ──
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+        var finalPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(finalPlan);
+        Assert.Equal(PlanStatus.Succeeded, finalPlan!.Status);
+        Assert.Equal(6, finalPlan.Jobs.Count); // A, B, B1, B2, BV, C
+        Assert.All(finalPlan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+
+        // Verify the reshaped topology is correct
+        var cNode = finalPlan.Jobs[ids.Key("c")];
+        Assert.Single(cNode.DependsOn);
+        Assert.Equal(ids.Key("bv"), cNode.DependsOn[0]);
+
+        var bvNode = finalPlan.Jobs[ids.Key("bv")];
+        Assert.Equal(2, bvNode.DependsOn.Count);
+        Assert.Contains(ids.Key("b1"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b2"), bvNode.DependsOn);
+    }
+
+    /// <summary>
+    /// Verifies that <c>CompletedSplit → Failed</c> propagates correctly:
+    /// if the reshape fails after entering <c>CompletedSplit</c>, the job
+    /// transitions to <c>Failed</c> and downstream jobs become <c>Blocked</c>.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-CONTEXT-PRESSURE-FAIL")]
+    public async Task DAG_LIFECYCLE_ContextPressure_ReshapeFailure_PropagatesBlocked()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "pressure-fail", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // Execute A
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        // B enters Running, then CompletedSplit
+        await TransitionToRunning(store, planId, ids.Key("b"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.CompletedSplit));
+
+        // Simulate: reshape failed (e.g., manifest corrupt, cycle detected)
+        // Transition CompletedSplit → Failed
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.Failed));
+
+        // C should be blocked (predecessor B is Failed)
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(JobStatus.Failed, plan!.Jobs[ids.Key("b")].Status);
+
+        // ReadySet should be empty — C's predecessor failed
+        var ready = await ComputeReadySet(store, planId);
+        Assert.Empty(ready);
+
+        // Mark C as Blocked explicitly (scheduler would do this)
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("c"), JobStatus.Blocked));
+
+        // Verify final state
+        var finalPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(finalPlan);
+        Assert.Equal(JobStatus.Succeeded, finalPlan!.Jobs[ids.Key("a")].Status);
+        Assert.Equal(JobStatus.Failed, finalPlan.Jobs[ids.Key("b")].Status);
+        Assert.Equal(JobStatus.Blocked, finalPlan.Jobs[ids.Key("c")].Status);
     }
 
     // ────────────────────────────── Test 9 ──────────────────────────────
