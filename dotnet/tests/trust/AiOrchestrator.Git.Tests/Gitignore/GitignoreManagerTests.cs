@@ -145,11 +145,13 @@ public sealed class GitignoreManagerTests : IDisposable
 public sealed class GitignoreCommitterTests : IDisposable
 {
     private readonly string repoPath;
+    private readonly GitignoreCommitter committer;
 
     public GitignoreCommitterTests()
     {
         this.repoPath = Path.Combine(Path.GetTempPath(), "aio-committer-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(this.repoPath);
+        this.committer = new GitignoreCommitter(new RealProcessSpawner());
 
         // Initialize a real git repo
         RunGit(this.repoPath, "init -b main");
@@ -187,7 +189,7 @@ public sealed class GitignoreCommitterTests : IDisposable
     [Fact]
     public async Task EnsureAndCommitAsync_CommitsEntries_OnFirstRun()
     {
-        var result = await GitignoreCommitter.EnsureAndCommitAsync(this.repoPath);
+        var result = await this.committer.EnsureAndCommitAsync(this.repoPath);
 
         Assert.True(result);
 
@@ -211,11 +213,11 @@ public sealed class GitignoreCommitterTests : IDisposable
     public async Task EnsureAndCommitAsync_NoOp_WhenAlreadyCommitted()
     {
         // First call — commits
-        var first = await GitignoreCommitter.EnsureAndCommitAsync(this.repoPath);
+        var first = await this.committer.EnsureAndCommitAsync(this.repoPath);
         Assert.True(first);
 
         // Second call — no-op
-        var second = await GitignoreCommitter.EnsureAndCommitAsync(this.repoPath);
+        var second = await this.committer.EnsureAndCommitAsync(this.repoPath);
         Assert.False(second);
 
         // Verify only 2 commits total (initial + gitignore)
@@ -226,7 +228,7 @@ public sealed class GitignoreCommitterTests : IDisposable
     [Fact]
     public async Task EnsureAndCommitAsync_CommitIsFirstAfterSeed()
     {
-        await GitignoreCommitter.EnsureAndCommitAsync(this.repoPath);
+        await this.committer.EnsureAndCommitAsync(this.repoPath);
 
         // Get commit messages in chronological order (oldest first)
         var messages = RunGit(this.repoPath, "log --format=%s --reverse")

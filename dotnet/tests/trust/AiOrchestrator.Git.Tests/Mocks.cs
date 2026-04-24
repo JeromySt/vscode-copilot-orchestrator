@@ -3,7 +3,9 @@
 // </copyright>
 
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO.Pipelines;
+using System.Text;
 using AiOrchestrator.Abstractions.Credentials;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.Models;
@@ -11,6 +13,7 @@ using AiOrchestrator.Models.Auth;
 using AiOrchestrator.Models.Paths;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using SysProcess = System.Diagnostics.Process;
 
 namespace AiOrchestrator.Git.Tests;
 
@@ -112,4 +115,114 @@ internal sealed class FakeProcessHandle : IProcessHandle
     public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct) => ValueTask.CompletedTask;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+/// <summary>
+/// Minimal <see cref="IProcessSpawner"/> that actually starts real processes.
+/// Used in integration tests that run real git commands.
+/// Test projects are exempt from OE0005/OE0012 analyzers.
+/// </summary>
+internal sealed class RealProcessSpawner : IProcessSpawner
+{
+    public ValueTask<IProcessHandle> SpawnAsync(ProcessSpec spec, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo(spec.Executable)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var arg in spec.Arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        if (spec.Environment is not null)
+        {
+            foreach (var kvp in spec.Environment)
+            {
+                psi.Environment[kvp.Key] = kvp.Value;
+            }
+        }
+
+        var process = SysProcess.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {spec.Executable}");
+
+        return ValueTask.FromResult<IProcessHandle>(new RealProcessHandle(process));
+    }
+}
+
+/// <summary>
+/// Wraps a real <see cref="SysProcess"/> behind the <see cref="IProcessHandle"/> interface.
+/// </summary>
+internal sealed class RealProcessHandle : IProcessHandle
+{
+    private readonly SysProcess process;
+    private readonly Pipe outPipe = new();
+    private readonly Pipe errPipe = new();
+    private readonly Pipe inPipe = new();
+    private readonly Task outPump;
+    private readonly Task errPump;
+
+    public RealProcessHandle(SysProcess process)
+    {
+        this.process = process;
+        this.outPump = PumpAsync(process.StandardOutput.BaseStream, this.outPipe.Writer);
+        this.errPump = PumpAsync(process.StandardError.BaseStream, this.errPipe.Writer);
+    }
+
+    public int ProcessId => this.process.Id;
+
+    public PipeReader StandardOut => this.outPipe.Reader;
+
+    public PipeReader StandardError => this.errPipe.Reader;
+
+    public PipeWriter StandardIn => this.inPipe.Writer;
+
+    public async Task<int> WaitForExitAsync(CancellationToken ct)
+    {
+        await this.process.WaitForExitAsync(ct).ConfigureAwait(false);
+        await Task.WhenAll(this.outPump, this.errPump).ConfigureAwait(false);
+        return this.process.ExitCode;
+    }
+
+    public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct)
+    {
+        try
+        {
+            this.process.Kill();
+        }
+        catch (InvalidOperationException)
+        {
+            // Already exited
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        this.process.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private static async Task PumpAsync(Stream source, PipeWriter writer)
+    {
+        try
+        {
+            var buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = await source.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+            {
+                await writer.WriteAsync(buffer.AsMemory(0, bytesRead)).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            await writer.CompleteAsync().ConfigureAwait(false);
+        }
+    }
 }

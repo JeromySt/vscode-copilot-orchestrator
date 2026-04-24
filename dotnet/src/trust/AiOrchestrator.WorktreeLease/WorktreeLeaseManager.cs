@@ -4,7 +4,6 @@
 
 #pragma warning disable CA1303 // Do not pass literals as localized parameters.
 
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
@@ -264,10 +263,17 @@ public sealed class WorktreeLeaseManager : IWorktreeLease
 
     private static string ComputeProcessHash()
     {
-        var raw = $"{Environment.MachineName}:{Environment.ProcessId}:{Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture)}";
+        var raw = $"{Environment.MachineName}:{Environment.ProcessId}:{ProcessStartupNonce}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes)[..16];
     }
+
+    /// <summary>
+    /// A nonce generated once per process lifetime, used as a substitute for
+    /// <c>Process.GetCurrentProcess().StartTime</c> to avoid a dependency on
+    /// <c>System.Diagnostics.Process</c>.
+    /// </summary>
+    private static readonly string ProcessStartupNonce = Guid.NewGuid().ToString("N");
 
     private async ValueTask ReleaseCoreAsync(LeaseHandle handle, CancellationToken ct)
     {

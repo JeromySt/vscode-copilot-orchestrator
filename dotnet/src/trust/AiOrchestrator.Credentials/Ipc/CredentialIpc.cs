@@ -246,7 +246,7 @@ public sealed partial class CredentialIpc : IAsyncDisposable
 
         if (pid == 0)
         {
-            pid = System.Diagnostics.Process.GetCurrentProcess().Id;
+            pid = Environment.ProcessId;
         }
 
         return new PeerInfo { Pid = pid, Uid = uid, UserSid = null };
@@ -298,7 +298,7 @@ public sealed partial class CredentialIpc : IAsyncDisposable
 
         return new PeerInfo
         {
-            Pid = System.Diagnostics.Process.GetCurrentProcess().Id,
+            Pid = Environment.ProcessId,
             Uid = 0,
             UserSid = Environment.UserName,
         };

@@ -3,17 +3,22 @@
 // </copyright>
 
 using System;
-using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Abstractions.Eventing;
+using AiOrchestrator.Abstractions.Process;
+using AiOrchestrator.Models;
 using AiOrchestrator.Models.Ids;
 using AiOrchestrator.Plan.Models;
 using AiOrchestrator.Plan.PhaseExec.Phases;
 using AiOrchestrator.Plan.Store;
 using Microsoft.Extensions.Options;
+using SysProcess = System.Diagnostics.Process;
 
 namespace AiOrchestrator.Plan.PhaseExec.Tests;
 
@@ -198,5 +203,92 @@ internal static class Fixtures
         commit = new FakePhaseRunner(JobPhase.Commit, sha ?? new CommitSha("0000000000000000000000000000000000000000"));
         var mergeRi = new FakePhaseRunner(JobPhase.MergeReverseIntegration);
         return new IPhaseRunner[] { mergeFi, setup, pre, work, commit, post, mergeRi };
+    }
+}
+
+/// <summary>
+/// Minimal <see cref="IProcessSpawner"/> that starts real processes for integration tests.
+/// </summary>
+internal sealed class TestProcessSpawner : IProcessSpawner
+{
+    public ValueTask<IProcessHandle> SpawnAsync(ProcessSpec spec, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo(spec.Executable)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        foreach (var arg in spec.Arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        var process = SysProcess.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {spec.Executable}");
+
+        return ValueTask.FromResult<IProcessHandle>(new TestProcessHandle(process));
+    }
+
+    private sealed class TestProcessHandle : IProcessHandle
+    {
+        private readonly SysProcess process;
+        private readonly Pipe outPipe = new();
+        private readonly Pipe errPipe = new();
+        private readonly Pipe inPipe = new();
+        private readonly Task outPump;
+        private readonly Task errPump;
+
+        public TestProcessHandle(SysProcess process)
+        {
+            this.process = process;
+            this.outPump = PumpAsync(process.StandardOutput.BaseStream, this.outPipe.Writer);
+            this.errPump = PumpAsync(process.StandardError.BaseStream, this.errPipe.Writer);
+        }
+
+        public int ProcessId => this.process.Id;
+        public PipeReader StandardOut => this.outPipe.Reader;
+        public PipeReader StandardError => this.errPipe.Reader;
+        public PipeWriter StandardIn => this.inPipe.Writer;
+
+        public async Task<int> WaitForExitAsync(CancellationToken ct)
+        {
+            await this.process.WaitForExitAsync(ct).ConfigureAwait(false);
+            await Task.WhenAll(this.outPump, this.errPump).ConfigureAwait(false);
+            return this.process.ExitCode;
+        }
+
+        public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct)
+        {
+            try { this.process.Kill(); }
+            catch (InvalidOperationException) { }
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            this.process.Dispose();
+            return ValueTask.CompletedTask;
+        }
+
+        private static async Task PumpAsync(Stream source, PipeWriter writer)
+        {
+            try
+            {
+                var buffer = new byte[4096];
+                int bytesRead;
+                while ((bytesRead = await source.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+                {
+                    await writer.WriteAsync(buffer.AsMemory(0, bytesRead)).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                await writer.CompleteAsync().ConfigureAwait(false);
+            }
+        }
     }
 }

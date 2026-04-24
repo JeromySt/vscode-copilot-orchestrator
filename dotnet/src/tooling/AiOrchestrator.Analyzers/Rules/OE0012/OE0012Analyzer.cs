@@ -63,7 +63,6 @@ public sealed class OE0012Analyzer : DiagnosticAnalyzer
     private static bool IsInExemptProject(SyntaxNode node)
     {
         var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.IndexOf("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-               filePath.IndexOf("AiOrchestrator.Git", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        return filePath.IndexOf("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

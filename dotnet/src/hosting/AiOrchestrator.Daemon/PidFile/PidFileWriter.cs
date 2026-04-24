@@ -3,9 +3,9 @@
 // </copyright>
 
 using System;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Abstractions.Io;
@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 namespace AiOrchestrator.Daemon.PidFile;
 
 /// <summary>Writes the daemon pid file atomically and detects conflicting live instances.</summary>
-internal sealed class PidFileWriter
+internal sealed partial class PidFileWriter
 {
     private readonly IFileSystem fs;
     private readonly IClock clock;
@@ -62,14 +62,9 @@ internal sealed class PidFileWriter
 
         try
         {
-            using var proc = Process.GetProcessById(pid);
-            return !proc.HasExited;
+            return IsProcessAlive(pid);
         }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
+        catch
         {
             return false;
         }
@@ -83,5 +78,40 @@ internal sealed class PidFileWriter
         }
 
         await this.WriteAsync(path, Environment.ProcessId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks whether a process with the given PID is alive, using platform-native
+    /// syscalls to avoid a dependency on <c>System.Diagnostics.Process</c>.
+    /// </summary>
+    private static bool IsProcessAlive(int pid)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var handle = NativeMethods.OpenProcess(0x00100000 /* SYNCHRONIZE */, false, pid);
+            if (handle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            NativeMethods.CloseHandle(handle);
+            return true;
+        }
+
+        // POSIX: kill(pid, 0) checks existence without sending a signal.
+        return NativeMethods.Kill(pid, 0) == 0;
+    }
+
+    private static partial class NativeMethods
+    {
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        public static partial IntPtr OpenProcess(int desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, int processId);
+
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool CloseHandle(IntPtr handle);
+
+        [LibraryImport("libc", EntryPoint = "kill", SetLastError = true)]
+        public static partial int Kill(int pid, int sig);
     }
 }

@@ -87,10 +87,6 @@ public sealed class OE0005Analyzer : DiagnosticAnalyzer
     private static bool IsInProcessProject(SyntaxNode node)
     {
         var filePath = node.SyntaxTree.FilePath ?? string.Empty;
-        return filePath.IndexOf("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-               filePath.IndexOf("AiOrchestrator.Git", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-               filePath.IndexOf("AiOrchestrator.WorktreeLease", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-               filePath.IndexOf("AiOrchestrator.Daemon", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-               filePath.IndexOf("AiOrchestrator.Credentials", System.StringComparison.OrdinalIgnoreCase) >= 0;
+        return filePath.IndexOf("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

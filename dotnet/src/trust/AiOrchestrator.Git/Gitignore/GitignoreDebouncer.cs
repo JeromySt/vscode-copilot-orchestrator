@@ -4,9 +4,12 @@
 
 using System;
 using System.Collections.Concurrent;
-using System.Diagnostics;
+using System.Collections.Immutable;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Process;
+using AiOrchestrator.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -28,19 +31,24 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
     private readonly ConcurrentDictionary<string, DebouncerState> repos = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeSpan delay;
     private readonly ILogger<GitignoreDebouncer> logger;
+    private readonly GitignoreCommitter committer;
+    private readonly IProcessSpawner spawner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GitignoreDebouncer"/> class.
     /// </summary>
+    /// <param name="spawner">Process spawner used to launch <c>git</c>.</param>
     /// <param name="delay">
     /// How long to wait after the last <see cref="RequestEnsure"/> call before
     /// flushing entries.  Defaults to <see cref="DefaultDelay"/> (30 s).
     /// </param>
     /// <param name="logger">Optional logger.</param>
-    public GitignoreDebouncer(TimeSpan? delay = null, ILogger<GitignoreDebouncer>? logger = null)
+    public GitignoreDebouncer(IProcessSpawner spawner, TimeSpan? delay = null, ILogger<GitignoreDebouncer>? logger = null)
     {
+        this.spawner = spawner ?? throw new ArgumentNullException(nameof(spawner));
         this.delay = delay ?? DefaultDelay;
         this.logger = logger ?? NullLogger<GitignoreDebouncer>.Instance;
+        this.committer = new GitignoreCommitter(spawner);
     }
 
     /// <summary>
@@ -53,7 +61,7 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
         var state = this.repos.GetOrAdd(repoRoot, _ => new DebouncerState());
-        state.RequestWrite(repoRoot, this.delay, this.logger);
+        state.RequestWrite(repoRoot, this.delay, this.committer, this.logger);
     }
 
     /// <summary>
@@ -67,13 +75,13 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(repoRoot);
 
-        var hasChanges = await HasUncommittedGitignoreAsync(repoRoot, ct).ConfigureAwait(false);
+        var hasChanges = await this.HasUncommittedGitignoreAsync(repoRoot, ct).ConfigureAwait(false);
 
         if (hasChanges)
         {
             try
             {
-                await RunGitAsync(repoRoot, "stash push -m \"aio-gitignore-autostash\" -- .gitignore", ct)
+                await this.RunGitAsync(repoRoot, ["stash", "push", "-m", "aio-gitignore-autostash", "--", ".gitignore"], ct)
                     .ConfigureAwait(false);
                 this.logger.LogDebug("Stashed uncommitted .gitignore changes in {Repo}", repoRoot);
             }
@@ -94,7 +102,7 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if a commit was made; otherwise <c>false</c>.</returns>
     public Task<bool> EnsureNowAsync(string repoRoot, CancellationToken ct = default)
-        => GitignoreCommitter.EnsureAndCommitAsync(repoRoot, ct);
+        => this.committer.EnsureAndCommitAsync(repoRoot, ct);
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
@@ -108,29 +116,53 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    private static async Task<bool> HasUncommittedGitignoreAsync(string repoRoot, CancellationToken ct)
+    private async Task<bool> HasUncommittedGitignoreAsync(string repoRoot, CancellationToken ct)
     {
-        var output = await RunGitAsync(repoRoot, "status --porcelain -- .gitignore", ct)
+        var output = await this.RunGitAsync(repoRoot, ["status", "--porcelain", "--", ".gitignore"], ct)
             .ConfigureAwait(false);
         return !string.IsNullOrWhiteSpace(output);
     }
 
-    private static async Task<string> RunGitAsync(string workDir, string args, CancellationToken ct)
+    private async Task<string> RunGitAsync(string workDir, string[] args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo("git", args)
+        var argv = ImmutableArray.CreateBuilder<string>(args.Length + 2);
+        argv.Add("-C");
+        argv.Add(workDir);
+        argv.AddRange(args);
+
+        var spec = new ProcessSpec
         {
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            Producer = "AiOrchestrator.Git",
+            Description = $"git {args[0]}",
+            Executable = "git",
+            Arguments = argv.ToImmutable(),
         };
 
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start git process");
-        var output = await proc.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
-        await proc.WaitForExitAsync(ct).ConfigureAwait(false);
-        return output.Trim();
+        await using var handle = await this.spawner.SpawnAsync(spec, ct).ConfigureAwait(false);
+        var stdout = await ReadAllAsync(handle.StandardOut, ct).ConfigureAwait(false);
+        await handle.WaitForExitAsync(ct).ConfigureAwait(false);
+        return stdout.Trim();
+    }
+
+    private static async Task<string> ReadAllAsync(System.IO.Pipelines.PipeReader reader, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        while (true)
+        {
+            var read = await reader.ReadAsync(ct).ConfigureAwait(false);
+            foreach (var segment in read.Buffer)
+            {
+                sb.Append(Encoding.UTF8.GetString(segment.Span));
+            }
+
+            reader.AdvanceTo(read.Buffer.End);
+            if (read.IsCompleted)
+            {
+                break;
+            }
+        }
+
+        return sb.ToString();
     }
 
     private sealed class DebouncerState
@@ -139,7 +171,7 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
         private readonly object sync = new();
 
         /// <summary>Schedules a debounced .gitignore commit after the specified delay.</summary>
-        public void RequestWrite(string repoRoot, TimeSpan writeDelay, ILogger logger)
+        public void RequestWrite(string repoRoot, TimeSpan writeDelay, GitignoreCommitter committer, ILogger logger)
         {
             lock (this.sync)
             {
@@ -155,7 +187,7 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
                         {
                             await Task.Delay(writeDelay, ct).ConfigureAwait(false);
 
-                            var committed = await GitignoreCommitter.EnsureAndCommitAsync(repoRoot, ct)
+                            var committed = await committer.EnsureAndCommitAsync(repoRoot, ct)
                                 .ConfigureAwait(false);
 
                             if (committed)

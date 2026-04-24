@@ -14,6 +14,7 @@ namespace AiOrchestrator.Git.Tests.Gitignore;
 public sealed class GitignoreDebouncerTests : IDisposable
 {
     private readonly string repoRoot;
+    private readonly RealProcessSpawner spawner = new();
 
     public GitignoreDebouncerTests()
     {
@@ -46,7 +47,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task RequestEnsure_CommitsAfterDelay()
     {
-        await using var debouncer = new GitignoreDebouncer(delay: TimeSpan.FromMilliseconds(500));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromMilliseconds(500));
 
         debouncer.RequestEnsure(this.repoRoot);
 
@@ -64,7 +65,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task RequestEnsure_ResetsTimer_OnRapidCalls()
     {
-        await using var debouncer = new GitignoreDebouncer(delay: TimeSpan.FromSeconds(1));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromSeconds(1));
 
         // T=0: first request
         debouncer.RequestEnsure(this.repoRoot);
@@ -100,7 +101,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
         Assert.NotEmpty(statusBefore);
 
         // OnBranchSwitch should stash the change
-        await using var debouncer = new GitignoreDebouncer(delay: TimeSpan.FromMilliseconds(500));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromMilliseconds(500));
         await debouncer.OnBranchSwitchAsync(this.repoRoot);
 
         // Working tree should be clean after stash
@@ -116,7 +117,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task EnsureNow_BypassesDebounce()
     {
-        await using var debouncer = new GitignoreDebouncer(delay: TimeSpan.FromSeconds(60));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromSeconds(60));
 
         var committed = await debouncer.EnsureNowAsync(this.repoRoot);
 
@@ -128,7 +129,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task Dispose_CancelsPending()
     {
-        var debouncer = new GitignoreDebouncer(delay: TimeSpan.FromSeconds(5));
+        var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromSeconds(5));
         debouncer.RequestEnsure(this.repoRoot);
 
         // Dispose immediately — should cancel the pending write

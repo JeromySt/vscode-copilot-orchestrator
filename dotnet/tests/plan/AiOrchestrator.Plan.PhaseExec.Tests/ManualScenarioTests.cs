@@ -558,7 +558,7 @@ public sealed class ManualScenarioTests : IDisposable
             RunGit(this.repoPath, "commit", "-m", "Initial commit");
 
             // Ensure orchestrator .gitignore entries are committed before any plan execution
-            AiOrchestrator.Git.Gitignore.GitignoreCommitter
+            new AiOrchestrator.Git.Gitignore.GitignoreCommitter(new TestProcessSpawner())
                 .EnsureAndCommitAsync(this.repoPath)
                 .GetAwaiter().GetResult();
         }

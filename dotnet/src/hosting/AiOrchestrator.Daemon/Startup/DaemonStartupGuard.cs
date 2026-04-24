@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.Git.Gitignore;
 using Microsoft.Extensions.Logging;
 
@@ -21,12 +22,14 @@ public static class DaemonStartupGuard
     /// </summary>
     public static async Task EnsureGitignoreAsync(
         string repoRoot,
+        IProcessSpawner spawner,
         ILogger? logger = null,
         CancellationToken ct = default)
     {
         try
         {
-            var committed = await GitignoreCommitter.EnsureAndCommitAsync(repoRoot, ct)
+            var committer = new GitignoreCommitter(spawner);
+            var committed = await committer.EnsureAndCommitAsync(repoRoot, ct)
                 .ConfigureAwait(false);
 
             if (committed)
