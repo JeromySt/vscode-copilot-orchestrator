@@ -689,6 +689,264 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
         Assert.Equal(JobStatus.Blocked, finalPlan.Jobs[ids.Key("c")].Status);
     }
 
+    // ──────────── Test: Chained / Nested Context Pressure Split ─────────────
+
+    /// <summary>
+    /// Exercises chained (nested) context pressure splits where sub-jobs themselves
+    /// hit context pressure and split further. Inner sub-jobs do NOT create their own
+    /// fan-in — they all fan into the outermost verification job.
+    ///
+    /// <para>Initial DAG: <c>A → B → C</c></para>
+    ///
+    /// <list type="number">
+    /// <item>B runs, hits context pressure → <c>CompletedSplit</c>
+    ///   <list type="bullet">
+    ///     <item>Reshape: add B1, B2, B3, B4 (depend on B) + BV fan-in (depends on B1–B4)</item>
+    ///     <item>C rewired to depend on BV</item>
+    ///     <item>B → <c>Succeeded</c></item>
+    ///   </list>
+    /// </item>
+    /// <item>B1 executes normally ✓</item>
+    /// <item>B2 runs, hits context pressure → <c>CompletedSplit</c>
+    ///   <list type="bullet">
+    ///     <item>Reshape: add B2a, B2b (depend on B2)</item>
+    ///     <item><b>BV rewired</b>: replace B2 dep with B2a + B2b (inner subs fan into outer BV)</item>
+    ///     <item>B2 → <c>Succeeded</c></item>
+    ///   </list>
+    /// </item>
+    /// <item>B3 runs, hits context pressure → <c>CompletedSplit</c>
+    ///   <list type="bullet">
+    ///     <item>Reshape: add B3a, B3b, B3c (depend on B3)</item>
+    ///     <item><b>BV rewired</b>: replace B3 dep with B3a + B3b + B3c</item>
+    ///     <item>B3 → <c>Succeeded</c></item>
+    ///   </list>
+    /// </item>
+    /// <item>B4, B2a, B2b, B3a, B3b, B3c all execute normally</item>
+    /// <item>BV becomes ready (all 7 leaf sub-jobs succeeded), executes</item>
+    /// <item>C becomes ready (BV succeeded), executes</item>
+    /// </list>
+    ///
+    /// Final DAG has 13 jobs: A, B, B1, B2, B2a, B2b, B3, B3a, B3b, B3c, B4, BV, C
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-CHAINED-SPLIT")]
+    public async Task DAG_LIFECYCLE_ContextPressure_ChainedSplit_InnerSubsFanInToOuterV()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "chained-split", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // Initial DAG: A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 1: Execute A normally
+        // ══════════════════════════════════════════════════════════════
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 2: B hits context pressure → split into 4 chunks + BV
+        // ══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("b"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.CompletedSplit));
+
+        // C blocked during split
+        Assert.Empty(await ComputeReadySet(store, planId));
+
+        // Reshape: add B1–B4 depending on B, + BV depending on B1–B4
+        foreach (var name in new[] { "b1", "b2", "b3", "b4" })
+        {
+            await Mutate(store, planId, new JobAdded(0, default, default,
+                new JobNode
+                {
+                    Id = ids.Register(name).ToString(),
+                    Title = $"B-chunk-{name}",
+                    Status = JobStatus.Pending,
+                    DependsOn = new[] { ids.Key("b") },
+                    WorkSpec = new WorkSpec { Instructions = $"Continue B's work: {name}" },
+                }));
+        }
+
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = ids.Register("bv").ToString(),
+                Title = "B-fanin-verify",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("b1"), ids.Key("b2"), ids.Key("b3"), ids.Key("b4") },
+                WorkSpec = new WorkSpec { Instructions = "Verify all B chunks" },
+            }));
+
+        // Rewire C: depend on BV instead of B
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("c"), ImmutableArray.Create(ids.Key("bv"))));
+
+        // Finalize B → Succeeded
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.Succeeded));
+
+        // B1–B4 all ready now
+        var readyL1 = await ComputeReadySet(store, planId);
+        Assert.Equal(4, readyL1.Count);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 3: Execute B1 normally
+        // ══════════════════════════════════════════════════════════════
+        await ExecuteJob(store, exec, planId, ids["b1"]);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 4: B2 hits context pressure → split into B2a, B2b
+        //          Inner subs fan into OUTER BV (not a new inner fan-in)
+        // ══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("b2"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b2"), JobStatus.CompletedSplit));
+
+        // Add B2a, B2b depending on B2
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = ids.Register("b2a").ToString(),
+                Title = "B2-chunk-a",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("b2") },
+                WorkSpec = new WorkSpec { Instructions = "Continue B2: chunk a" },
+            }));
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = ids.Register("b2b").ToString(),
+                Title = "B2-chunk-b",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("b2") },
+                WorkSpec = new WorkSpec { Instructions = "Continue B2: chunk b" },
+            }));
+
+        // Rewire BV: replace B2 with B2a + B2b in its dependency list
+        // Current BV deps: [B1, B2, B3, B4] → [B1, B2a, B2b, B3, B4]
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("bv"),
+            ImmutableArray.Create(ids.Key("b1"), ids.Key("b2a"), ids.Key("b2b"), ids.Key("b3"), ids.Key("b4"))));
+
+        // Finalize B2 → Succeeded
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b2"), JobStatus.Succeeded));
+
+        // B2a and B2b should now be ready (depend on B2 which is Succeeded)
+        // B3 and B4 are still ready from before (depend on B which is Succeeded)
+        var readyAfterB2Split = await ComputeReadySet(store, planId);
+        Assert.Equal(4, readyAfterB2Split.Count); // B3, B4, B2a, B2b
+        Assert.Contains(ids.Key("b2a"), readyAfterB2Split);
+        Assert.Contains(ids.Key("b2b"), readyAfterB2Split);
+        Assert.Contains(ids.Key("b3"), readyAfterB2Split);
+        Assert.Contains(ids.Key("b4"), readyAfterB2Split);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 5: B3 hits context pressure → split into B3a, B3b, B3c
+        //          Again: inner subs fan into OUTER BV
+        // ══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("b3"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b3"), JobStatus.CompletedSplit));
+
+        // Add B3a, B3b, B3c depending on B3
+        foreach (var suffix in new[] { "a", "b", "c" })
+        {
+            var name = $"b3{suffix}";
+            await Mutate(store, planId, new JobAdded(0, default, default,
+                new JobNode
+                {
+                    Id = ids.Register(name).ToString(),
+                    Title = $"B3-chunk-{suffix}",
+                    Status = JobStatus.Pending,
+                    DependsOn = new[] { ids.Key("b3") },
+                    WorkSpec = new WorkSpec { Instructions = $"Continue B3: chunk {suffix}" },
+                }));
+        }
+
+        // Rewire BV: replace B3 with B3a + B3b + B3c
+        // Current BV deps: [B1, B2a, B2b, B3, B4] → [B1, B2a, B2b, B3a, B3b, B3c, B4]
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("bv"),
+            ImmutableArray.Create(
+                ids.Key("b1"), ids.Key("b2a"), ids.Key("b2b"),
+                ids.Key("b3a"), ids.Key("b3b"), ids.Key("b3c"),
+                ids.Key("b4"))));
+
+        // Finalize B3 → Succeeded
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b3"), JobStatus.Succeeded));
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 6: Execute all remaining leaf sub-jobs
+        // ══════════════════════════════════════════════════════════════
+        // Ready: B4, B2a, B2b, B3a, B3b, B3c  (B1 already succeeded)
+        var readyLeaves = await ComputeReadySet(store, planId);
+        Assert.Equal(6, readyLeaves.Count);
+
+        // Execute them all
+        await ExecuteJob(store, exec, planId, ids["b4"]);
+        await ExecuteJob(store, exec, planId, ids["b2a"]);
+        await ExecuteJob(store, exec, planId, ids["b2b"]);
+        await ExecuteJob(store, exec, planId, ids["b3a"]);
+        await ExecuteJob(store, exec, planId, ids["b3b"]);
+        await ExecuteJob(store, exec, planId, ids["b3c"]);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 7: BV becomes ready — all 7 leaf deps succeeded
+        // ══════════════════════════════════════════════════════════════
+        var readyForBV = await ComputeReadySet(store, planId);
+        Assert.Single(readyForBV);
+        Assert.Contains(ids.Key("bv"), readyForBV);
+
+        await ExecuteJob(store, exec, planId, ids["bv"]);
+
+        // ══════════════════════════════════════════════════════════════
+        // Phase 8: C becomes ready — BV succeeded
+        // ══════════════════════════════════════════════════════════════
+        var readyForC = await ComputeReadySet(store, planId);
+        Assert.Single(readyForC);
+        Assert.Contains(ids.Key("c"), readyForC);
+
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        // ══════════════════════════════════════════════════════════════
+        // Final verification
+        // ══════════════════════════════════════════════════════════════
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+        var finalPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(finalPlan);
+        Assert.Equal(PlanStatus.Succeeded, finalPlan!.Status);
+
+        // 13 jobs total: A, B, B1, B2, B2a, B2b, B3, B3a, B3b, B3c, B4, BV, C
+        Assert.Equal(13, finalPlan.Jobs.Count);
+        Assert.All(finalPlan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+
+        // Verify BV has the correct 7 leaf dependencies (no intermediate fan-ins)
+        var bvNode = finalPlan.Jobs[ids.Key("bv")];
+        Assert.Equal(7, bvNode.DependsOn.Count);
+        Assert.Contains(ids.Key("b1"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b2a"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b2b"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b3a"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b3b"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b3c"), bvNode.DependsOn);
+        Assert.Contains(ids.Key("b4"), bvNode.DependsOn);
+
+        // Verify C still depends only on BV (not on any inner sub-jobs)
+        var cNode = finalPlan.Jobs[ids.Key("c")];
+        Assert.Single(cNode.DependsOn);
+        Assert.Equal(ids.Key("bv"), cNode.DependsOn[0]);
+    }
+
     // ────────────────────────────── Test 9 ──────────────────────────────
 
     [Fact]
