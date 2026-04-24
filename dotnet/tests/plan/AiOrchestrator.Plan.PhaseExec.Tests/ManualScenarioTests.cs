@@ -556,6 +556,11 @@ public sealed class ManualScenarioTests : IDisposable
             File.WriteAllText(initFile, "init");
             RunGit(this.repoPath, "add", ".");
             RunGit(this.repoPath, "commit", "-m", "Initial commit");
+
+            // Ensure orchestrator .gitignore entries are committed before any plan execution
+            AiOrchestrator.Git.Gitignore.GitignoreCommitter
+                .EnsureAndCommitAsync(this.repoPath)
+                .GetAwaiter().GetResult();
         }
 
         public string RepoPath => this.repoPath;

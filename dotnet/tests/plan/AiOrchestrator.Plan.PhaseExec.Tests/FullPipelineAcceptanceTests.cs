@@ -261,6 +261,12 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             Assert.Contains(entry, gitignoreContent);
         }
 
+        // 7b. .gitignore commit is the FIRST commit after the initial seed (before any job work)
+        var commits = fixture.GetCommitMessages("main");
+        Assert.True(commits.Length >= 2, "Expected at least 2 commits (initial + gitignore)");
+        Assert.Equal("Initial commit", commits[0]);
+        Assert.Equal(AiOrchestrator.Git.Gitignore.GitignoreCommitter.CommitMessage, commits[1]);
+
         // ════════════════════════════════════════════════════════════
         // PLAN STATE ASSERTIONS
         // ════════════════════════════════════════════════════════════
@@ -873,12 +879,10 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             RunGit(this.repoPath, "add", ".");
             RunGit(this.repoPath, "commit", "-m", "Initial commit");
 
-            // Ensure orchestrator .gitignore entries are present and committed.
-            AiOrchestrator.Git.Gitignore.GitignoreManager
-                .EnsureOrchestratorGitIgnoreAsync(this.repoPath)
+            // Ensure orchestrator .gitignore entries are committed before any plan execution.
+            AiOrchestrator.Git.Gitignore.GitignoreCommitter
+                .EnsureAndCommitAsync(this.repoPath)
                 .GetAwaiter().GetResult();
-            RunGit(this.repoPath, "add", ".gitignore");
-            RunGit(this.repoPath, "commit", "-m", "Add orchestrator .gitignore entries");
         }
 
         public void CreateWorktree(string jobKey)
@@ -951,6 +955,13 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
 
         public string ReadFileOnBranch(string branch, string filename) =>
             RunGit(this.repoPath, "show", $"{branch}:{filename}").TrimEnd('\r', '\n');
+
+        public string[] GetCommitMessages(string branch) =>
+            RunGit(this.repoPath, "log", branch, "--format=%s")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(m => m.TrimEnd('\r'))
+                .Reverse()
+                .ToArray();
 
         public void Dispose()
         {

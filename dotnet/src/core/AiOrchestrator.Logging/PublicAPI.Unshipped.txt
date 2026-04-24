@@ -8,6 +8,17 @@ public static class AmbientContext
 public static IDisposable Push(string key, object value);
 public static IReadOnlyDictionary<string, object> Snapshot();
 public static T? Get<T>(string key);
+public static class AioLogPaths
+public static string GlobalDaemonLog { get; }
+public static string RepoLog(string repoRoot);
+namespace AiOrchestrator.Logging.File;
+public sealed record RollingFileLoggerOptions { public required string FilePath { get; init; } public long MaxFileSizeBytes { get; init; } = 10485760; public int MaxRetainedFiles { get; init; } = 5; }
+public sealed class RollingFileLoggerProvider : ILoggerProvider
+public RollingFileLoggerProvider(RollingFileLoggerOptions options);
+public ILogger CreateLogger(string categoryName);
+public void Dispose();
+public static class LoggingBuilderExtensions
+public static ILoggingBuilder AddRollingFile(this ILoggingBuilder builder, RollingFileLoggerOptions options);
 public static class LoggerCategory<T> { public static readonly string Name = typeof(T).FullName!; }
 namespace AiOrchestrator.Logging.Telemetry;
 public sealed class OtlpTelemetrySink : ITelemetrySink, IDisposable

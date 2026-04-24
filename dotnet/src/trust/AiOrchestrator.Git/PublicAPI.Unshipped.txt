@@ -4,3 +4,5 @@ static AiOrchestrator.Git.Gitignore.GitignoreManager.EnsureEntriesAsync(string! 
 static AiOrchestrator.Git.Gitignore.GitignoreManager.EnsureOrchestratorGitIgnoreAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 static AiOrchestrator.Git.Gitignore.GitignoreManager.IsConfiguredAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 static AiOrchestrator.Git.Gitignore.GitignoreManager.IsDiffOnlyOrchestratorChanges(string! unifiedDiff) -> bool
+static AiOrchestrator.Git.Gitignore.GitignoreCommitter.CommitMessage -> string!
+static AiOrchestrator.Git.Gitignore.GitignoreCommitter.EnsureAndCommitAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
