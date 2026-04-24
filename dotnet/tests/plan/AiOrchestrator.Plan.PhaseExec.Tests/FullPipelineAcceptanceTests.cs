@@ -253,6 +253,14 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Equal("Output from Root", fixture.ReadFileOnBranch("main", "root.txt"));
         Assert.Equal("Output from Final", fixture.ReadFileOnBranch("main", "final.txt"));
 
+        // 7. .gitignore contains all orchestrator entries and is committed
+        Assert.True(fixture.VerifyFileOnBranch("main", ".gitignore"));
+        var gitignoreContent = fixture.ReadFileOnBranch("main", ".gitignore");
+        foreach (var entry in AiOrchestrator.Git.Gitignore.GitignoreManager.OrchestratorEntries)
+        {
+            Assert.Contains(entry, gitignoreContent);
+        }
+
         // ════════════════════════════════════════════════════════════
         // PLAN STATE ASSERTIONS
         // ════════════════════════════════════════════════════════════
@@ -849,6 +857,8 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         private readonly Dictionary<string, string> worktreePaths = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> worktreeBranches = new(StringComparer.Ordinal);
 
+        public string RepoPath => this.repoPath;
+
         public GitTestFixture()
         {
             this.repoPath = Path.Combine(Path.GetTempPath(), "full-pipeline-git", Guid.NewGuid().ToString("N"));
@@ -862,6 +872,13 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             File.WriteAllText(initFile, "init");
             RunGit(this.repoPath, "add", ".");
             RunGit(this.repoPath, "commit", "-m", "Initial commit");
+
+            // Ensure orchestrator .gitignore entries are present and committed.
+            AiOrchestrator.Git.Gitignore.GitignoreManager
+                .EnsureOrchestratorGitIgnoreAsync(this.repoPath)
+                .GetAwaiter().GetResult();
+            RunGit(this.repoPath, "add", ".gitignore");
+            RunGit(this.repoPath, "commit", "-m", "Add orchestrator .gitignore entries");
         }
 
         public void CreateWorktree(string jobKey)

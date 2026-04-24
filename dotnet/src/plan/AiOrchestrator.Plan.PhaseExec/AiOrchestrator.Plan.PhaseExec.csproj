@@ -26,5 +26,6 @@
     <ProjectReference Include="..\..\trust\AiOrchestrator.WorktreeLease\AiOrchestrator.WorktreeLease.csproj" />
     <ProjectReference Include="..\..\execution\AiOrchestrator.Shell\AiOrchestrator.Shell.csproj" />
     <ProjectReference Include="..\..\execution\AiOrchestrator.Agent\AiOrchestrator.Agent.csproj" />
+    <ProjectReference Include="..\..\trust\AiOrchestrator.Git\AiOrchestrator.Git.csproj" />
   </ItemGroup>
 </Project>

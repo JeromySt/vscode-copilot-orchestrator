@@ -454,6 +454,7 @@
         "dependencies": {
           "AiOrchestrator.Abstractions": "[1.0.0, )",
           "AiOrchestrator.Agent": "[1.0.0, )",
+          "AiOrchestrator.Git": "[1.0.0, )",
           "AiOrchestrator.HookGate": "[1.0.0, )",
           "AiOrchestrator.Models": "[1.0.0, )",
           "AiOrchestrator.Plan.Models": "[1.0.0, )",

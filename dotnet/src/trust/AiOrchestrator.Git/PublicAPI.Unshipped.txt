@@ -1,1 +1,6 @@
 #nullable enable
+static AiOrchestrator.Git.Gitignore.GitignoreManager.OrchestratorEntries -> System.Collections.Generic.IReadOnlyList<string!>!
+static AiOrchestrator.Git.Gitignore.GitignoreManager.EnsureEntriesAsync(string! repoRoot, System.Collections.Generic.IReadOnlyList<string!>? entries = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static AiOrchestrator.Git.Gitignore.GitignoreManager.EnsureOrchestratorGitIgnoreAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static AiOrchestrator.Git.Gitignore.GitignoreManager.IsConfiguredAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static AiOrchestrator.Git.Gitignore.GitignoreManager.IsDiffOnlyOrchestratorChanges(string! unifiedDiff) -> bool

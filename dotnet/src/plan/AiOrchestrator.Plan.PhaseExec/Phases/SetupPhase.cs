@@ -3,9 +3,11 @@
 // </copyright>
 
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Abstractions.Git;
+using AiOrchestrator.Git.Gitignore;
 using AiOrchestrator.Models.Ids;
 using Microsoft.Extensions.Logging;
 
@@ -35,7 +37,7 @@ internal sealed class SetupPhase : IPhaseRunner
     public JobPhase Phase => JobPhase.Setup;
 
     /// <inheritdoc/>
-    public ValueTask<CommitSha?> RunAsync(PhaseRunContext ctx, CancellationToken ct)
+    public async ValueTask<CommitSha?> RunAsync(PhaseRunContext ctx, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         this.logger.LogInformation(
@@ -45,8 +47,21 @@ internal sealed class SetupPhase : IPhaseRunner
             ctx.RunId,
             ctx.AttemptNumber);
 
+        // Ensure orchestrator-managed .gitignore entries exist in the repo root.
+        // The repo root is inferred from the first AllowedFolder if available.
+        var repoRoot = ctx.Job.WorkSpec?.AllowedFolders.FirstOrDefault();
+        if (repoRoot is not null)
+        {
+            var modified = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(repoRoot, ct)
+                .ConfigureAwait(false);
+            if (modified)
+            {
+                this.logger.LogInformation("Ensured orchestrator .gitignore entries in {RepoRoot}", repoRoot);
+            }
+        }
+
         // Setup is delegated to upstream wiring (worktree lease + git facade).
         // The presence of git/lease wiring is verified by integration tests in job 32.
-        return ValueTask.FromResult<CommitSha?>(null);
+        return null;
     }
 }
