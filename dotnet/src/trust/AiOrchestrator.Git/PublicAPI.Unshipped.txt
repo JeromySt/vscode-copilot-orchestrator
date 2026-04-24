@@ -6,3 +6,10 @@ static AiOrchestrator.Git.Gitignore.GitignoreManager.IsConfiguredAsync(string! r
 static AiOrchestrator.Git.Gitignore.GitignoreManager.IsDiffOnlyOrchestratorChanges(string! unifiedDiff) -> bool
 static AiOrchestrator.Git.Gitignore.GitignoreCommitter.CommitMessage -> string!
 static AiOrchestrator.Git.Gitignore.GitignoreCommitter.EnsureAndCommitAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+AiOrchestrator.Git.Gitignore.GitignoreDebouncer
+AiOrchestrator.Git.Gitignore.GitignoreDebouncer.GitignoreDebouncer(System.TimeSpan? delay = null, Microsoft.Extensions.Logging.ILogger<AiOrchestrator.Git.Gitignore.GitignoreDebouncer>? logger = null) -> void
+AiOrchestrator.Git.Gitignore.GitignoreDebouncer.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Git.Gitignore.GitignoreDebouncer.EnsureNowAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+AiOrchestrator.Git.Gitignore.GitignoreDebouncer.OnBranchSwitchAsync(string! repoRoot, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+AiOrchestrator.Git.Gitignore.GitignoreDebouncer.RequestEnsure(string! repoRoot) -> void
+static readonly AiOrchestrator.Git.Gitignore.GitignoreDebouncer.DefaultDelay -> System.TimeSpan

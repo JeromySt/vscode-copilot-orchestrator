@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\trust\AiOrchestrator.Audit\AiOrchestrator.Audit.csproj" />
+    <ProjectReference Include="..\..\trust\AiOrchestrator.Git\AiOrchestrator.Git.csproj" />
     <ProjectReference Include="..\..\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
     <ProjectReference Include="..\..\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
   </ItemGroup>

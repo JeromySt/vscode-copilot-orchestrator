@@ -10,6 +10,7 @@
   </ItemGroup><ItemGroup>
   <ProjectReference Include="..\..\..\src\hosting\AiOrchestrator.Daemon\AiOrchestrator.Daemon.csproj" />
   <ProjectReference Include="..\..\..\src\trust\AiOrchestrator.Audit\AiOrchestrator.Audit.csproj" />
+  <ProjectReference Include="..\..\..\src\trust\AiOrchestrator.Git\AiOrchestrator.Git.csproj" />
   <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
   <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
   <ProjectReference Include="..\..\..\tests\core\AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj" />

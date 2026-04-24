@@ -880,6 +880,8 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             RunGit(this.repoPath, "commit", "-m", "Initial commit");
 
             // Ensure orchestrator .gitignore entries are committed before any plan execution.
+            // In production, this is done by DaemonStartupGuard.EnsureGitignoreAsync()
+            // before any logging file sinks are opened.
             AiOrchestrator.Git.Gitignore.GitignoreCommitter
                 .EnsureAndCommitAsync(this.repoPath)
                 .GetAwaiter().GetResult();
