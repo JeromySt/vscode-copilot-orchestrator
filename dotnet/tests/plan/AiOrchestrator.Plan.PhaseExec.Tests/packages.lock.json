@@ -170,6 +170,24 @@
           "Microsoft.Extensions.Options": "[10.0.7, )"
         }
       },
+      "aiorchestrator.concurrency.broker": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Concurrency.User": "[1.0.0, )",
+          "Microsoft.Extensions.Hosting.Abstractions": "[10.0.7, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[10.0.7, )",
+          "Microsoft.Extensions.Options": "[10.0.7, )"
+        }
+      },
+      "aiorchestrator.concurrency.user": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "Microsoft.Extensions.Options": "[10.0.7, )"
+        }
+      },
       "aiorchestrator.hookgate": {
         "type": "Project",
         "dependencies": {
@@ -198,6 +216,19 @@
           "AiOrchestrator.Plan.Store": "[1.0.0, )",
           "AiOrchestrator.Shell": "[1.0.0, )",
           "AiOrchestrator.WorktreeLease": "[1.0.0, )",
+          "Microsoft.Extensions.Logging.Abstractions": "[10.0.7, )"
+        }
+      },
+      "aiorchestrator.plan.scheduler": {
+        "type": "Project",
+        "dependencies": {
+          "AiOrchestrator.Abstractions": "[1.0.0, )",
+          "AiOrchestrator.Concurrency.Broker": "[1.0.0, )",
+          "AiOrchestrator.Concurrency.User": "[1.0.0, )",
+          "AiOrchestrator.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Models": "[1.0.0, )",
+          "AiOrchestrator.Plan.Store": "[1.0.0, )",
+          "Microsoft.Extensions.Hosting.Abstractions": "[10.0.7, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.7, )"
         }
       },

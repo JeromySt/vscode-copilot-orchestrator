@@ -17,6 +17,7 @@ public readonly record struct JobStatusTransitions
             (JobStatus.Pending, JobStatus.Ready),
             (JobStatus.Pending, JobStatus.Canceled),
             (JobStatus.Pending, JobStatus.Blocked),
+            (JobStatus.Pending, JobStatus.Skipped),
             (JobStatus.Ready, JobStatus.Scheduled),
             (JobStatus.Ready, JobStatus.Canceled),
             (JobStatus.Ready, JobStatus.Blocked),

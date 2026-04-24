@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Models\AiOrchestrator.Models.csproj" />
     <ProjectReference Include="..\..\..\src\plan\AiOrchestrator.Plan.Models\AiOrchestrator.Plan.Models.csproj" />
     <ProjectReference Include="..\..\..\src\plan\AiOrchestrator.Plan.PhaseExec\AiOrchestrator.Plan.PhaseExec.csproj" />
+    <ProjectReference Include="..\..\..\src\plan\AiOrchestrator.Plan.Scheduler\AiOrchestrator.Plan.Scheduler.csproj" />
     <ProjectReference Include="..\..\..\src\plan\AiOrchestrator.Plan.Store\AiOrchestrator.Plan.Store.csproj" />
     <ProjectReference Include="..\..\..\tests\core\AiOrchestrator.TestKit\AiOrchestrator.TestKit.csproj" />
   </ItemGroup>

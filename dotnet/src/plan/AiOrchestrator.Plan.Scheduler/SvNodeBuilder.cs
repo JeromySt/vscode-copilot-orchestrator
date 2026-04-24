@@ -79,8 +79,14 @@ public static class SvNodeBuilder
         var svId = FindSvNodeId(plan);
         var hasSuccessor = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var (_, node) in plan.Jobs)
+        foreach (var (nodeId, node) in plan.Jobs)
         {
+            // Skip SV's own edges — its dependencies are the leaves we want to find.
+            if (nodeId == svId)
+            {
+                continue;
+            }
+
             foreach (var dep in node.DependsOn)
             {
                 hasSuccessor.Add(dep);

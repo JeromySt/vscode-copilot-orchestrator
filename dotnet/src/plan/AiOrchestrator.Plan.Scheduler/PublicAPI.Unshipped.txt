@@ -1,4 +1,7 @@
 #nullable enable
+AiOrchestrator.Plan.Scheduler.Completion.PlanCompletionHandler
+AiOrchestrator.Plan.Scheduler.Completion.PlanCompletionHandler.PlanCompletionHandler(AiOrchestrator.Plan.Store.IPlanStore! store, AiOrchestrator.Abstractions.Eventing.IEventBus! bus, AiOrchestrator.Abstractions.Time.IClock! clock, Microsoft.Extensions.Logging.ILogger<AiOrchestrator.Plan.Scheduler.Completion.PlanCompletionHandler!>! logger) -> void
+AiOrchestrator.Plan.Scheduler.Completion.PlanCompletionHandler.ProcessAsync(AiOrchestrator.Models.Ids.PlanId planId, System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<bool>!
 AiOrchestrator.Plan.Scheduler.Events.JobBlockedEvent
 AiOrchestrator.Plan.Scheduler.Events.JobBlockedEvent.At.get -> System.DateTimeOffset
 AiOrchestrator.Plan.Scheduler.Events.JobBlockedEvent.At.init -> void

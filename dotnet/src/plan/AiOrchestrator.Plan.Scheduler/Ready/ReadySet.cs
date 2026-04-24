@@ -26,8 +26,10 @@ internal sealed class ReadySet
 
     /// <summary>
     /// Returns the jobs that are ready to run given the current status snapshot.
-    /// A job is ready if it is <see cref="JobStatus.Pending"/> and all predecessors are <see cref="JobStatus.Succeeded"/>.
-    /// A job is blocked (never ready) if any predecessor is <see cref="JobStatus.Failed"/> or <see cref="JobStatus.Canceled"/>.
+    /// A job is ready if it is <see cref="JobStatus.Pending"/> and all predecessors are
+    /// <see cref="JobStatus.Succeeded"/> or <see cref="JobStatus.Skipped"/>.
+    /// A job is blocked (never ready) if any predecessor is <see cref="JobStatus.Failed"/>,
+    /// <see cref="JobStatus.Canceled"/>, or <see cref="JobStatus.Blocked"/>.
     /// Results are sorted by priority: retries first, then most dependents, then alphabetical.
     /// </summary>
     /// <param name="currentStatuses">The current status of each job, keyed by <see cref="JobId"/>.</param>
@@ -57,14 +59,14 @@ internal sealed class ReadySet
                     continue;
                 }
 
-                if (predStatus == JobStatus.Failed || predStatus == JobStatus.Canceled)
+                if (predStatus == JobStatus.Failed || predStatus == JobStatus.Canceled || predStatus == JobStatus.Blocked)
                 {
                     anyTerminalFailure = true;
                     allSucceeded = false;
                     break;
                 }
 
-                if (predStatus != JobStatus.Succeeded)
+                if (predStatus != JobStatus.Succeeded && predStatus != JobStatus.Skipped)
                 {
                     allSucceeded = false;
                 }

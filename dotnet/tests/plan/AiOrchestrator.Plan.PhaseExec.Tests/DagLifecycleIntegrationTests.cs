@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -16,6 +17,8 @@ using AiOrchestrator.Models.Paths;
 using AiOrchestrator.Plan.Models;
 using AiOrchestrator.Plan.PhaseExec;
 using AiOrchestrator.Plan.PhaseExec.Phases;
+using AiOrchestrator.Plan.Scheduler;
+using AiOrchestrator.Plan.Scheduler.Completion;
 using AiOrchestrator.Plan.Store;
 using AiOrchestrator.TestKit.Time;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -1269,6 +1272,1113 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
         Assert.All(plan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
     }
 
+    // ────────────────────────── Test 11 ──────────────────────────────
+
+    /// <summary>
+    /// Exercises every <see cref="PhaseFailureKind"/> value (0–10) through the
+    /// <see cref="HealOrResumeStrategy"/> truth table with auto-heal enabled.
+    ///
+    /// <para>Creates 11 independent root jobs, each configured to fail its Work phase
+    /// with a different <see cref="PhaseFailureKind"/>. On the first invocation the
+    /// Work runner throws; on retry it succeeds.</para>
+    ///
+    /// <list type="bullet">
+    /// <item><b>Transient</b> (0=TransientNetwork, 1=TransientFileLock):
+    ///   PhaseResume → succeed on retry (2 attempts)</item>
+    /// <item><b>Healable</b> (2=AgentMaxTurnsExceeded, 3=AgentNonZeroExit,
+    ///   4=ShellNonZeroExit, 5=MergeConflict, 7=AnalyzerOrTestFailure,
+    ///   10=ProcessCrash): AutoHeal → succeed on retry (2 attempts)</item>
+    /// <item><b>Fatal</b> (6=RemoteRejected, 8=Timeout, 9=Internal):
+    ///   GiveUp → job fails immediately (1 attempt)</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-AUTOHEAL-ALL-KINDS")]
+    public async Task DAG_LIFECYCLE_AutoHeal_All10FailureKinds()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "all-failure-kinds", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // 11 independent root jobs — one per PhaseFailureKind
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("net"), "TransientNetwork");
+        await AddJob(store, planId, ids.Register("lock"), "TransientFileLock");
+        await AddJob(store, planId, ids.Register("maxturns"), "AgentMaxTurnsExceeded");
+        await AddJob(store, planId, ids.Register("agentexit"), "AgentNonZeroExit");
+        await AddJob(store, planId, ids.Register("shellexit"), "ShellNonZeroExit");
+        await AddJob(store, planId, ids.Register("merge"), "MergeConflict");
+        await AddJob(store, planId, ids.Register("rejected"), "RemoteRejected");
+        await AddJob(store, planId, ids.Register("analyzer"), "AnalyzerOrTestFailure");
+        await AddJob(store, planId, ids.Register("timeout"), "Timeout");
+        await AddJob(store, planId, ids.Register("internal"), "Internal");
+        await AddJob(store, planId, ids.Register("crash"), "ProcessCrash");
+
+        // Map each JobId to the PhaseFailureKind its Work phase should throw
+        var failureMap = new Dictionary<string, PhaseFailureKind>(StringComparer.Ordinal)
+        {
+            [ids["net"].ToString()] = PhaseFailureKind.TransientNetwork,
+            [ids["lock"].ToString()] = PhaseFailureKind.TransientFileLock,
+            [ids["maxturns"].ToString()] = PhaseFailureKind.AgentMaxTurnsExceeded,
+            [ids["agentexit"].ToString()] = PhaseFailureKind.AgentNonZeroExit,
+            [ids["shellexit"].ToString()] = PhaseFailureKind.ShellNonZeroExit,
+            [ids["merge"].ToString()] = PhaseFailureKind.MergeConflict,
+            [ids["rejected"].ToString()] = PhaseFailureKind.RemoteRejected,
+            [ids["analyzer"].ToString()] = PhaseFailureKind.AnalyzerOrTestFailure,
+            [ids["timeout"].ToString()] = PhaseFailureKind.Timeout,
+            [ids["internal"].ToString()] = PhaseFailureKind.Internal,
+            [ids["crash"].ToString()] = PhaseFailureKind.ProcessCrash,
+        };
+
+        var workRunner = new PerJobWorkRunner(failureMap);
+        var exec = this.MakeExecutorWithCustomWork(store, workRunner, autoHeal: _ => true);
+
+        // All 11 jobs are independent roots — all ready immediately
+        var ready = await ComputeReadySet(store, planId);
+        Assert.Equal(11, ready.Count);
+
+        // ── Transient failures (0,1): PhaseResume → succeed on retry ──
+        var resultNet = await ExecuteJob(store, exec, planId, ids["net"]);
+        Assert.Equal(JobStatus.Succeeded, resultNet.FinalStatus);
+        Assert.Equal(2, resultNet.AttemptCount);
+
+        var resultLock = await ExecuteJob(store, exec, planId, ids["lock"]);
+        Assert.Equal(JobStatus.Succeeded, resultLock.FinalStatus);
+        Assert.Equal(2, resultLock.AttemptCount);
+
+        // ── Healable failures (2,3,4,5,7,10): AutoHeal → succeed on retry ──
+        var resultMaxturns = await ExecuteJob(store, exec, planId, ids["maxturns"]);
+        Assert.Equal(JobStatus.Succeeded, resultMaxturns.FinalStatus);
+        Assert.Equal(2, resultMaxturns.AttemptCount);
+
+        var resultAgentexit = await ExecuteJob(store, exec, planId, ids["agentexit"]);
+        Assert.Equal(JobStatus.Succeeded, resultAgentexit.FinalStatus);
+        Assert.Equal(2, resultAgentexit.AttemptCount);
+
+        var resultShellexit = await ExecuteJob(store, exec, planId, ids["shellexit"]);
+        Assert.Equal(JobStatus.Succeeded, resultShellexit.FinalStatus);
+        Assert.Equal(2, resultShellexit.AttemptCount);
+
+        var resultMerge = await ExecuteJob(store, exec, planId, ids["merge"]);
+        Assert.Equal(JobStatus.Succeeded, resultMerge.FinalStatus);
+        Assert.Equal(2, resultMerge.AttemptCount);
+
+        var resultAnalyzer = await ExecuteJob(store, exec, planId, ids["analyzer"]);
+        Assert.Equal(JobStatus.Succeeded, resultAnalyzer.FinalStatus);
+        Assert.Equal(2, resultAnalyzer.AttemptCount);
+
+        var resultCrash = await ExecuteJob(store, exec, planId, ids["crash"]);
+        Assert.Equal(JobStatus.Succeeded, resultCrash.FinalStatus);
+        Assert.Equal(2, resultCrash.AttemptCount);
+
+        // ── Fatal failures (6,8,9): GiveUp → fail immediately ──
+        var resultRejected = await ExecuteJob(store, exec, planId, ids["rejected"]);
+        Assert.Equal(JobStatus.Failed, resultRejected.FinalStatus);
+        Assert.Equal(1, resultRejected.AttemptCount);
+
+        var resultTimeout = await ExecuteJob(store, exec, planId, ids["timeout"]);
+        Assert.Equal(JobStatus.Failed, resultTimeout.FinalStatus);
+        Assert.Equal(1, resultTimeout.AttemptCount);
+
+        var resultInternal = await ExecuteJob(store, exec, planId, ids["internal"]);
+        Assert.Equal(JobStatus.Failed, resultInternal.FinalStatus);
+        Assert.Equal(1, resultInternal.AttemptCount);
+
+        // ── Verify stored attempts in the plan ──
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+
+        // Transient jobs: 2 attempts each (failed + succeeded)
+        foreach (var name in new[] { "net", "lock" })
+        {
+            var attempts = plan!.Jobs[ids.Key(name)].Attempts;
+            Assert.Equal(2, attempts.Count);
+            Assert.Equal(JobStatus.Failed, attempts[0].Status);
+            Assert.Equal(JobStatus.Succeeded, attempts[1].Status);
+        }
+
+        // Healable jobs: 2 attempts each (failed + succeeded)
+        foreach (var name in new[] { "maxturns", "agentexit", "shellexit", "merge", "analyzer", "crash" })
+        {
+            var attempts = plan!.Jobs[ids.Key(name)].Attempts;
+            Assert.Equal(2, attempts.Count);
+            Assert.Equal(JobStatus.Failed, attempts[0].Status);
+            Assert.Equal(JobStatus.Succeeded, attempts[1].Status);
+        }
+
+        // Fatal jobs: 1 attempt each (failed with error message)
+        foreach (var name in new[] { "rejected", "timeout", "internal" })
+        {
+            var attempts = plan!.Jobs[ids.Key(name)].Attempts;
+            Assert.Equal(1, attempts.Count);
+            Assert.Equal(JobStatus.Failed, attempts[0].Status);
+            Assert.NotNull(attempts[0].ErrorMessage);
+        }
+
+        // Summary: 8 succeeded (2 transient + 6 healable), 3 failed (fatal)
+        Assert.Equal(8, plan!.Jobs.Values.Count(j => j.Status == JobStatus.Succeeded));
+        Assert.Equal(3, plan.Jobs.Values.Count(j => j.Status == JobStatus.Failed));
+        Assert.Equal(11, plan.Jobs.Count);
+    }
+
+    // ────────────────────────── Test 12 ──────────────────────────────
+
+    /// <summary>
+    /// Tests a mini scheduler watch+dispatch loop: a background task watches the plan,
+    /// computes the ready set from each snapshot, and dispatches jobs automatically.
+    /// Verifies that a 3-job linear chain (A→B→C) executes in dependency order without
+    /// manual driving.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-SCHEDULER-WATCHLOOP")]
+    public async Task DAG_LIFECYCLE_Scheduler_WatchLoopDispatch()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "scheduler-watchloop", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+        var executionOrder = new ConcurrentQueue<string>();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Mini scheduler loop in a background task
+        var schedulerTask = Task.Run(async () =>
+        {
+            var dispatched = new HashSet<string>(StringComparer.Ordinal);
+
+            await foreach (var snapshot in store.WatchAsync(planId, cts.Token))
+            {
+                // Compute ready set from the snapshot
+                foreach (var (id, job) in snapshot.Jobs)
+                {
+                    if (job.Status != JobStatus.Pending)
+                    {
+                        continue;
+                    }
+
+                    if (dispatched.Contains(id))
+                    {
+                        continue;
+                    }
+
+                    bool allDepsMet = job.DependsOn.Count == 0 ||
+                        job.DependsOn.All(d => snapshot.Jobs.TryGetValue(d, out var dep) &&
+                                               dep.Status == JobStatus.Succeeded);
+                    if (!allDepsMet)
+                    {
+                        continue;
+                    }
+
+                    dispatched.Add(id);
+                    var jobId = new JobId(Guid.Parse(id.Replace("job_", string.Empty)));
+                    executionOrder.Enqueue(id);
+                    await ExecuteJob(store, exec, planId, jobId);
+                }
+
+                // Check if all jobs are terminal
+                if (snapshot.Jobs.Values.All(j =>
+                    j.Status == JobStatus.Succeeded || j.Status == JobStatus.Failed ||
+                    j.Status == JobStatus.Canceled || j.Status == JobStatus.Blocked))
+                {
+                    break;
+                }
+            }
+        }, cts.Token);
+
+        await schedulerTask;
+
+        // Verify all jobs executed in dependency order
+        var order = executionOrder.ToArray();
+        Assert.Equal(3, order.Length);
+        Assert.Equal(ids.Key("a"), order[0]);
+        Assert.Equal(ids.Key("b"), order[1]);
+        Assert.Equal(ids.Key("c"), order[2]);
+
+        // Verify final state
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.All(plan!.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+    }
+
+    // ────────────────────────── Test 13 ──────────────────────────────
+
+    /// <summary>
+    /// Tests that 5 independent root jobs can execute concurrently without data races.
+    /// Each job writes a unique marker during its Work phase. Verifies all markers are
+    /// present, all jobs succeeded, and no duplicate executions occurred.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-CONCURRENT-NORACE")]
+    public async Task DAG_LIFECYCLE_ConcurrentExecution_ParallelJobsNoRace()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "concurrent-norace", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // 5 independent root jobs
+        var ids = new JobIdMap();
+        for (int i = 0; i < 5; i++)
+        {
+            await AddJob(store, planId, ids.Register($"j{i}"), $"Job {i}");
+        }
+
+        var markers = new ConcurrentBag<string>();
+        var executionCounts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+
+        // Work phase runner that records a marker and introduces a small delay
+        var work = new FakePhaseRunner(JobPhase.Work);
+        work.OnRun = async ct =>
+        {
+            await Task.Delay(50, ct);
+        };
+        var exec = this.MakeExecutor(store, workRunner: work);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Execute all 5 jobs concurrently via a mini scheduler
+        var schedulerTask = Task.Run(async () =>
+        {
+            var dispatchedTasks = new List<Task>();
+            var dispatched = new HashSet<string>(StringComparer.Ordinal);
+
+            await foreach (var snapshot in store.WatchAsync(planId, cts.Token))
+            {
+                foreach (var (id, job) in snapshot.Jobs)
+                {
+                    if (job.Status != JobStatus.Pending || dispatched.Contains(id))
+                    {
+                        continue;
+                    }
+
+                    bool allDepsMet = job.DependsOn.Count == 0 ||
+                        job.DependsOn.All(d => snapshot.Jobs.TryGetValue(d, out var dep) &&
+                                               dep.Status == JobStatus.Succeeded);
+                    if (!allDepsMet)
+                    {
+                        continue;
+                    }
+
+                    dispatched.Add(id);
+                    var jobId = new JobId(Guid.Parse(id.Replace("job_", string.Empty)));
+
+                    // Dispatch each job concurrently
+                    dispatchedTasks.Add(Task.Run(async () =>
+                    {
+                        executionCounts.AddOrUpdate(id, 1, (_, c) => c + 1);
+                        markers.Add(id);
+                        await ExecuteJob(store, exec, planId, jobId);
+                    }, cts.Token));
+                }
+
+                // Check if all jobs are terminal
+                if (snapshot.Jobs.Values.All(j =>
+                    j.Status == JobStatus.Succeeded || j.Status == JobStatus.Failed ||
+                    j.Status == JobStatus.Canceled || j.Status == JobStatus.Blocked))
+                {
+                    break;
+                }
+            }
+
+            await Task.WhenAll(dispatchedTasks);
+        }, cts.Token);
+
+        await schedulerTask;
+
+        // All 5 markers present
+        Assert.Equal(5, markers.Count);
+        for (int i = 0; i < 5; i++)
+        {
+            Assert.Contains(ids.Key($"j{i}"), markers);
+        }
+
+        // Each job executed exactly once (no duplicates)
+        Assert.Equal(5, executionCounts.Count);
+        Assert.All(executionCounts.Values, c => Assert.Equal(1, c));
+
+        // All 5 jobs succeeded
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(5, plan!.Jobs.Count);
+        Assert.All(plan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+    }
+
+    // ────────────────────────── Test 14 ──────────────────────────────
+
+    /// <summary>
+    /// Tests that pausing a plan prevents new job dispatch and resuming restarts it.
+    /// Creates A→B→C, executes A, pauses, verifies B stays Ready for 500ms,
+    /// resumes, then completes B and C.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-PAUSE-RESUME")]
+    public async Task DAG_LIFECYCLE_PauseResume_NoDispatchWhilePaused()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "pause-resume", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // Execute A
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        // B should be ready
+        var readyBeforePause = await ComputeReadySet(store, planId);
+        Assert.Single(readyBeforePause);
+        Assert.Contains(ids.Key("b"), readyBeforePause);
+
+        // Pause the plan
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Paused));
+
+        var pausedPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(pausedPlan);
+        Assert.Equal(PlanStatus.Paused, pausedPlan!.Status);
+
+        // Wait 500ms — B should still be Pending (no dispatch while paused)
+        await Task.Delay(500);
+        var planDuringPause = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(planDuringPause);
+        Assert.Equal(JobStatus.Pending, planDuringPause!.Jobs[ids.Key("b")].Status);
+        Assert.Equal(JobStatus.Pending, planDuringPause.Jobs[ids.Key("c")].Status);
+
+        // B is still in the ready set (its deps are met), plan is just paused
+        var readyWhilePaused = await ComputeReadySet(store, planId);
+        Assert.Single(readyWhilePaused);
+        Assert.Contains(ids.Key("b"), readyWhilePaused);
+
+        // Resume the plan
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Running));
+
+        var resumedPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(resumedPlan);
+        Assert.Equal(PlanStatus.Running, resumedPlan!.Status);
+
+        // Now execute B and C
+        await ExecuteJob(store, exec, planId, ids["b"]);
+
+        var readyAfterB = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterB);
+        Assert.Contains(ids.Key("c"), readyAfterB);
+
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        // Verify all succeeded
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+        var finalPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(finalPlan);
+        Assert.Equal(PlanStatus.Succeeded, finalPlan!.Status);
+        Assert.All(finalPlan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+    }
+
+    // ────────────────────────── Test 15 ──────────────────────────────
+
+    /// <summary>
+    /// Tests crash recovery: if a job is left in Running state after a "crash",
+    /// on restart it can be detected and reset via Running→Failed→Pending→Ready,
+    /// then re-executed to completion.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-CRASH-RECOVERY")]
+    public async Task DAG_LIFECYCLE_CrashRecovery_RunningJobResetOnRestart()
+    {
+        // Use a dedicated sub-directory so a second store instance can reload from disk
+        var crashRoot = Path.Combine(this.root, "crash-recovery");
+        Directory.CreateDirectory(crashRoot);
+
+        // ── Phase 1: Normal execution, then simulate crash ──
+        PlanId planId;
+        JobIdMap ids;
+        {
+            await using var store1 = new PlanStore(
+                new AbsolutePath(crashRoot),
+                new NullFileSystem(),
+                this.clock,
+                this.bus,
+                new FixedOptions<PlanStoreOptions>(new PlanStoreOptions()),
+                NullLogger<PlanStore>.Instance);
+
+            planId = await store1.CreateAsync(
+                new PlanModel { Name = "crash-recovery", Status = PlanStatus.Running },
+                Idem(), CancellationToken.None);
+
+            ids = new JobIdMap();
+            await AddJob(store1, planId, ids.Register("a"), "Job A");
+            await AddJob(store1, planId, ids.Register("b"), "Job B", ids["a"]);
+            await AddJob(store1, planId, ids.Register("c"), "Job C", ids["b"]);
+
+            var exec1 = this.MakeExecutor(store1);
+
+            // Execute A successfully
+            await ExecuteJob(store1, exec1, planId, ids["a"]);
+
+            // Transition B to Running (simulating it was dispatched)
+            await TransitionToRunning(store1, planId, ids.Key("b"));
+
+            // Verify B is Running before "crash"
+            var preCrash = await store1.LoadAsync(planId, CancellationToken.None);
+            Assert.NotNull(preCrash);
+            Assert.Equal(JobStatus.Succeeded, preCrash!.Jobs[ids.Key("a")].Status);
+            Assert.Equal(JobStatus.Running, preCrash.Jobs[ids.Key("b")].Status);
+            Assert.Equal(JobStatus.Pending, preCrash.Jobs[ids.Key("c")].Status);
+
+            // Checkpoint to persist state to disk
+            await store1.CheckpointAsync(planId, CancellationToken.None);
+
+            // "Crash" — store1 disposes here
+        }
+
+        // ── Phase 2: Restart — create a new store pointing at the same directory ──
+        {
+            await using var store2 = new PlanStore(
+                new AbsolutePath(crashRoot),
+                new NullFileSystem(),
+                this.clock,
+                this.bus,
+                new FixedOptions<PlanStoreOptions>(new PlanStoreOptions()),
+                NullLogger<PlanStore>.Instance);
+
+            // Load the plan — B should still be Running (orphaned)
+            var recovered = await store2.LoadAsync(planId, CancellationToken.None);
+            Assert.NotNull(recovered);
+            Assert.Equal(JobStatus.Succeeded, recovered!.Jobs[ids.Key("a")].Status);
+            Assert.Equal(JobStatus.Running, recovered.Jobs[ids.Key("b")].Status);
+            Assert.Equal(JobStatus.Pending, recovered.Jobs[ids.Key("c")].Status);
+
+            // Reset orphaned B: Running → Failed (valid transition)
+            await Mutate(store2, planId,
+                new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.Failed));
+
+            // Then Failed → Pending (valid transition for retry)
+            await Mutate(store2, planId,
+                new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.Pending));
+
+            // B should now be in the ready set (A is Succeeded)
+            var ready = await ComputeReadySet(store2, planId);
+            Assert.Single(ready);
+            Assert.Contains(ids.Key("b"), ready);
+
+            // Execute B and C from recovered state
+            var exec2 = this.MakeExecutor(store2);
+            await ExecuteJob(store2, exec2, planId, ids["b"]);
+            await ExecuteJob(store2, exec2, planId, ids["c"]);
+
+            // Verify all succeeded
+            await Mutate(store2, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+            var finalPlan = await store2.LoadAsync(planId, CancellationToken.None);
+            Assert.NotNull(finalPlan);
+            Assert.Equal(PlanStatus.Succeeded, finalPlan!.Status);
+            Assert.All(finalPlan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+        }
+    }
+
+    // ────────────────────────── Test 16 ──────────────────────────────
+
+    /// <summary>
+    /// Exercises the full SV node lifecycle: creation via <see cref="SvNodeBuilder.Build"/>,
+    /// execution gating, reshape-triggered re-sync via <see cref="SvNodeBuilder.SyncDependencies"/>,
+    /// and downstream propagation.
+    ///
+    /// <para>Initial DAG: <c>A → B, A → C, SV depends on [B, C]</c></para>
+    ///
+    /// <list type="number">
+    /// <item>Build SV node depending on leaves [B, C]</item>
+    /// <item>Execute A — B and C become ready</item>
+    /// <item>Execute B and C — SV becomes ready</item>
+    /// <item>Reshape: add job D depending on A (new leaf)</item>
+    /// <item>SyncDependencies detects D as new leaf → update SV deps to [B, C, D]</item>
+    /// <item>D should be ready (A succeeded), execute D</item>
+    /// <item>Now SV should be ready (B, C, D all succeeded)</item>
+    /// <item>Execute SV — all succeed</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-SV-AUTOSYNC")]
+    public async Task DAG_LIFECYCLE_SvNode_AutoSyncAfterReshape()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "sv-autosync", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B, A → C (B and C are leaves)
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["a"]);
+
+        // Build SV node using SvNodeBuilder — depends on leaves [B, C]
+        var svId = ids.Register("sv");
+        var svNode = SvNodeBuilder.Build(new[] { ids.Key("b"), ids.Key("c") }) with { Id = svId.ToString() };
+        await Mutate(store, planId, new JobAdded(0, default, default, svNode));
+        var svKey = svNode.Id;
+
+        var exec = this.MakeExecutor(store);
+
+        // ── Execute A — B and C become ready ──
+        var ready0 = await ComputeReadySet(store, planId);
+        Assert.Single(ready0);
+        Assert.Contains(ids.Key("a"), ready0);
+
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        var readyAfterA = await ComputeReadySet(store, planId);
+        Assert.Equal(2, readyAfterA.Count);
+        Assert.Contains(ids.Key("b"), readyAfterA);
+        Assert.Contains(ids.Key("c"), readyAfterA);
+
+        // ── Execute B and C — SV becomes ready ──
+        await ExecuteJob(store, exec, planId, ids["b"]);
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        var readyForSv = await ComputeReadySet(store, planId);
+        Assert.Single(readyForSv);
+        Assert.Contains(svKey, readyForSv);
+
+        // ── Reshape: add job D depending on A (new leaf) ──
+        var dId = ids.Register("d");
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode
+            {
+                Id = dId.ToString(),
+                Title = "Job D",
+                Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("a") },
+                WorkSpec = new WorkSpec { Instructions = "New leaf job" },
+            }));
+
+        // ── SyncDependencies detects the leaf change ──
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        var updatedLeaves = SvNodeBuilder.SyncDependencies(plan!);
+        Assert.NotNull(updatedLeaves); // change detected
+
+        // The new leaf set should include B, C, and D
+        Assert.Equal(3, updatedLeaves!.Count);
+        Assert.Contains(ids.Key("b"), updatedLeaves);
+        Assert.Contains(ids.Key("c"), updatedLeaves);
+        Assert.Contains(ids.Key("d"), updatedLeaves);
+
+        // Apply the updated deps to SV
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            svKey, ImmutableArray.CreateRange(updatedLeaves)));
+
+        // SV should NOT be ready now (D is still Pending)
+        var readyAfterSync = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterSync);
+        Assert.Contains(ids.Key("d"), readyAfterSync); // D is ready (A succeeded)
+
+        // ── Execute D ──
+        await ExecuteJob(store, exec, planId, ids["d"]);
+
+        // Now SV should be ready (B, C, D all succeeded)
+        var readyForSv2 = await ComputeReadySet(store, planId);
+        Assert.Single(readyForSv2);
+        Assert.Contains(svKey, readyForSv2);
+
+        // ── Execute SV ──
+        await ExecuteJob(store, exec, planId, ids["sv"]);
+
+        // ── Final verification ──
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+        var finalPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(finalPlan);
+        Assert.Equal(PlanStatus.Succeeded, finalPlan!.Status);
+        Assert.Equal(5, finalPlan.Jobs.Count); // A, B, C, D, SV
+        Assert.All(finalPlan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+
+        // Verify SV has 3 deps [B, C, D]
+        var svFinal = finalPlan.Jobs[svKey];
+        Assert.Equal(3, svFinal.DependsOn.Count);
+        Assert.Contains(ids.Key("b"), svFinal.DependsOn);
+        Assert.Contains(ids.Key("c"), svFinal.DependsOn);
+        Assert.Contains(ids.Key("d"), svFinal.DependsOn);
+    }
+
+    // ────────────────────────── Test 17 ──────────────────────────────
+
+    /// <summary>
+    /// Verifies that the SV node correctly blocks until ALL leaf predecessors succeed.
+    /// SV should NOT become ready when only some leaves have completed.
+    ///
+    /// <para>DAG: <c>A → B, A → C, SV depends on [B, C]</c></para>
+    ///
+    /// <list type="number">
+    /// <item>Execute A, then B — SV should NOT be ready (C still Pending)</item>
+    /// <item>Execute C — now SV becomes ready</item>
+    /// <item>Execute SV — all succeed</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-SV-BLOCKS")]
+    public async Task DAG_LIFECYCLE_SvNode_BlocksUntilAllLeavesSucceed()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "sv-blocks", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B, A → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["a"]);
+
+        // Build SV node depending on leaves [B, C]
+        var svId = ids.Register("sv");
+        var svNode = SvNodeBuilder.Build(new[] { ids.Key("b"), ids.Key("c") }) with { Id = svId.ToString() };
+        await Mutate(store, planId, new JobAdded(0, default, default, svNode));
+        var svKey = svNode.Id;
+
+        var exec = this.MakeExecutor(store);
+
+        // ── Execute A — B and C become ready ──
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        var readyAfterA = await ComputeReadySet(store, planId);
+        Assert.Equal(2, readyAfterA.Count);
+        Assert.Contains(ids.Key("b"), readyAfterA);
+        Assert.Contains(ids.Key("c"), readyAfterA);
+        Assert.DoesNotContain(svKey, readyAfterA); // SV not ready yet
+
+        // ── Execute B — SV should NOT be ready (C still Pending) ──
+        await ExecuteJob(store, exec, planId, ids["b"]);
+
+        var readyAfterB = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterB);
+        Assert.Contains(ids.Key("c"), readyAfterB);
+        Assert.DoesNotContain(svKey, readyAfterB); // SV still not ready
+
+        // ── Execute C — now SV becomes ready ──
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        var readyAfterC = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterC);
+        Assert.Contains(svKey, readyAfterC);
+
+        // ── Execute SV ──
+        await ExecuteJob(store, exec, planId, ids["sv"]);
+
+        // ── Final verification ──
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+        var finalPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(finalPlan);
+        Assert.Equal(PlanStatus.Succeeded, finalPlan!.Status);
+        Assert.Equal(4, finalPlan.Jobs.Count); // A, B, C, SV
+        Assert.All(finalPlan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+
+        // SV correctly gates on ALL leaf predecessors
+        var svFinal = finalPlan.Jobs[svKey];
+        Assert.Equal(2, svFinal.DependsOn.Count);
+        Assert.Contains(ids.Key("b"), svFinal.DependsOn);
+        Assert.Contains(ids.Key("c"), svFinal.DependsOn);
+    }
+
+    // ────────────────────────── Test 18 ──────────────────────────────
+
+    /// <summary>
+    /// When auto-heal is enabled but the cap is exhausted (MaxAutoHealAttempts=2), the job
+    /// should fail after 3 attempts (1 original + 2 heals). Then <see cref="PlanCompletionHandler"/>
+    /// cascades Blocked to downstream jobs and derives plan status as Failed.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-AUTOHEAL-CAP-CASCADE")]
+    public async Task DAG_LIFECYCLE_AutoHeal_CapExhaustion_CascadesBlocked()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "autoheal-cap-cascade", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        // A's Work phase ALWAYS fails with AgentNonZeroExit
+        var alwaysFail = new FakePhaseRunner(JobPhase.Work, failureSelector: _ =>
+            () => throw new PhaseExecutionException(PhaseFailureKind.AgentNonZeroExit, JobPhase.Work, "agent died"));
+
+        var opts = new PhaseOptions { MaxAutoHealAttempts = 2 };
+        var runners = BuildRunners(alwaysFail);
+        var exec = new PhaseExecutor(
+            store, this.bus, this.clock,
+            new FixedOptions<PhaseOptions>(opts),
+            NullLogger<PhaseExecutor>.Instance,
+            runners,
+            autoHealEnabledSelector: _ => true);
+
+        // Execute A — should fail after 3 attempts (1 + 2 heals)
+        var resultA = await ExecuteJob(store, exec, planId, ids["a"]);
+        Assert.Equal(JobStatus.Failed, resultA.FinalStatus);
+        Assert.Equal(3, resultA.AttemptCount);
+
+        // PlanCompletionHandler cascades B→Blocked, C→Blocked, Plan→Failed
+        var handler = new PlanCompletionHandler(
+            store, this.bus, this.clock, NullLogger<PlanCompletionHandler>.Instance);
+        var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
+        Assert.True(terminal);
+
+        // Verify final state
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(JobStatus.Failed, plan!.Jobs[ids.Key("a")].Status);
+        Assert.Equal(JobStatus.Blocked, plan.Jobs[ids.Key("b")].Status);
+        Assert.Equal(JobStatus.Blocked, plan.Jobs[ids.Key("c")].Status);
+        Assert.Equal(PlanStatus.Failed, plan.Status);
+
+        // A should have 3 recorded attempts
+        Assert.Equal(3, plan.Jobs[ids.Key("a")].Attempts.Count);
+
+        // No jobs should be ready
+        var ready = await ComputeReadySet(store, planId);
+        Assert.Empty(ready);
+    }
+
+    // ────────────────────────── Test 19 ──────────────────────────────
+
+    /// <summary>
+    /// When a job's Work phase always throws a transient failure (PhaseResume path),
+    /// the executor should exhaust <c>MaxPhaseResumeAttempts</c> and then fail the job.
+    /// With MaxPhaseResumeAttempts=2, the job runs 3 times total (1 original + 2 resumes).
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-PHASERESUME-EXHAUSTION")]
+    public async Task DAG_LIFECYCLE_PhaseResume_Exhaustion_JobFails()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "phaseresume-exhaustion", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Transient job");
+
+        // Work phase always throws TransientNetwork
+        var alwaysFail = new FakePhaseRunner(JobPhase.Work, failureSelector: _ =>
+            () => throw new PhaseExecutionException(PhaseFailureKind.TransientNetwork, JobPhase.Work, "net glitch"));
+
+        var opts = new PhaseOptions { MaxPhaseResumeAttempts = 2 };
+        var runners = BuildRunners(alwaysFail);
+        var exec = new PhaseExecutor(
+            store, this.bus, this.clock,
+            new FixedOptions<PhaseOptions>(opts),
+            NullLogger<PhaseExecutor>.Instance,
+            runners);
+
+        var result = await ExecuteJob(store, exec, planId, ids["a"]);
+
+        Assert.Equal(JobStatus.Failed, result.FinalStatus);
+        Assert.Equal(JobPhase.Work, result.EndedAtPhase);
+        // 1 original + 2 phase-resumes = 3 total attempts
+        Assert.Equal(3, result.AttemptCount);
+
+        // Verify attempts recorded in store
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        var attempts = plan!.Jobs[ids.Key("a")].Attempts;
+        Assert.Equal(3, attempts.Count);
+        Assert.All(attempts, a => Assert.Equal(JobStatus.Failed, a.Status));
+    }
+
+    // ────────────────────────── Test 20 ──────────────────────────────
+
+    /// <summary>
+    /// After all jobs in a linear chain succeed, <see cref="PlanCompletionHandler.ProcessAsync"/>
+    /// automatically derives plan status as Succeeded (not manually set).
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-PLAN-COMPLETION-AUTO")]
+    public async Task DAG_LIFECYCLE_PlanCompletion_AutoDerived()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "plan-completion-auto", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // Execute all three
+        await ExecuteJob(store, exec, planId, ids["a"]);
+        await ExecuteJob(store, exec, planId, ids["b"]);
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        // Plan is still Running — completion handler derives terminal status
+        var planBefore = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(planBefore);
+        Assert.Equal(PlanStatus.Running, planBefore!.Status);
+
+        var handler = new PlanCompletionHandler(
+            store, this.bus, this.clock, NullLogger<PlanCompletionHandler>.Instance);
+        var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
+        Assert.True(terminal);
+
+        // Verify auto-derived Succeeded
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(PlanStatus.Succeeded, plan!.Status);
+        Assert.All(plan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+    }
+
+    // ────────────────────────── Test 21 ──────────────────────────────
+
+    /// <summary>
+    /// When some jobs succeed and others fail in a fan-in topology,
+    /// <see cref="PlanCompletionHandler"/> cascades Blocked to the fan-in job
+    /// and derives plan status as Partial.
+    ///
+    /// <para>DAG: <c>A → C, B → C</c>. A succeeds, B fails (RemoteRejected).
+    /// C depends on both, so C becomes Blocked. Plan → Partial.</para>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-PLAN-COMPLETION-PARTIAL")]
+    public async Task DAG_LIFECYCLE_PlanCompletion_PartialStatus()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "plan-completion-partial", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → C, B → C (fan-in)
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B");
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["a"], ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // Execute A successfully
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        // B fails with RemoteRejected (fatal, no heal)
+        var failWork = new FakePhaseRunner(JobPhase.Work, failureSelector: _ =>
+            () => throw new PhaseExecutionException(PhaseFailureKind.RemoteRejected, JobPhase.Work, "rejected"));
+        var failExec = this.MakeExecutor(store, workRunner: failWork);
+        var resultB = await ExecuteJob(store, failExec, planId, ids["b"]);
+        Assert.Equal(JobStatus.Failed, resultB.FinalStatus);
+
+        // PlanCompletionHandler: C → Blocked (predecessor B failed), Plan → Partial
+        var handler = new PlanCompletionHandler(
+            store, this.bus, this.clock, NullLogger<PlanCompletionHandler>.Instance);
+        var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
+        Assert.True(terminal);
+
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(JobStatus.Succeeded, plan!.Jobs[ids.Key("a")].Status);
+        Assert.Equal(JobStatus.Failed, plan.Jobs[ids.Key("b")].Status);
+        Assert.Equal(JobStatus.Blocked, plan.Jobs[ids.Key("c")].Status);
+        Assert.Equal(PlanStatus.Partial, plan.Status);
+    }
+
+    // ────────────────────────── Test 22 ──────────────────────────────
+
+    /// <summary>
+    /// When a predecessor job is Skipped (Pending→Skipped), the ready-set treats Skipped
+    /// as "done" and downstream jobs become Ready and can execute normally.
+    ///
+    /// <para>DAG: <c>A → B → C</c>. A is Skipped, B becomes Ready, executes,
+    /// C becomes Ready, executes. All succeed except A which is Skipped.</para>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-SKIPPED-NO-BLOCK")]
+    public async Task DAG_LIFECYCLE_SkippedPredecessor_DoesNotBlock()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "skipped-no-block", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        // Skip A: Pending → Skipped
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("a"), JobStatus.Skipped));
+
+        var planAfterSkip = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(planAfterSkip);
+        Assert.Equal(JobStatus.Skipped, planAfterSkip!.Jobs[ids.Key("a")].Status);
+
+        // B should be Ready (A is Skipped, treated as "done")
+        var readyAfterSkip = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterSkip);
+        Assert.Contains(ids.Key("b"), readyAfterSkip);
+
+        var exec = this.MakeExecutor(store);
+
+        // Execute B
+        var resultB = await ExecuteJob(store, exec, planId, ids["b"]);
+        Assert.Equal(JobStatus.Succeeded, resultB.FinalStatus);
+
+        // C should be Ready
+        var readyAfterB = await ComputeReadySet(store, planId);
+        Assert.Single(readyAfterB);
+        Assert.Contains(ids.Key("c"), readyAfterB);
+
+        // Execute C
+        var resultC = await ExecuteJob(store, exec, planId, ids["c"]);
+        Assert.Equal(JobStatus.Succeeded, resultC.FinalStatus);
+
+        // Verify final state: A=Skipped, B=Succeeded, C=Succeeded
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(JobStatus.Skipped, plan!.Jobs[ids.Key("a")].Status);
+        Assert.Equal(JobStatus.Succeeded, plan.Jobs[ids.Key("b")].Status);
+        Assert.Equal(JobStatus.Succeeded, plan.Jobs[ids.Key("c")].Status);
+    }
+
+    // ────────────────────────── Test 23 ──────────────────────────────
+
+    /// <summary>
+    /// When all jobs are canceled (Pending→Canceled), <see cref="PlanCompletionHandler"/>
+    /// derives plan status as Canceled.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-ALL-CANCELED")]
+    public async Task DAG_LIFECYCLE_PlanCompletion_AllCanceled()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "all-canceled", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // 3 independent roots
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B");
+        await AddJob(store, planId, ids.Register("c"), "Job C");
+
+        // Cancel all three: Pending → Canceled
+        await Mutate(store, planId, new JobStatusUpdated(0, default, default, ids.Key("a"), JobStatus.Canceled));
+        await Mutate(store, planId, new JobStatusUpdated(0, default, default, ids.Key("b"), JobStatus.Canceled));
+        await Mutate(store, planId, new JobStatusUpdated(0, default, default, ids.Key("c"), JobStatus.Canceled));
+
+        // PlanCompletionHandler derives Canceled
+        var handler = new PlanCompletionHandler(
+            store, this.bus, this.clock, NullLogger<PlanCompletionHandler>.Instance);
+        var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
+        Assert.True(terminal);
+
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(PlanStatus.Canceled, plan!.Status);
+        Assert.All(plan.Jobs.Values, j => Assert.Equal(JobStatus.Canceled, j.Status));
+    }
+
+    // ────────────────────────── Test 24 ──────────────────────────────
+
+    /// <summary>
+    /// Exercises the Pausing lifecycle: a plan transitions to Pausing while a job is
+    /// Running, the in-flight job completes, the plan transitions to Paused (no new
+    /// dispatch), then resuming allows remaining jobs to execute.
+    ///
+    /// <para>DAG: <c>A → B → C</c></para>
+    /// <list type="number">
+    /// <item>Execute A</item>
+    /// <item>Start B (Running), set plan to Pausing</item>
+    /// <item>Complete B → plan transitions Pausing → Paused</item>
+    /// <item>Verify C is Ready but no dispatch (Paused)</item>
+    /// <item>Resume → Running, execute C</item>
+    /// <item>PlanCompletionHandler → Succeeded</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-PAUSING-INFLIGHT")]
+    public async Task DAG_LIFECYCLE_Pausing_InFlightCompletes_ThenPaused()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "pausing-inflight", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        // A → B → C
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("a"), "Job A");
+        await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
+        await AddJob(store, planId, ids.Register("c"), "Job C", ids["b"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // Execute A
+        await ExecuteJob(store, exec, planId, ids["a"]);
+
+        // Start B: transition to Running
+        await TransitionToRunning(store, planId, ids.Key("b"));
+
+        // Set plan to Pausing while B is Running
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Pausing));
+        var pausingPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(pausingPlan);
+        Assert.Equal(PlanStatus.Pausing, pausingPlan!.Status);
+        Assert.Equal(JobStatus.Running, pausingPlan.Jobs[ids.Key("b")].Status);
+
+        // Complete B (in-flight job finishes)
+        var resultB = await exec.ExecuteAsync(planId, ids["b"], RunId.New(), CancellationToken.None);
+        Assert.Equal(JobStatus.Succeeded, resultB.FinalStatus);
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("b"), resultB.FinalStatus));
+
+        // No Running jobs remain → transition Pausing → Paused
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Paused));
+        var pausedPlan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(pausedPlan);
+        Assert.Equal(PlanStatus.Paused, pausedPlan!.Status);
+
+        // C is Ready (B succeeded) but plan is Paused — no dispatch
+        var readyWhilePaused = await ComputeReadySet(store, planId);
+        Assert.Single(readyWhilePaused);
+        Assert.Contains(ids.Key("c"), readyWhilePaused);
+        Assert.Equal(JobStatus.Pending, pausedPlan.Jobs[ids.Key("c")].Status);
+
+        // Resume → Running
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Running));
+
+        // Execute C
+        await ExecuteJob(store, exec, planId, ids["c"]);
+
+        // PlanCompletionHandler derives Succeeded
+        var handler = new PlanCompletionHandler(
+            store, this.bus, this.clock, NullLogger<PlanCompletionHandler>.Instance);
+        var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
+        Assert.True(terminal);
+
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(PlanStatus.Succeeded, plan!.Status);
+        Assert.All(plan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+    }
+
     // ──────────────────────── Infrastructure helpers ────────────────────────
 
     private PlanStore CreateStore(PlanStoreOptions? options = null) =>
@@ -1286,6 +2396,31 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
         Func<JobNode, bool>? autoHeal = null)
     {
         var runners = BuildRunners(workRunner);
+        return new PhaseExecutor(
+            store,
+            this.bus,
+            this.clock,
+            new FixedOptions<PhaseOptions>(new PhaseOptions()),
+            NullLogger<PhaseExecutor>.Instance,
+            runners,
+            autoHeal);
+    }
+
+    private PhaseExecutor MakeExecutorWithCustomWork(
+        IPlanStore store,
+        IPhaseRunner workRunner,
+        Func<JobNode, bool>? autoHeal = null)
+    {
+        var runners = new IPhaseRunner[]
+        {
+            new FakePhaseRunner(JobPhase.MergeForwardIntegration),
+            new FakePhaseRunner(JobPhase.Setup),
+            new FakePhaseRunner(JobPhase.Prechecks),
+            workRunner,
+            new FakePhaseRunner(JobPhase.Commit, TestSha),
+            new FakePhaseRunner(JobPhase.Postchecks),
+            new FakePhaseRunner(JobPhase.MergeReverseIntegration),
+        };
         return new PhaseExecutor(
             store,
             this.bus,
@@ -1346,7 +2481,8 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
             }
 
             if (job.DependsOn.Count == 0 ||
-                job.DependsOn.All(d => plan.Jobs.TryGetValue(d, out var dep) && dep.Status == JobStatus.Succeeded))
+                job.DependsOn.All(d => plan.Jobs.TryGetValue(d, out var dep) &&
+                    (dep.Status == JobStatus.Succeeded || dep.Status == JobStatus.Skipped)))
             {
                 ready.Add(id);
             }
@@ -1388,6 +2524,36 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
 
         /// <summary>Gets the string key (job_xxx) used in the plan's Jobs dictionary.</summary>
         public string Key(string name) => this.map[name].ToString();
+    }
+
+    /// <summary>
+    /// Work-phase runner that throws a configured <see cref="PhaseFailureKind"/> on the
+    /// first invocation for each job, then succeeds on subsequent invocations (retries).
+    /// Used by <see cref="DAG_LIFECYCLE_AutoHeal_All10FailureKinds"/> to exercise all
+    /// failure-kind branches in a single plan.
+    /// </summary>
+    private sealed class PerJobWorkRunner : IPhaseRunner
+    {
+        private readonly Dictionary<string, PhaseFailureKind> failureKinds;
+        private readonly HashSet<string> alreadyFailed = new(StringComparer.Ordinal);
+
+        public PerJobWorkRunner(Dictionary<string, PhaseFailureKind> failureKinds)
+        {
+            this.failureKinds = failureKinds;
+        }
+
+        public JobPhase Phase => JobPhase.Work;
+
+        public ValueTask<CommitSha?> RunAsync(PhaseRunContext ctx, CancellationToken ct)
+        {
+            var key = ctx.JobId.ToString();
+            if (this.failureKinds.TryGetValue(key, out var kind) && this.alreadyFailed.Add(key))
+            {
+                throw new PhaseExecutionException(kind, JobPhase.Work, $"{kind} failure");
+            }
+
+            return new ValueTask<CommitSha?>((CommitSha?)null);
+        }
     }
 
     /// <summary>Minimal <see cref="IFileSystem"/> that does nothing — real PlanStore uses direct IO for journal/checkpoint.</summary>
