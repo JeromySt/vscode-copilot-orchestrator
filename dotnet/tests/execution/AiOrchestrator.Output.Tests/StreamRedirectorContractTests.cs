@@ -224,7 +224,11 @@ public sealed class StreamRedirectorContractTests
         await outW.CompleteAsync();
         await errW.CompleteAsync();
 
-        await WaitUntilAsync(() => sut.SnapshotFor(job).TotalStdoutBytes >= 3072, TimeSpan.FromSeconds(5));
+        await WaitUntilAsync(() =>
+        {
+            var s = sut.SnapshotFor(job);
+            return s.TotalStdoutBytes >= 3072 && s.RecentStdoutBytes.Length <= 1024;
+        }, TimeSpan.FromSeconds(5));
 
         var snap = sut.SnapshotFor(job);
         Assert.Equal(3072, snap.TotalStdoutBytes);

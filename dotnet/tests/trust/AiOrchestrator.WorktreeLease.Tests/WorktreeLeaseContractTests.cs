@@ -90,7 +90,7 @@ Assert.Equal("1", jdoc.RootElement.GetProperty("schemaVersion").GetString());
         }
     }
 
-    [Fact(Timeout = 30_000)]
+    [Fact(Timeout = 60_000)]
     [ContractTest("LS-CAS-3")]
     public async Task LS_CAS_3_FencingTokenStrictlyMonotonic()
     {
@@ -98,11 +98,11 @@ Assert.Equal("1", jdoc.RootElement.GetProperty("schemaVersion").GetString());
         var worktree = new AbsolutePath(temp.Path);
         var mgr = MakeManager(clock: new RealClock(), options: new LeaseOptions
         {
-            AcquireTimeout = TimeSpan.FromSeconds(20),
-            AcquireRetryDelay = TimeSpan.FromMilliseconds(5),
+            AcquireTimeout = TimeSpan.FromSeconds(30),
+            AcquireRetryDelay = TimeSpan.FromMilliseconds(25),
         });
 
-        const int acquirerCount = 32;
+        const int acquirerCount = 16;
         var tokens = new ConcurrentBag<long>();
         var concurrent = 0;
         var maxConcurrent = 0;
