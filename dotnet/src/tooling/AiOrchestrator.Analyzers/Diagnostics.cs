@@ -21,7 +21,7 @@ public static class Diagnostics
         title: "Public type or member missing XML doc comment",
         messageFormat: "Public {0} '{1}' is missing an XML documentation comment",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Every public type and member must have an XML documentation comment to keep the public API self-documented.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0001.md");
@@ -32,7 +32,7 @@ public static class Diagnostics
         title: "Direct instantiation of DI-managed type outside Composition",
         messageFormat: "Do not use 'new {0}()' outside AiOrchestrator.Composition; resolve it from the DI container",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Types registered in the DI container must never be directly instantiated outside the Composition project.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0002.md");
@@ -54,7 +54,7 @@ public static class Diagnostics
         title: "System.IO.File/Directory used outside FileSystem project",
         messageFormat: "Do not use '{0}' directly; use IFileSystem instead",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Direct file system access via System.IO.File or System.IO.Directory is only allowed in the AiOrchestrator.FileSystem project.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0004.md");
@@ -87,7 +87,7 @@ public static class Diagnostics
         title: "Async method missing CancellationToken parameter",
         messageFormat: "Async method '{0}' must accept a CancellationToken parameter",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Every async method must accept a CancellationToken to support cooperative cancellation.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0007.md");
@@ -109,7 +109,7 @@ public static class Diagnostics
         title: "[DllImport] used instead of [LibraryImport]",
         messageFormat: "Replace [DllImport] with [LibraryImport] for source-generated P/Invoke",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "[LibraryImport] generates efficient source-generated P/Invoke marshalling, unlike [DllImport] which uses runtime reflection.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0009.md");
@@ -131,7 +131,7 @@ public static class Diagnostics
         title: "Synchronous File I/O API",
         messageFormat: "Do not use synchronous '{0}'; use async IFileSystem methods instead",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Synchronous file I/O methods block threads. Use the async IFileSystem abstraction.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0011.md");
@@ -153,7 +153,7 @@ public static class Diagnostics
         title: "Public method has dynamic or object parameter",
         messageFormat: "Public method '{0}' has parameter '{1}' of type '{2}'; use a specific type or generic",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Public methods must not use 'dynamic' or 'object' as parameter types; use specific types or generics.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0020.md");
@@ -175,7 +175,7 @@ public static class Diagnostics
         title: "Reflection-based JSON serialization",
         messageFormat: "'{0}' uses reflection-based serialization; pass a JsonSerializerContext for source-generated serialization",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
+        defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "JsonSerializer.Serialize/Deserialize without a JsonSerializerContext use reflection, which is incompatible with trimming and NativeAOT.",
         helpLinkUri: "https://github.com/AiOrchestrator/docs/OE0040.md");

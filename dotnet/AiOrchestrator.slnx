@@ -57,9 +57,11 @@
   </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/core/">
+    <Project Path="tests/core/AiOrchestrator.Abstractions.Tests/AiOrchestrator.Abstractions.Tests.csproj" />
     <Project Path="tests/core/AiOrchestrator.Configuration.Tests/AiOrchestrator.Configuration.Tests.csproj" />
     <Project Path="tests/core/AiOrchestrator.FileSystem.Tests/AiOrchestrator.FileSystem.Tests.csproj" />
     <Project Path="tests/core/AiOrchestrator.Foundation.Tests/AiOrchestrator.Foundation.Tests.csproj" />
+    <Project Path="tests/core/AiOrchestrator.Models.Tests/AiOrchestrator.Models.Tests.csproj" />
     <Project Path="tests/core/AiOrchestrator.Logging.Tests/AiOrchestrator.Logging.Tests.csproj" />
     <Project Path="tests/core/AiOrchestrator.PathValidator.Tests/AiOrchestrator.PathValidator.Tests.csproj" />
     <Project Path="tests/core/AiOrchestrator.Process.Tests/AiOrchestrator.Process.Tests.csproj" />

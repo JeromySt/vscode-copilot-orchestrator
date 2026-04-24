@@ -106,7 +106,6 @@ $testArgs = @(
     'test'
     $testTarget
     '--verbosity', 'minimal'
-    '-p:DisableCustomAnalyzers=true'
     '--collect:XPlat Code Coverage'
     "--settings:$runSettingsPath"
     "--results-directory:$resultsDir"

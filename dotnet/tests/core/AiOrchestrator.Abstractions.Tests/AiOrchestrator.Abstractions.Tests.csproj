@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AiOrchestrator.Abstractions.Tests</AssemblyName>
+    <RootNamespace>AiOrchestrator.Abstractions.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

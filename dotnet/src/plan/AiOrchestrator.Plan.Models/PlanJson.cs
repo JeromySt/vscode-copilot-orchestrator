@@ -22,6 +22,7 @@ public static class PlanJson
     /// <summary>Deserializes a <see cref="Plan"/> from its JSON representation.</summary>
     /// <param name="json">The JSON string produced by <see cref="Serialize"/>.</param>
     /// <returns>The deserialized <see cref="Plan"/>, or <see langword="null"/> if <paramref name="json"/> is empty.</returns>
+#pragma warning disable OE0040 // Reflection-based serialization is intentional — PlanJson is the canonical serializer
     public static Plan? Deserialize(string json) =>
         JsonSerializer.Deserialize<Plan>(json, Options);
 
@@ -30,6 +31,7 @@ public static class PlanJson
     /// <returns>An indented JSON string with alphabetically-ordered properties and key-sorted dictionaries.</returns>
     public static string Serialize(Plan plan) =>
         JsonSerializer.Serialize(plan, Options);
+#pragma warning restore OE0040
 
     private static JsonSerializerOptions BuildOptions()
     {
@@ -75,12 +77,14 @@ public static class PlanJson
     /// <summary>Ensures <see cref="DateTimeOffset"/> values are always serialized as UTC (+00:00).</summary>
     private sealed class UtcDateTimeOffsetConverter : JsonConverter<DateTimeOffset>
     {
+        /// <inheritdoc/>
         public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             var raw = reader.GetString() ?? throw new JsonException("Expected DateTimeOffset string.");
             return DateTimeOffset.Parse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind);
         }
 
+        /// <inheritdoc/>
         public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options) =>
             writer.WriteStringValue(value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -90,11 +94,13 @@ public static class PlanJson
     /// </summary>
     private sealed class SortedDictionaryConverter : JsonConverterFactory
     {
+        /// <inheritdoc/>
         public override bool CanConvert(Type typeToConvert) =>
             typeToConvert.IsGenericType &&
             typeToConvert.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>) &&
             typeToConvert.GetGenericArguments()[0] == typeof(string);
 
+        /// <inheritdoc/>
         public override JsonConverter? CreateConverter(Type typeToConvert, JsonSerializerOptions options)
         {
             var valueType = typeToConvert.GetGenericArguments()[1];
@@ -104,8 +110,10 @@ public static class PlanJson
     }
 
 #pragma warning disable CA1812 // SortedDictionaryConverter is instantiated via reflection by SortedDictionaryConverterFactory
+#pragma warning disable OE0040 // Internal serialization pipeline — options are correctly forwarded
     private sealed class SortedDictionaryConverter<TValue> : JsonConverter<IReadOnlyDictionary<string, TValue>>
     {
+        /// <inheritdoc/>
         public override IReadOnlyDictionary<string, TValue>? Read(
             ref Utf8JsonReader reader,
             Type typeToConvert,
@@ -115,6 +123,7 @@ public static class PlanJson
             return dict;
         }
 
+        /// <inheritdoc/>
         public override void Write(
             Utf8JsonWriter writer,
             IReadOnlyDictionary<string, TValue> value,

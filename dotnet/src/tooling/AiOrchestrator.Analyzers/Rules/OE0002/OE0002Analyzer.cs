@@ -52,6 +52,24 @@ public sealed class OE0002Analyzer : DiagnosticAnalyzer
             return;
         }
 
+        // Value types (readonly record structs like PlanId, JobId, RunId, AbsolutePath) are never DI-managed.
+        if (type.IsValueType)
+        {
+            return;
+        }
+
+        // Nested private types (e.g., JSON converters) are implementation details, not DI services.
+        if (type is INamedTypeSymbol { DeclaredAccessibility: Accessibility.Private, ContainingType: not null })
+        {
+            return;
+        }
+
+        // Exception types are never DI-managed.
+        if (InheritsFrom(type, "System.Exception"))
+        {
+            return;
+        }
+
         var fullNamespace = type.ContainingNamespace?.ToDisplayString();
         if (fullNamespace is null)
         {
@@ -88,5 +106,21 @@ public sealed class OE0002Analyzer : DiagnosticAnalyzer
         }
 
         return null;
+    }
+
+    private static bool InheritsFrom(ITypeSymbol type, string baseTypeFullName)
+    {
+        var current = type.BaseType;
+        while (current != null)
+        {
+            if (current.ToDisplayString() == baseTypeFullName)
+            {
+                return true;
+            }
+
+            current = current.BaseType;
+        }
+
+        return false;
     }
 }

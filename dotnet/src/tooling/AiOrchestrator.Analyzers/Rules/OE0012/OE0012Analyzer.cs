@@ -51,7 +51,19 @@ public sealed class OE0012Analyzer : DiagnosticAnalyzer
         if (method.ContainingType?.ToDisplayString() == "System.Diagnostics.Process" &&
             method.Name == "Start")
         {
+            if (IsInExemptProject(invocation))
+            {
+                return;
+            }
+
             ctx.ReportDiagnostic(Diagnostic.Create(Diagnostics.OE0012, invocation.GetLocation()));
         }
+    }
+
+    private static bool IsInExemptProject(SyntaxNode node)
+    {
+        var filePath = node.SyntaxTree.FilePath ?? string.Empty;
+        return filePath.IndexOf("AiOrchestrator.Process", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+               filePath.IndexOf("AiOrchestrator.Git", System.StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }
