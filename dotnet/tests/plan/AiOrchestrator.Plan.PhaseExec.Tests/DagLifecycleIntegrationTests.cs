@@ -947,6 +947,240 @@ public sealed class DagLifecycleIntegrationTests : IDisposable
         Assert.Equal(ids.Key("bv"), cNode.DependsOn[0]);
     }
 
+    // ─────────── Test: 4-Tier Deep Nested Context Pressure Split ────────────
+
+    /// <summary>
+    /// Exercises a 4-tier deep nested context pressure split tree:
+    ///
+    /// <para>Initial DAG: <c>Root → Work → Final</c></para>
+    ///
+    /// Tier 0: Work splits into W1, W2 + WV fan-in. Final rewired to WV.
+    /// Tier 1: W1 splits into W1a, W1b. BV rewired: W1→{W1a,W1b}.
+    /// Tier 2: W1a splits into W1a-i, W1a-ii, W1a-iii. BV rewired: W1a→{W1a-i,ii,iii}.
+    /// Tier 3: W1a-i splits into W1a-i-α, W1a-i-β. BV rewired: W1a-i→{α,β}.
+    ///
+    /// Final BV deps (8 leaves): W1a-i-α, W1a-i-β, W1a-ii, W1a-iii, W1b, W2
+    ///   (W1, W1a, W1a-i are all CompletedSplit→Succeeded intermediates)
+    ///
+    /// Total jobs: 14 (Root, Work, W1, W1a, W1b, W1a-i, W1a-ii, W1a-iii,
+    ///                  W1a-i-α, W1a-i-β, W2, WV, Final)
+    ///   Wait — that's 13. Let me count:
+    ///   Root, Work, W1, W2, W1a, W1b, W1a-i, W1a-ii, W1a-iii,
+    ///   W1a-i-α, W1a-i-β, WV, Final = 13.
+    /// </summary>
+    [Fact]
+    [ContractTest("DAG-LIFECYCLE-4TIER-SPLIT")]
+    public async Task DAG_LIFECYCLE_ContextPressure_4TierDeepSplit()
+    {
+        await using var store = this.CreateStore();
+        var planId = await store.CreateAsync(
+            new PlanModel { Name = "4tier-split", Status = PlanStatus.Running },
+            Idem(), CancellationToken.None);
+
+        var ids = new JobIdMap();
+        await AddJob(store, planId, ids.Register("root"), "Root");
+        await AddJob(store, planId, ids.Register("work"), "Work", ids["root"]);
+        await AddJob(store, planId, ids.Register("final"), "Final", ids["work"]);
+
+        var exec = this.MakeExecutor(store);
+
+        // ═══════════════════════════════════════════════════════════════
+        // Execute Root normally
+        // ═══════════════════════════════════════════════════════════════
+        await ExecuteJob(store, exec, planId, ids["root"]);
+
+        // ═══════════════════════════════════════════════════════════════
+        // TIER 0: Work → CompletedSplit → {W1, W2} + WV
+        // ═══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("work"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("work"), JobStatus.CompletedSplit));
+
+        // Final blocked
+        Assert.Empty(await ComputeReadySet(store, planId));
+
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("w1").ToString(), Title = "W1", Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("work") },
+                WorkSpec = new WorkSpec { Instructions = "Chunk 1" } }));
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("w2").ToString(), Title = "W2", Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("work") },
+                WorkSpec = new WorkSpec { Instructions = "Chunk 2" } }));
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("wv").ToString(), Title = "WV-fanin", Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("w1"), ids.Key("w2") },
+                WorkSpec = new WorkSpec { Instructions = "Verify all chunks" } }));
+
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("final"), ImmutableArray.Create(ids.Key("wv"))));
+
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("work"), JobStatus.Succeeded));
+
+        var readyT0 = await ComputeReadySet(store, planId);
+        Assert.Equal(2, readyT0.Count); // W1, W2
+
+        // ═══════════════════════════════════════════════════════════════
+        // TIER 1: W1 → CompletedSplit → {W1a, W1b}
+        //         Inner subs fan into outer WV
+        // ═══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("w1"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("w1"), JobStatus.CompletedSplit));
+
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("w1a").ToString(), Title = "W1a", Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("w1") },
+                WorkSpec = new WorkSpec { Instructions = "W1 chunk a" } }));
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("w1b").ToString(), Title = "W1b", Status = JobStatus.Pending,
+                DependsOn = new[] { ids.Key("w1") },
+                WorkSpec = new WorkSpec { Instructions = "W1 chunk b" } }));
+
+        // WV: replace W1 with W1a, W1b
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("wv"), ImmutableArray.Create(ids.Key("w1a"), ids.Key("w1b"), ids.Key("w2"))));
+
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("w1"), JobStatus.Succeeded));
+
+        // W1a, W1b, W2 all ready
+        var readyT1 = await ComputeReadySet(store, planId);
+        Assert.Equal(3, readyT1.Count);
+
+        // ═══════════════════════════════════════════════════════════════
+        // TIER 2: W1a → CompletedSplit → {W1a-i, W1a-ii, W1a-iii}
+        //         Inner subs fan into outer WV
+        // ═══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("w1a"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("w1a"), JobStatus.CompletedSplit));
+
+        foreach (var suffix in new[] { "i", "ii", "iii" })
+        {
+            var name = $"w1a-{suffix}";
+            await Mutate(store, planId, new JobAdded(0, default, default,
+                new JobNode { Id = ids.Register(name).ToString(), Title = name.ToUpperInvariant(),
+                    Status = JobStatus.Pending, DependsOn = new[] { ids.Key("w1a") },
+                    WorkSpec = new WorkSpec { Instructions = $"W1a sub-chunk {suffix}" } }));
+        }
+
+        // WV: replace W1a with W1a-i, W1a-ii, W1a-iii
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("wv"), ImmutableArray.Create(
+                ids.Key("w1a-i"), ids.Key("w1a-ii"), ids.Key("w1a-iii"),
+                ids.Key("w1b"), ids.Key("w2"))));
+
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("w1a"), JobStatus.Succeeded));
+
+        // W1a-i, W1a-ii, W1a-iii, W1b, W2 all ready
+        var readyT2 = await ComputeReadySet(store, planId);
+        Assert.Equal(5, readyT2.Count);
+
+        // ═══════════════════════════════════════════════════════════════
+        // TIER 3: W1a-i → CompletedSplit → {W1a-i-α, W1a-i-β}
+        //         Deepest split — subs fan into outer WV
+        // ═══════════════════════════════════════════════════════════════
+        await TransitionToRunning(store, planId, ids.Key("w1a-i"));
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("w1a-i"), JobStatus.CompletedSplit));
+
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("w1a-i-alpha").ToString(), Title = "W1A-I-ALPHA",
+                Status = JobStatus.Pending, DependsOn = new[] { ids.Key("w1a-i") },
+                WorkSpec = new WorkSpec { Instructions = "Deepest chunk α" } }));
+        await Mutate(store, planId, new JobAdded(0, default, default,
+            new JobNode { Id = ids.Register("w1a-i-beta").ToString(), Title = "W1A-I-BETA",
+                Status = JobStatus.Pending, DependsOn = new[] { ids.Key("w1a-i") },
+                WorkSpec = new WorkSpec { Instructions = "Deepest chunk β" } }));
+
+        // WV: replace W1a-i with W1a-i-α, W1a-i-β
+        await Mutate(store, planId, new JobDepsUpdated(0, default, default,
+            ids.Key("wv"), ImmutableArray.Create(
+                ids.Key("w1a-i-alpha"), ids.Key("w1a-i-beta"),
+                ids.Key("w1a-ii"), ids.Key("w1a-iii"),
+                ids.Key("w1b"), ids.Key("w2"))));
+
+        await Mutate(store, planId,
+            new JobStatusUpdated(0, default, default, ids.Key("w1a-i"), JobStatus.Succeeded));
+
+        // All 6 leaf sub-jobs ready: α, β, W1a-ii, W1a-iii, W1b, W2
+        var readyT3 = await ComputeReadySet(store, planId);
+        Assert.Equal(6, readyT3.Count);
+        Assert.Contains(ids.Key("w1a-i-alpha"), readyT3);
+        Assert.Contains(ids.Key("w1a-i-beta"), readyT3);
+        Assert.Contains(ids.Key("w1a-ii"), readyT3);
+        Assert.Contains(ids.Key("w1a-iii"), readyT3);
+        Assert.Contains(ids.Key("w1b"), readyT3);
+        Assert.Contains(ids.Key("w2"), readyT3);
+
+        // ═══════════════════════════════════════════════════════════════
+        // Execute all 6 leaf sub-jobs
+        // ═══════════════════════════════════════════════════════════════
+        await ExecuteJob(store, exec, planId, ids["w1a-i-alpha"]);
+        await ExecuteJob(store, exec, planId, ids["w1a-i-beta"]);
+        await ExecuteJob(store, exec, planId, ids["w1a-ii"]);
+        await ExecuteJob(store, exec, planId, ids["w1a-iii"]);
+        await ExecuteJob(store, exec, planId, ids["w1b"]);
+        await ExecuteJob(store, exec, planId, ids["w2"]);
+
+        // ═══════════════════════════════════════════════════════════════
+        // WV ready — all 6 leaf deps succeeded
+        // ═══════════════════════════════════════════════════════════════
+        var readyWV = await ComputeReadySet(store, planId);
+        Assert.Single(readyWV);
+        Assert.Contains(ids.Key("wv"), readyWV);
+
+        await ExecuteJob(store, exec, planId, ids["wv"]);
+
+        // ═══════════════════════════════════════════════════════════════
+        // Final ready — WV succeeded
+        // ═══════════════════════════════════════════════════════════════
+        var readyFinal = await ComputeReadySet(store, planId);
+        Assert.Single(readyFinal);
+        Assert.Contains(ids.Key("final"), readyFinal);
+
+        await ExecuteJob(store, exec, planId, ids["final"]);
+
+        // ═══════════════════════════════════════════════════════════════
+        // Final verification
+        // ═══════════════════════════════════════════════════════════════
+        await Mutate(store, planId, new PlanStatusUpdated(0, default, default, PlanStatus.Succeeded));
+
+        var plan = await store.LoadAsync(planId, CancellationToken.None);
+        Assert.NotNull(plan);
+        Assert.Equal(PlanStatus.Succeeded, plan!.Status);
+
+        // 13 total: Root, Work, W1, W2, W1a, W1b, W1a-i, W1a-ii, W1a-iii,
+        //           W1a-i-α, W1a-i-β, WV, Final
+        Assert.Equal(13, plan.Jobs.Count);
+        Assert.All(plan.Jobs.Values, j => Assert.Equal(JobStatus.Succeeded, j.Status));
+
+        // WV has exactly 6 leaf deps (no intermediate split nodes)
+        var wvNode = plan.Jobs[ids.Key("wv")];
+        Assert.Equal(6, wvNode.DependsOn.Count);
+        Assert.Contains(ids.Key("w1a-i-alpha"), wvNode.DependsOn);
+        Assert.Contains(ids.Key("w1a-i-beta"), wvNode.DependsOn);
+        Assert.Contains(ids.Key("w1a-ii"), wvNode.DependsOn);
+        Assert.Contains(ids.Key("w1a-iii"), wvNode.DependsOn);
+        Assert.Contains(ids.Key("w1b"), wvNode.DependsOn);
+        Assert.Contains(ids.Key("w2"), wvNode.DependsOn);
+
+        // Final depends only on WV
+        var finalNode = plan.Jobs[ids.Key("final")];
+        Assert.Single(finalNode.DependsOn);
+        Assert.Equal(ids.Key("wv"), finalNode.DependsOn[0]);
+
+        // Verify the split chain: Work→W1→W1a→W1a-i all went through CompletedSplit
+        // (they're now Succeeded, but their transition history would show CompletedSplit)
+        // The key structural invariant: no intermediate fan-in jobs exist
+        // Only WV is the single fan-in point for the entire split tree
+        var allJobTitles = plan.Jobs.Values.Select(j => j.Title).OrderBy(t => t).ToArray();
+        Assert.DoesNotContain(allJobTitles, t => t.Contains("fanin") && t != "WV-fanin");
+    }
+
     // ────────────────────────────── Test 9 ──────────────────────────────
 
     [Fact]
