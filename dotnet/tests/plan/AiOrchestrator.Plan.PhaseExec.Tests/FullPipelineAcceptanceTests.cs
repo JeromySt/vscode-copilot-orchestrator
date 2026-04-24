@@ -20,6 +20,7 @@ using AiOrchestrator.Plan.Scheduler;
 using AiOrchestrator.Plan.Scheduler.Completion;
 using AiOrchestrator.Plan.Scheduler.Events;
 using AiOrchestrator.Plan.Store;
+using AiOrchestrator.Plan.Store.Events;
 using AiOrchestrator.TestKit.Time;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -215,6 +216,27 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.True(lastIdx(ids["sv"]) < firstIdx(ids["final"]),
             "SV should complete before Final starts");
 
+        // 5. JobStatusChangedEvent: 4 transitions per job × 6 jobs = 24
+        //    Each job: Pending→Ready, Ready→Scheduled, Scheduled→Running, Running→Succeeded
+        var jobStatusEvents = this.bus.Of<JobStatusChangedEvent>();
+        Assert.Equal(24, jobStatusEvents.Count);
+
+        foreach (var name in new[] { "root", "work1", "work2", "work3", "sv", "final" })
+        {
+            var forJob = jobStatusEvents.Where(e => e.JobId == ids[name]).ToList();
+            Assert.Equal(4, forJob.Count);
+            Assert.Contains(forJob, e => e.PreviousStatus == JobStatus.Pending && e.NewStatus == JobStatus.Ready);
+            Assert.Contains(forJob, e => e.PreviousStatus == JobStatus.Ready && e.NewStatus == JobStatus.Scheduled);
+            Assert.Contains(forJob, e => e.PreviousStatus == JobStatus.Scheduled && e.NewStatus == JobStatus.Running);
+            Assert.Contains(forJob, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Succeeded);
+        }
+
+        // 6. PlanStatusChangedEvent: Running → Succeeded
+        var planStatusEvents = this.bus.Of<PlanStatusChangedEvent>();
+        Assert.Single(planStatusEvents);
+        Assert.Equal(PlanStatus.Running, planStatusEvents[0].PreviousStatus);
+        Assert.Equal(PlanStatus.Succeeded, planStatusEvents[0].NewStatus);
+
         // ════════════════════════════════════════════════════════════
         // GIT / FILE ASSERTIONS
         // ════════════════════════════════════════════════════════════
@@ -358,6 +380,44 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         var blockedD = blockedEvents.Single(e => e.JobId == ids["d"]);
         Assert.Equal(ids["c"], blockedD.BlockedBy);
 
+        // 4. JobStatusChangedEvent: A(4) + B(4) + C(1) + D(1) = 10
+        var jobStatusEvents = this.bus.Of<JobStatusChangedEvent>();
+        Assert.Equal(10, jobStatusEvents.Count);
+
+        // A: Pending→Ready→Scheduled→Running→Succeeded
+        var forA = jobStatusEvents.Where(e => e.JobId == ids["a"]).ToList();
+        Assert.Equal(4, forA.Count);
+        Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Pending && e.NewStatus == JobStatus.Ready);
+        Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Ready && e.NewStatus == JobStatus.Scheduled);
+        Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Scheduled && e.NewStatus == JobStatus.Running);
+        Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Succeeded);
+
+        // B: Pending→Ready→Scheduled→Running→Failed
+        var forB = jobStatusEvents.Where(e => e.JobId == ids["b"]).ToList();
+        Assert.Equal(4, forB.Count);
+        Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Pending && e.NewStatus == JobStatus.Ready);
+        Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Ready && e.NewStatus == JobStatus.Scheduled);
+        Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Scheduled && e.NewStatus == JobStatus.Running);
+        Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Failed);
+
+        // C: Pending→Blocked
+        var forC = jobStatusEvents.Where(e => e.JobId == ids["c"]).ToList();
+        Assert.Single(forC);
+        Assert.Equal(JobStatus.Pending, forC[0].PreviousStatus);
+        Assert.Equal(JobStatus.Blocked, forC[0].NewStatus);
+
+        // D: Pending→Blocked
+        var forD = jobStatusEvents.Where(e => e.JobId == ids["d"]).ToList();
+        Assert.Single(forD);
+        Assert.Equal(JobStatus.Pending, forD[0].PreviousStatus);
+        Assert.Equal(JobStatus.Blocked, forD[0].NewStatus);
+
+        // 5. PlanStatusChangedEvent: Running → Partial
+        var planStatusEvents = this.bus.Of<PlanStatusChangedEvent>();
+        Assert.Single(planStatusEvents);
+        Assert.Equal(PlanStatus.Running, planStatusEvents[0].PreviousStatus);
+        Assert.Equal(PlanStatus.Partial, planStatusEvents[0].NewStatus);
+
         // ════════════════════════════════════════════════════════════
         // GIT ASSERTIONS
         // ════════════════════════════════════════════════════════════
@@ -459,6 +519,21 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Single(readyEvents);
         Assert.Equal(ids["healer"], readyEvents[0].JobId);
 
+        // 4. JobStatusChangedEvent: 6 transitions including Failed→Running heal
+        //    Pending→Ready, Ready→Scheduled, Scheduled→Running,
+        //    Running→Failed (heal), Failed→Running (heal retry), Running→Succeeded
+        var jobStatusEvents = this.bus.Of<JobStatusChangedEvent>();
+        Assert.Equal(6, jobStatusEvents.Count);
+
+        var forHealer = jobStatusEvents.Where(e => e.JobId == ids["healer"]).ToList();
+        Assert.Equal(6, forHealer.Count);
+        Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Pending && e.NewStatus == JobStatus.Ready);
+        Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Ready && e.NewStatus == JobStatus.Scheduled);
+        Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Scheduled && e.NewStatus == JobStatus.Running);
+        Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Failed);
+        Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Failed && e.NewStatus == JobStatus.Running);
+        Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Succeeded);
+
         // ════════════════════════════════════════════════════════════
         // GIT ASSERTIONS
         // ════════════════════════════════════════════════════════════
@@ -547,6 +622,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         JobScheduledEvent e => e.JobId,
         PhaseAttemptCompletedEvent e => e.JobId,
         JobBlockedEvent e => e.JobId,
+        JobStatusChangedEvent e => e.JobId,
         _ => null,
     };
 

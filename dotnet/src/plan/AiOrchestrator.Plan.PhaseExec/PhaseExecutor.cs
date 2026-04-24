@@ -250,6 +250,22 @@ public sealed class PhaseExecutor : IPhaseExecutor
                 switch (decision.Mode)
                 {
                     case ResumeMode.AutoHeal:
+                        // Transition Running → Failed → Running so that
+                        // JobStatusChangedEvent is published for UX tracking.
+                        var healIdem1 = IdempotencyKey.FromGuid(Guid.NewGuid());
+                        await this.store.MutateAsync(
+                            planId,
+                            new JobStatusUpdated(0, healIdem1, this.clock.UtcNow, jobId.ToString(), JobStatus.Failed),
+                            healIdem1,
+                            ct).ConfigureAwait(false);
+
+                        var healIdem2 = IdempotencyKey.FromGuid(Guid.NewGuid());
+                        await this.store.MutateAsync(
+                            planId,
+                            new JobStatusUpdated(0, healIdem2, this.clock.UtcNow, jobId.ToString(), JobStatus.Running),
+                            healIdem2,
+                            ct).ConfigureAwait(false);
+
                         healAttempts++;
                         startPhase = decision.ResumeFromPhase;
                         continue;

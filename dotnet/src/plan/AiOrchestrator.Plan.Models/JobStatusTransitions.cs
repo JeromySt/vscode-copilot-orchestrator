@@ -30,6 +30,7 @@ public readonly record struct JobStatusTransitions
             (JobStatus.CompletedSplit, JobStatus.Succeeded),
             (JobStatus.CompletedSplit, JobStatus.Failed),
             (JobStatus.Failed, JobStatus.Ready),
+            (JobStatus.Failed, JobStatus.Running),
             (JobStatus.Failed, JobStatus.Blocked),
             (JobStatus.Failed, JobStatus.Pending),
             (JobStatus.Canceled, JobStatus.Pending),

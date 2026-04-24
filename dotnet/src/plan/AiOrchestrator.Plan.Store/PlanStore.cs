@@ -17,6 +17,7 @@ using AiOrchestrator.Abstractions.Time;
 using AiOrchestrator.Models.Ids;
 using AiOrchestrator.Models.Paths;
 using AiOrchestrator.Plan.Models;
+using AiOrchestrator.Plan.Store.Events;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -32,10 +33,8 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
     private readonly AbsolutePath storeRoot;
     private readonly IFileSystem fs;
     private readonly IClock clock;
-    #pragma warning disable CA1823, IDE0052
     private readonly IEventBus bus;
     private readonly ILogger<PlanStore> logger;
-    #pragma warning restore CA1823, IDE0052
     private readonly IOptionsMonitor<PlanStoreOptions> opts;
 
     private readonly ConcurrentDictionary<PlanId, PlanState> plans = new();
@@ -134,7 +133,50 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
         var state = await this.EnsureLoadedAsync(id, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Plan not found: {id}");
 
+        // Capture pre-mutation status for event publishing.
+        JobStatus? oldJobStatus = null;
+        string? jobIdValue = null;
+        PlanStatus? oldPlanStatus = null;
+
+        if (mutation is JobStatusUpdated jsu && state.Plan.Jobs.TryGetValue(jsu.JobIdValue, out var oldJob))
+        {
+            oldJobStatus = oldJob.Status;
+            jobIdValue = jsu.JobIdValue;
+        }
+        else if (mutation is PlanStatusUpdated)
+        {
+            oldPlanStatus = state.Plan.Status;
+        }
+
         await state.MutateAsync(mutation, idemKey, ct).ConfigureAwait(false);
+
+        // Publish status-change events after successful mutation.
+        if (mutation is JobStatusUpdated jsu2 && oldJobStatus.HasValue && oldJobStatus.Value != jsu2.NewStatus
+            && JobId.TryParse(jobIdValue!, out var parsedJobId))
+        {
+            await this.bus.PublishAsync(
+                new JobStatusChangedEvent
+                {
+                    PlanId = id,
+                    JobId = parsedJobId,
+                    PreviousStatus = oldJobStatus.Value,
+                    NewStatus = jsu2.NewStatus,
+                    At = this.clock.UtcNow,
+                },
+                ct).ConfigureAwait(false);
+        }
+        else if (mutation is PlanStatusUpdated psu && oldPlanStatus.HasValue && oldPlanStatus.Value != psu.NewStatus)
+        {
+            await this.bus.PublishAsync(
+                new PlanStatusChangedEvent
+                {
+                    PlanId = id,
+                    PreviousStatus = oldPlanStatus.Value,
+                    NewStatus = psu.NewStatus,
+                    At = this.clock.UtcNow,
+                },
+                ct).ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />

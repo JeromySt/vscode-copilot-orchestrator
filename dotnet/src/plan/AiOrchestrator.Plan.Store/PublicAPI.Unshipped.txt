@@ -30,3 +30,27 @@ public PlanCheckpointer(AbsolutePath path, IFileSystem fs);
 public ValueTask WriteAsync(Plan plan, long upToSeq, CancellationToken ct);   // atomic temp+rename
 public ValueTask<(Plan plan, long upToSeq)?> LoadLatestAsync(CancellationToken ct);
 public sealed class IdempotencyConflictException : Exception { public required IdempotencyKey Key { get; init; } public required PlanMutation StoredMutation { get; init; } public required PlanMutation NewMutation { get; init; } }
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.JobStatusChangedEvent() -> void
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.PlanId.get -> AiOrchestrator.Models.Ids.PlanId
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.PlanId.init -> void
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.JobId.get -> AiOrchestrator.Models.Ids.JobId
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.JobId.init -> void
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.PreviousStatus.get -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.PreviousStatus.init -> void
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.NewStatus.get -> AiOrchestrator.Plan.Models.JobStatus
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.NewStatus.init -> void
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.At.get -> System.DateTimeOffset
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.At.init -> void
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.Reason.get -> string?
+AiOrchestrator.Plan.Store.Events.JobStatusChangedEvent.Reason.init -> void
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.PlanStatusChangedEvent() -> void
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.PlanId.get -> AiOrchestrator.Models.Ids.PlanId
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.PlanId.init -> void
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.PreviousStatus.get -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.PreviousStatus.init -> void
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.NewStatus.get -> AiOrchestrator.Plan.Models.PlanStatus
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.NewStatus.init -> void
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.At.get -> System.DateTimeOffset
+AiOrchestrator.Plan.Store.Events.PlanStatusChangedEvent.At.init -> void
