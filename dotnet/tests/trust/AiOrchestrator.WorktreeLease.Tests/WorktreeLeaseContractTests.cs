@@ -163,13 +163,46 @@ Assert.True(ok);
 Assert.False(File.Exists(Path.Combine(temp.Path, "bad.txt")));
     }
 
-    [Fact(Skip = "OE0040 Roslyn analyzer is scheduled for a follow-up analyzer-project job (job 011). " +
-        "The enforcement path is validated by LS_INF_1_StaleTokenRejected; the analyzer complements it " +
-        "by preventing direct IFileSystem.WriteAsync calls at compile time.")]
+    [Fact]
     [ContractTest("LS-INF-2")]
     public void LS_INF_2_AnalyzerForbidsBypass()
     {
-        // Intentionally skipped — see [Fact(Skip=...)] attribute for rationale.
+        // OE0004 prevents direct System.IO.File/Directory usage in non-exempt projects,
+        // forcing all file I/O through IFileSystem where fencing-token enforcement lives.
+        // Verify that Directory.Build.targets wires the analyzer and that the WorktreeLease
+        // source project is NOT excluded from analyzer enforcement.
+        var repoRoot = FindRepoRoot();
+
+        var targets = Path.Combine(repoRoot, "dotnet", "Directory.Build.targets");
+        Assert.True(File.Exists(targets), "Directory.Build.targets must exist");
+        var targetsContent = File.ReadAllText(targets);
+        Assert.Contains("AiOrchestrator.Analyzers.csproj", targetsContent);
+        Assert.Contains("OutputItemType=\"Analyzer\"", targetsContent);
+
+        var csproj = Path.Combine(
+            repoRoot, "dotnet", "src", "trust", "AiOrchestrator.WorktreeLease",
+            "AiOrchestrator.WorktreeLease.csproj");
+        Assert.True(File.Exists(csproj), "WorktreeLease.csproj must exist");
+        var csprojContent = File.ReadAllText(csproj);
+        // WorktreeLease must NOT opt out of the OE0004 analyzer.
+        Assert.DoesNotContain("DisableCustomAnalyzers", csprojContent);
+        Assert.DoesNotContain("<IsTestProject>true</IsTestProject>", csprojContent);
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "dotnet", "src")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent!;
+        }
+
+        throw new InvalidOperationException("Cannot locate repo root from " + AppContext.BaseDirectory);
     }
 
     [Fact]

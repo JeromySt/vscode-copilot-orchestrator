@@ -673,7 +673,7 @@ public sealed class AnalyzersPackAndDogfoodTests
         throw new InvalidOperationException("Cannot locate repo root from " + AppContext.BaseDirectory);
     }
 
-    [Fact(Skip = "NuGet pack metadata (IsPackable, IsAnalyzer) not yet added to Analyzers.csproj")]
+    [Fact]
     [ContractTest("ANALYZERS-PACK")]
     public void ANALYZERS_PACK_IsPackedAsAnalyzerOutput()
     {
