@@ -8,6 +8,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Audit.Crypto;
 using AiOrchestrator.Models.Paths;
 
@@ -22,11 +23,13 @@ internal sealed class SegmentWriter
 {
     private readonly EcdsaSigner signer;
     private readonly HmacChain chain;
+    private readonly IFileSystem fs;
 
-    public SegmentWriter(EcdsaSigner signer, HmacChain chain)
+    public SegmentWriter(EcdsaSigner signer, HmacChain chain, IFileSystem fs)
     {
         this.signer = signer;
         this.chain = chain;
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
     }
 
     /// <summary>Seals and writes a segment to disk.</summary>
@@ -56,19 +59,24 @@ internal sealed class SegmentWriter
         var trailer = SegmentCodec.SerializeTrailer(hmac, signature, publicKey.ToArray());
 
         var fileName = $"{sealedHeader.SegmentSeq:D10}-{sealedHeader.SegmentId:N}.aioa";
-        var finalPath = Path.Combine(segmentRoot.Value, fileName);
-        var tmpPath = finalPath + ".tmp";
+        var finalPath = new AbsolutePath(Path.Combine(segmentRoot.Value, fileName));
+        var tmpPath = new AbsolutePath(finalPath.Value + ".tmp");
 
         // INV-11 — write tmp, flush, rename atomically.
-        await using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+        await using (var stream = await this.fs.OpenWriteAsync(tmpPath, ct).ConfigureAwait(false))
         {
-            await fs.WriteAsync(body, ct).ConfigureAwait(false);
-            await fs.WriteAsync(trailer, ct).ConfigureAwait(false);
-            await fs.FlushAsync(ct).ConfigureAwait(false);
-            fs.Flush(flushToDisk: true);
+            await stream.WriteAsync(body, ct).ConfigureAwait(false);
+            await stream.WriteAsync(trailer, ct).ConfigureAwait(false);
+            await stream.FlushAsync(ct).ConfigureAwait(false);
+
+            // Attempt fsync for data integrity; gracefully degrade for non-FileStream impls.
+            if (stream is FileStream fileStream)
+            {
+                fileStream.Flush(flushToDisk: true);
+            }
         }
 
-        File.Move(tmpPath, finalPath, overwrite: false);
+        await this.fs.MoveAtomicAsync(tmpPath, finalPath, ct).ConfigureAwait(false);
 
         return new Segment
         {

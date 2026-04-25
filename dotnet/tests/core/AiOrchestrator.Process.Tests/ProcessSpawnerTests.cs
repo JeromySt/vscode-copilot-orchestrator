@@ -134,7 +134,7 @@ public sealed class RealProcessSpawnerTests
     private static readonly FakeProcessLifecycle Lifecycle = new();
     private static readonly FakeClock Clock = new();
     private static readonly FakeTelemetrySink Telemetry = new();
-    private static readonly ProcessSpawner Spawner = new(Lifecycle, Clock, Telemetry);
+    private static readonly ProcessSpawner Spawner = new(Lifecycle, Clock, Telemetry, NullFileSystem.Instance);
 
     private static bool IsWindows => System.Runtime.InteropServices.RuntimeInformation
         .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);

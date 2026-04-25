@@ -39,6 +39,7 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
 
     private readonly ConcurrentDictionary<PlanId, PlanState> plans = new();
     private int disposed;
+    private int storeRootEnsured;
 
     /// <summary>Initializes a new <see cref="PlanStore"/>.</summary>
     /// <param name="storeRoot">Root directory holding per-plan subdirectories.</param>
@@ -61,11 +62,6 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
         this.bus = bus ?? throw new ArgumentNullException(nameof(bus));
         this.opts = opts ?? throw new ArgumentNullException(nameof(opts));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        if (!Directory.Exists(storeRoot.Value))
-        {
-            _ = Directory.CreateDirectory(storeRoot.Value);
-        }
     }
 
     /// <inheritdoc />
@@ -81,10 +77,11 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
             CreatedAt = initialPlan.CreatedAt == default ? this.clock.UtcNow : initialPlan.CreatedAt,
         };
 
-        var dir = Path.Combine(this.storeRoot.Value, id.ToString());
-        _ = Directory.CreateDirectory(dir);
+        await this.EnsureStoreRootAsync(ct).ConfigureAwait(false);
+        var dir = new AbsolutePath(Path.Combine(this.storeRoot.Value, id.ToString()));
+        await this.fs.CreateDirectoryAsync(dir, ct).ConfigureAwait(false);
 
-        var state = new PlanState(this.fs, this.clock, new AbsolutePath(dir), this.opts)
+        var state = new PlanState(this.fs, this.clock, dir, this.opts)
         {
             Plan = plan,
             LastCheckpointAt = this.clock.UtcNow,
@@ -108,13 +105,13 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
             return cached.GetSnapshot();
         }
 
-        var dir = Path.Combine(this.storeRoot.Value, id.ToString());
-        if (!Directory.Exists(dir))
+        var dir = new AbsolutePath(Path.Combine(this.storeRoot.Value, id.ToString()));
+        if (!await this.fs.DirectoryExistsAsync(dir, ct).ConfigureAwait(false))
         {
             return null;
         }
 
-        var state = await PlanState.LoadAsync(new AbsolutePath(dir), this.fs, this.clock, this.opts, ct).ConfigureAwait(false);
+        var state = await PlanState.LoadAsync(dir, this.fs, this.clock, this.opts, ct).ConfigureAwait(false);
         if (state == null)
         {
             return null;
@@ -190,14 +187,14 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
     /// <inheritdoc />
     public async IAsyncEnumerable<AiOrchestrator.Plan.Models.Plan> ListAsync([EnumeratorCancellation] CancellationToken ct)
     {
-        if (!Directory.Exists(this.storeRoot.Value))
+        if (!await this.fs.DirectoryExistsAsync(this.storeRoot, ct).ConfigureAwait(false))
         {
             yield break;
         }
 
-        foreach (var dir in Directory.EnumerateDirectories(this.storeRoot.Value))
+        await foreach (var dir in this.fs.EnumerateDirectoriesAsync(this.storeRoot, ct).ConfigureAwait(false))
         {
-            var name = Path.GetFileName(dir);
+            var name = Path.GetFileName(dir.Value);
             if (!PlanId.TryParse(name, out var id))
             {
                 continue;
@@ -263,6 +260,15 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
+    private async ValueTask EnsureStoreRootAsync(CancellationToken ct)
+    {
+        if (Volatile.Read(ref this.storeRootEnsured) == 0)
+        {
+            await this.fs.CreateDirectoryAsync(this.storeRoot, ct).ConfigureAwait(false);
+            Volatile.Write(ref this.storeRootEnsured, 1);
+        }
+    }
+
     private async ValueTask<PlanState?> EnsureLoadedAsync(PlanId id, CancellationToken ct)
     {
         if (this.plans.TryGetValue(id, out var cached))
@@ -270,13 +276,13 @@ public sealed class PlanStore : IPlanStore, IAsyncDisposable
             return cached;
         }
 
-        var dir = Path.Combine(this.storeRoot.Value, id.ToString());
-        if (!Directory.Exists(dir))
+        var dir = new AbsolutePath(Path.Combine(this.storeRoot.Value, id.ToString()));
+        if (!await this.fs.DirectoryExistsAsync(dir, ct).ConfigureAwait(false))
         {
             return null;
         }
 
-        var state = await PlanState.LoadAsync(new AbsolutePath(dir), this.fs, this.clock, this.opts, ct).ConfigureAwait(false);
+        var state = await PlanState.LoadAsync(dir, this.fs, this.clock, this.opts, ct).ConfigureAwait(false);
         if (state != null)
         {
             _ = this.plans.TryAdd(id, state);

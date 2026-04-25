@@ -210,6 +210,141 @@ public sealed class AsyncFileSystem : IFileSystem
         return this.mounts.InspectAsync(path, ct);
     }
 
+    /// <inheritdoc/>
+    public ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(path);
+        return new ValueTask<bool>(File.Exists(path.Value));
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(path);
+        return new ValueTask<bool>(Directory.Exists(path.Value));
+    }
+
+    /// <inheritdoc/>
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(path);
+        Directory.CreateDirectory(path.Value);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(path);
+        Directory.Delete(path.Value, recursive);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct)
+    {
+        this.AssertSafe(path);
+        await using var stream = new FileStream(
+            path.Value,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            DefaultBufferSize,
+            useAsync: true);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct).ConfigureAwait(false);
+        return ms.ToArray();
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        this.AssertSafe(path);
+        await using var stream = new FileStream(
+            path.Value,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            DefaultBufferSize,
+            useAsync: true);
+        await stream.WriteAsync(contents.AsMemory(), ct).ConfigureAwait(false);
+        await stream.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(source);
+        this.AssertSafe(destination);
+        File.Copy(source.Value, destination.Value, overwrite);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(
+        AbsolutePath directory,
+        string searchPattern,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        this.AssertSafe(directory);
+        await Task.CompletedTask.ConfigureAwait(false);
+        foreach (var file in Directory.EnumerateFiles(directory.Value, searchPattern))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(file);
+        }
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(
+        AbsolutePath directory,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        this.AssertSafe(directory);
+        await Task.CompletedTask.ConfigureAwait(false);
+        foreach (var dir in Directory.EnumerateDirectories(directory.Value))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(dir);
+        }
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(path);
+        Stream stream = new FileStream(
+            path.Value,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            DefaultBufferSize,
+            useAsync: true);
+        return new ValueTask<Stream>(stream);
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        this.AssertSafe(path);
+        Stream stream = new FileStream(
+            path.Value,
+            FileMode.Append,
+            FileAccess.Write,
+            FileShare.None,
+            DefaultBufferSize,
+            useAsync: true);
+        return new ValueTask<Stream>(stream);
+    }
+
     private static void ApplyOwnerOnlyDaclWindows(string path)
     {
         if (OperatingSystem.IsWindows())

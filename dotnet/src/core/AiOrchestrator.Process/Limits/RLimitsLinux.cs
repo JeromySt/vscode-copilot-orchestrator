@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Process.Native.Linux;
 
 namespace AiOrchestrator.Process.Limits;
@@ -23,7 +24,9 @@ internal static class RLimitsLinux
     /// </summary>
     /// <param name="pid">The PID of the process to limit.</param>
     /// <param name="limits">The resource limits to apply.</param>
-    internal static void Apply(int pid, ResourceLimits limits)
+    /// <param name="fs">The filesystem abstraction for cgroup I/O.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal static async ValueTask ApplyAsync(int pid, ResourceLimits limits, IFileSystem fs, CancellationToken ct)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
@@ -31,16 +34,18 @@ internal static class RLimitsLinux
         }
 
         ApplyRlimits(limits);
-        CGroupV2.Apply(pid, limits);
+        await CGroupV2.ApplyAsync(pid, limits, fs, ct).ConfigureAwait(false);
     }
 
     /// <summary>Cleans up cgroup slices created for a process after it exits.</summary>
     /// <param name="pid">The PID of the exited process.</param>
-    internal static void Cleanup(int pid)
+    /// <param name="fs">The filesystem abstraction for cgroup I/O.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal static async ValueTask CleanupAsync(int pid, IFileSystem fs, CancellationToken ct)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            CGroupV2.Cleanup(pid);
+            await CGroupV2.CleanupAsync(pid, fs, ct).ConfigureAwait(false);
         }
     }
 

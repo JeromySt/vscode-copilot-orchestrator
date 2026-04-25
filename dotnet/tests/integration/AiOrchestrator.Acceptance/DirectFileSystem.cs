@@ -51,4 +51,49 @@ internal sealed class DirectFileSystem : IFileSystem
 
     public ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct)
         => new(MountKind.Local);
+
+    public ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct) => new(File.Exists(path.Value));
+
+    public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct) => new(Directory.Exists(path.Value));
+
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException("Acceptance gate is read-only.");
+
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct)
+        => throw new NotSupportedException("Acceptance gate is read-only.");
+
+    public async ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct)
+        => await File.ReadAllBytesAsync(path.Value, ct).ConfigureAwait(false);
+
+    public ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct)
+        => throw new NotSupportedException("Acceptance gate is read-only.");
+
+    public ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct)
+        => throw new NotSupportedException("Acceptance gate is read-only.");
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(AbsolutePath directory, string searchPattern, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        foreach (var f in Directory.EnumerateFiles(directory.Value, searchPattern))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(f);
+        }
+    }
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(AbsolutePath directory, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        foreach (var d in Directory.EnumerateDirectories(directory.Value))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(d);
+        }
+    }
+
+    public ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException("Acceptance gate is read-only.");
+
+    public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException("Acceptance gate is read-only.");
 }

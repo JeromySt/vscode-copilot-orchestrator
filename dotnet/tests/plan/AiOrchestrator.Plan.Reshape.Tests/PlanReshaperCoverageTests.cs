@@ -38,7 +38,7 @@ public sealed class PlanReshaperCoverageTests : IAsyncLifetime
     {
         this.store = new PlanStore(
             new AbsolutePath(this.root),
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(),
             new NullEventBus(),
             new StaticOptionsMonitor<PlanStoreOptions>(new PlanStoreOptions()),

@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Models.Paths;
 using AiOrchestrator.Process.Native.Windows;
 using Microsoft.Extensions.Logging;
@@ -19,12 +20,15 @@ namespace AiOrchestrator.Process.Lifecycle;
 public sealed class CrashDumpCollector : IProcessLifecycle
 {
     private readonly ILogger<CrashDumpCollector> logger;
+    private readonly IFileSystem fs;
 
     /// <summary>Initializes a new instance of the <see cref="CrashDumpCollector"/> class.</summary>
     /// <param name="logger">Logger for diagnostics.</param>
-    public CrashDumpCollector(ILogger<CrashDumpCollector> logger)
+    /// <param name="fs">Filesystem abstraction for I/O operations.</param>
+    public CrashDumpCollector(ILogger<CrashDumpCollector> logger, IFileSystem fs)
     {
         this.logger = logger;
+        this.fs = fs;
     }
 
     /// <inheritdoc/>
@@ -38,7 +42,7 @@ public sealed class CrashDumpCollector : IProcessLifecycle
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                await CaptureLinuxDumpAsync(pid, outputPath, ct).ConfigureAwait(false);
+                await this.CaptureLinuxDumpAsync(pid, outputPath, ct).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -50,7 +54,10 @@ public sealed class CrashDumpCollector : IProcessLifecycle
 
     private static async ValueTask CaptureWindowsDumpAsync(int pid, AbsolutePath outputPath, CancellationToken ct)
     {
+        // MiniDumpWriteDump requires a native SafeFileHandle — FileStream is the only way to get one.
+#pragma warning disable OE0004 // Native P/Invoke requires SafeFileHandle from FileStream
         await using var fileStream = new FileStream(outputPath.Value, FileMode.Create, FileAccess.Write, FileShare.None);
+#pragma warning restore OE0004
         using var processHandle = CreateProcessNative.OpenProcess(CreateProcessNative.PROCESS_ALL_ACCESS, false, pid);
 
         if (!processHandle.IsInvalid)
@@ -68,31 +75,30 @@ public sealed class CrashDumpCollector : IProcessLifecycle
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    private static async ValueTask CaptureLinuxDumpAsync(int pid, AbsolutePath outputPath, CancellationToken ct)
+    private async ValueTask CaptureLinuxDumpAsync(int pid, AbsolutePath outputPath, CancellationToken ct)
     {
         // Try to copy an existing core dump file produced by the kernel
-        var corePattern = "/proc/sys/kernel/core_pattern";
-        if (File.Exists(corePattern))
+        var corePatternPath = new AbsolutePath("/proc/sys/kernel/core_pattern");
+        if (await this.fs.FileExistsAsync(corePatternPath, ct).ConfigureAwait(false))
         {
-            var pattern = (await File.ReadAllTextAsync(corePattern, ct).ConfigureAwait(false)).Trim();
+            var pattern = (await this.fs.ReadAllTextAsync(corePatternPath, ct).ConfigureAwait(false)).Trim();
             if (!pattern.StartsWith('|'))
             {
                 // Simple path pattern; try common core dump locations
                 var coreFile = $"core.{pid}";
-                if (File.Exists(coreFile))
+                var coreFilePath = new AbsolutePath(Path.GetFullPath(coreFile));
+                if (await this.fs.FileExistsAsync(coreFilePath, ct).ConfigureAwait(false))
                 {
-                    File.Copy(coreFile, outputPath.Value, overwrite: true);
+                    await this.fs.CopyAsync(coreFilePath, outputPath, overwrite: true, ct).ConfigureAwait(false);
                     return;
                 }
 
-                var coreInTmp = Path.Combine("/tmp", coreFile);
-                if (File.Exists(coreInTmp))
+                var coreInTmpPath = new AbsolutePath(Path.Combine("/tmp", coreFile));
+                if (await this.fs.FileExistsAsync(coreInTmpPath, ct).ConfigureAwait(false))
                 {
-                    File.Copy(coreInTmp, outputPath.Value, overwrite: true);
+                    await this.fs.CopyAsync(coreInTmpPath, outputPath, overwrite: true, ct).ConfigureAwait(false);
                 }
             }
         }
-
-        await Task.CompletedTask.ConfigureAwait(false);
     }
 }

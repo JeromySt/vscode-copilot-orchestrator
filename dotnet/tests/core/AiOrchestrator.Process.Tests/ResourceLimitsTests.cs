@@ -47,7 +47,7 @@ public sealed class ResourceLimitsTests
 
         // Verify RLimitsLinux.Apply doesn't throw (best we can do without a child process fixture)
         var pid = System.Diagnostics.Process.GetCurrentProcess().Id;
-        RLimitsLinux.Apply(pid, limits);
+        await RLimitsLinux.ApplyAsync(pid, limits, NullFileSystem.Instance, CancellationToken.None);
     }
 
     /// <summary>PROC-10: Job Objects limit memory on Windows.</summary>
@@ -66,7 +66,7 @@ public sealed class ResourceLimitsTests
             MaxMemoryBytes = 512L * 1024 * 1024, // 512 MB
         };
 
-        var spawner = new ProcessSpawner(Lifecycle, Clock, Telemetry);
+        var spawner = new ProcessSpawner(Lifecycle, Clock, Telemetry, NullFileSystem.Instance);
 
         var spec = new ProcessSpec
         {
@@ -80,7 +80,7 @@ public sealed class ResourceLimitsTests
         await using var handle = await spawner.SpawnAsync(spec, CancellationToken.None);
 
         // Apply job object limits right after spawn
-        ProcessSpawner.ApplyLimits(handle.ProcessId, limits);
+        await ProcessSpawner.ApplyLimitsAsync(handle.ProcessId, limits, NullFileSystem.Instance, CancellationToken.None);
 
         await handle.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
     }

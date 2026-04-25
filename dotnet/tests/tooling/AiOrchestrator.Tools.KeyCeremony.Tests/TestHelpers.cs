@@ -117,6 +117,62 @@ internal sealed class DiskFileSystem : IFileSystem
 
     public ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct)
         => ValueTask.FromResult(MountKind.Local);
+
+    public ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct)
+        => ValueTask.FromResult(File.Exists(path.Value));
+
+    public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct)
+        => ValueTask.FromResult(Directory.Exists(path.Value));
+
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct)
+    {
+        Directory.CreateDirectory(path.Value);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct)
+    {
+        Directory.Delete(path.Value, recursive);
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct)
+        => await File.ReadAllBytesAsync(path.Value, ct).ConfigureAwait(false);
+
+    public async ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct)
+        => await File.WriteAllBytesAsync(path.Value, contents, ct).ConfigureAwait(false);
+
+    public ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct)
+    {
+        File.Copy(source.Value, destination.Value, overwrite);
+        return ValueTask.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(AbsolutePath directory, string searchPattern, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        foreach (var f in Directory.EnumerateFiles(directory.Value, searchPattern))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(f);
+        }
+    }
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(AbsolutePath directory, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        foreach (var d in Directory.EnumerateDirectories(directory.Value))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(d);
+        }
+    }
+
+    public ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct)
+        => ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.Create, FileAccess.Write));
+
+    public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct)
+        => ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.Append, FileAccess.Write));
 }
 
 internal static class CeremonyTestEnv

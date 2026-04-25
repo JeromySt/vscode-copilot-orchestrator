@@ -25,25 +25,7 @@ public sealed class OE0011Analyzer : DiagnosticAnalyzer
     /// </summary>
     private static readonly ImmutableHashSet<string> ExemptAssemblies = ImmutableHashSet.Create(
         System.StringComparer.Ordinal,
-        "AiOrchestrator.Audit",
-        "AiOrchestrator.Plan.Store",
-        "AiOrchestrator.Process",
-        "AiOrchestrator.EventLog",
-        "AiOrchestrator.Git",
-        "AiOrchestrator.WorktreeLease",
-        "AiOrchestrator.Cli",
-        "AiOrchestrator.Logging",
-        "AiOrchestrator.FileSystem",
-        "AiOrchestrator.HookGate",
-        "AiOrchestrator.Daemon",
-        "AiOrchestrator.Plugins",
-        "AiOrchestrator.Concurrency.Broker",
-        "AiOrchestrator.Diagnose",
-        "AiOrchestrator.Plan.Portability",
-        "AiOrchestrator.Credentials",
-        "AiOrchestrator.Tools.KeyCeremony",
-        "AiOrchestrator.Agent",
-        "AiOrchestrator.Shell");
+        "AiOrchestrator.FileSystem");
 
     private static readonly ImmutableHashSet<string> BannedMethods = ImmutableHashSet.Create(
         System.StringComparer.Ordinal,

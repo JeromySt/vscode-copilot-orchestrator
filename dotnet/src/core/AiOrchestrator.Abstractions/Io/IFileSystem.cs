@@ -62,4 +62,37 @@ public interface IFileSystem
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The <see cref="MountKind"/> of the hosting volume.</returns>
     ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct);
+
+    /// <summary>Determines whether a file exists at the specified path.</summary>
+    ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct);
+
+    /// <summary>Determines whether a directory exists at the specified path.</summary>
+    ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct);
+
+    /// <summary>Creates a directory at the specified path (and all parent directories if needed).</summary>
+    ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct);
+
+    /// <summary>Deletes a directory and optionally all its contents.</summary>
+    ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct);
+
+    /// <summary>Reads all bytes from the specified file.</summary>
+    ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct);
+
+    /// <summary>Writes the specified bytes to the file at the given path, creating or replacing it.</summary>
+    ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct);
+
+    /// <summary>Copies a file from source to destination.</summary>
+    ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct);
+
+    /// <summary>Enumerates file paths in a directory, optionally matching a search pattern.</summary>
+    IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(AbsolutePath directory, string searchPattern, CancellationToken ct);
+
+    /// <summary>Enumerates subdirectory paths in a directory.</summary>
+    IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(AbsolutePath directory, CancellationToken ct);
+
+    /// <summary>Opens or creates a file for writing (creating parent directories if needed).</summary>
+    ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct);
+
+    /// <summary>Opens a file for appending (creates if it doesn't exist).</summary>
+    ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct);
 }

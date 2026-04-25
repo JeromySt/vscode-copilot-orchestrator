@@ -6,6 +6,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.Abstractions.Telemetry;
 using AiOrchestrator.Abstractions.Time;
@@ -29,16 +30,19 @@ public sealed class ProcessSpawner : IProcessSpawner
     private readonly IProcessLifecycle lifecycle;
     private readonly IClock clock;
     private readonly ITelemetrySink telemetry;
+    private readonly IFileSystem fs;
 
     /// <summary>Initializes a new instance of the <see cref="ProcessSpawner"/> class.</summary>
     /// <param name="lifecycle">Provides crash-dump capture on abnormal process exit.</param>
     /// <param name="clock">Clock for elapsed-time measurements.</param>
     /// <param name="telemetry">Telemetry sink for process spawn metrics.</param>
-    public ProcessSpawner(IProcessLifecycle lifecycle, IClock clock, ITelemetrySink telemetry)
+    /// <param name="fs">Filesystem abstraction for I/O operations.</param>
+    public ProcessSpawner(IProcessLifecycle lifecycle, IClock clock, ITelemetrySink telemetry, IFileSystem fs)
     {
         this.lifecycle = lifecycle;
         this.clock = clock;
         this.telemetry = telemetry;
+        this.fs = fs;
     }
 
     /// <summary>
@@ -47,11 +51,13 @@ public sealed class ProcessSpawner : IProcessSpawner
     /// </summary>
     /// <param name="pid">The process to limit.</param>
     /// <param name="limits">The limits to apply.</param>
-    public static void ApplyLimits(int pid, ResourceLimits limits)
+    /// <param name="fs">Filesystem abstraction for cgroup I/O.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public static async ValueTask ApplyLimitsAsync(int pid, ResourceLimits limits, IFileSystem fs, CancellationToken ct)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            RLimitsLinux.Apply(pid, limits);
+            await RLimitsLinux.ApplyAsync(pid, limits, fs, ct).ConfigureAwait(false);
         }
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -81,7 +87,7 @@ public sealed class ProcessSpawner : IProcessSpawner
         // setrlimit is applied via RLimitsLinux which writes to the cgroup immediately after start)
         ApplyResourceLimits(process.Id, spec);
 
-        var handle = new ProcessHandle(process, this.lifecycle, this.clock, this.telemetry);
+        var handle = new ProcessHandle(process, this.lifecycle, this.clock, this.telemetry, this.fs);
 
         // Wire cancellation: on cancel → SIGTERM, then SIGKILL after grace period (INV-2)
         if (ct.CanBeCanceled)

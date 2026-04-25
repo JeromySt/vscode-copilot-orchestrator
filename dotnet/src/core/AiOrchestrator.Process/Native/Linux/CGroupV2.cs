@@ -4,6 +4,8 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using AiOrchestrator.Abstractions.Io;
+using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.Process.Native.Linux;
 
@@ -23,22 +25,28 @@ internal static class CGroupV2
     /// </summary>
     /// <param name="pid">The process ID to attach.</param>
     /// <param name="limits">The resource limits to apply.</param>
-    internal static void Apply(int pid, ResourceLimits limits)
+    /// <param name="fs">The filesystem abstraction to use for I/O.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal static async ValueTask ApplyAsync(int pid, ResourceLimits limits, IFileSystem fs, CancellationToken ct)
     {
         var cgroupDir = Path.Combine(CGroupRoot, OrchestratorGroup, pid.ToString(CultureInfo.InvariantCulture));
         try
         {
-            _ = Directory.CreateDirectory(cgroupDir);
+            await fs.CreateDirectoryAsync(new AbsolutePath(cgroupDir), ct).ConfigureAwait(false);
 
             // Attach process to cgroup
-            File.WriteAllText(Path.Combine(cgroupDir, "cgroup.procs"), pid.ToString(CultureInfo.InvariantCulture));
+            await fs.WriteAllTextAsync(
+                new AbsolutePath(Path.Combine(cgroupDir, "cgroup.procs")),
+                pid.ToString(CultureInfo.InvariantCulture),
+                ct).ConfigureAwait(false);
 
             // Memory limit
             if (limits.MaxMemoryBytes.HasValue)
             {
-                File.WriteAllText(
-                    Path.Combine(cgroupDir, "memory.max"),
-                    limits.MaxMemoryBytes.Value.ToString(CultureInfo.InvariantCulture));
+                await fs.WriteAllTextAsync(
+                    new AbsolutePath(Path.Combine(cgroupDir, "memory.max")),
+                    limits.MaxMemoryBytes.Value.ToString(CultureInfo.InvariantCulture),
+                    ct).ConfigureAwait(false);
             }
 
             // CPU quota (microseconds per period; 100000 µs period = 100 ms)
@@ -48,9 +56,10 @@ internal static class CGroupV2
                 // For max CPU time we set a hard quota via cpu.max
                 const long PeriodUs = 100_000L;
                 var quotaUs = (long)(limits.MaxCpuTime.Value.TotalSeconds * PeriodUs);
-                File.WriteAllText(
-                    Path.Combine(cgroupDir, "cpu.max"),
-                    FormattableString.Invariant($"{quotaUs} {PeriodUs}"));
+                await fs.WriteAllTextAsync(
+                    new AbsolutePath(Path.Combine(cgroupDir, "cpu.max")),
+                    FormattableString.Invariant($"{quotaUs} {PeriodUs}"),
+                    ct).ConfigureAwait(false);
             }
         }
         catch (UnauthorizedAccessException)
@@ -65,14 +74,16 @@ internal static class CGroupV2
 
     /// <summary>Removes the cgroup created for a process after it exits.</summary>
     /// <param name="pid">The process ID whose cgroup slice should be removed.</param>
-    internal static void Cleanup(int pid)
+    /// <param name="fs">The filesystem abstraction to use for I/O.</param>
+    /// <param name="ct">Cancellation token.</param>
+    internal static async ValueTask CleanupAsync(int pid, IFileSystem fs, CancellationToken ct)
     {
         var cgroupDir = Path.Combine(CGroupRoot, OrchestratorGroup, pid.ToString(CultureInfo.InvariantCulture));
         try
         {
-            if (Directory.Exists(cgroupDir))
+            if (await fs.DirectoryExistsAsync(new AbsolutePath(cgroupDir), ct).ConfigureAwait(false))
             {
-                Directory.Delete(cgroupDir);
+                await fs.DeleteDirectoryAsync(new AbsolutePath(cgroupDir), false, ct).ConfigureAwait(false);
             }
         }
         catch

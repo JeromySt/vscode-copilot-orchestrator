@@ -103,6 +103,28 @@ internal sealed class StubFileSystem : AiOrchestrator.Abstractions.Io.IFileSyste
     public ValueTask DeleteAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => default;
 
     public ValueTask<AiOrchestrator.Abstractions.Io.MountKind> GetMountKindAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => new(AiOrchestrator.Abstractions.Io.MountKind.Local);
+
+    public ValueTask<bool> FileExistsAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => new(false);
+
+    public ValueTask<bool> DirectoryExistsAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => new(false);
+
+    public ValueTask CreateDirectoryAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => default;
+
+    public ValueTask DeleteDirectoryAsync(AiOrchestrator.Models.Paths.AbsolutePath path, bool recursive, CancellationToken ct) => default;
+
+    public ValueTask<byte[]> ReadAllBytesAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => new(Array.Empty<byte>());
+
+    public ValueTask WriteAllBytesAsync(AiOrchestrator.Models.Paths.AbsolutePath path, byte[] contents, CancellationToken ct) => default;
+
+    public ValueTask CopyAsync(AiOrchestrator.Models.Paths.AbsolutePath source, AiOrchestrator.Models.Paths.AbsolutePath destination, bool overwrite, CancellationToken ct) => default;
+
+    public async IAsyncEnumerable<AiOrchestrator.Models.Paths.AbsolutePath> EnumerateFilesAsync(AiOrchestrator.Models.Paths.AbsolutePath directory, string searchPattern, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct) { await Task.CompletedTask; yield break; }
+
+    public async IAsyncEnumerable<AiOrchestrator.Models.Paths.AbsolutePath> EnumerateDirectoriesAsync(AiOrchestrator.Models.Paths.AbsolutePath directory, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct) { await Task.CompletedTask; yield break; }
+
+    public ValueTask<System.IO.Stream> OpenWriteAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => new(new System.IO.MemoryStream());
+
+    public ValueTask<System.IO.Stream> OpenAppendAsync(AiOrchestrator.Models.Paths.AbsolutePath path, CancellationToken ct) => new(new System.IO.MemoryStream());
 }
 
 internal sealed class StubHandler : HttpMessageHandler

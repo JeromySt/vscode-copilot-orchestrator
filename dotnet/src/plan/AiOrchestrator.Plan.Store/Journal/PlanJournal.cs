@@ -22,8 +22,8 @@ namespace AiOrchestrator.Plan.Store;
 internal sealed class PlanJournal : IAsyncDisposable
 {
     private readonly AbsolutePath path;
-    #pragma warning disable CA1823, IDE0052
     private readonly IFileSystem fs;
+    #pragma warning disable CA1823, IDE0052
     private readonly IClock clock;
     #pragma warning restore CA1823, IDE0052
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -54,25 +54,22 @@ internal sealed class PlanJournal : IAsyncDisposable
         try
         {
             var dir = Path.GetDirectoryName(this.path.Value);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            if (!string.IsNullOrEmpty(dir))
             {
-                _ = Directory.CreateDirectory(dir);
+                await this.fs.CreateDirectoryAsync(new AbsolutePath(dir), ct).ConfigureAwait(false);
             }
 
             // Open append-exclusive, write, fsync, close.
-            await using var fstream = new FileStream(
-                this.path.Value,
-                FileMode.Append,
-                FileAccess.Write,
-                FileShare.Read,
-                bufferSize: 4096,
-                useAsync: true);
+            await using var fstream = await this.fs.OpenAppendAsync(this.path, ct).ConfigureAwait(false);
             var bytes = System.Text.Encoding.UTF8.GetBytes(line);
             await fstream.WriteAsync(bytes, ct).ConfigureAwait(false);
             await fstream.FlushAsync(ct).ConfigureAwait(false);
             try
             {
-                fstream.Flush(flushToDisk: true);
+                if (fstream is FileStream fileStream)
+                {
+                    fileStream.Flush(flushToDisk: true);
+                }
             }
             catch
             {
@@ -91,14 +88,14 @@ internal sealed class PlanJournal : IAsyncDisposable
     /// <returns>An async sequence of mutations in ascending Seq order.</returns>
     public async IAsyncEnumerable<PlanMutation> ReadFromAsync(long fromSeq, [EnumeratorCancellation] CancellationToken ct)
     {
-        if (!File.Exists(this.path.Value))
+        if (!await this.fs.FileExistsAsync(this.path, ct).ConfigureAwait(false))
         {
             yield break;
         }
 
         // Read entire file, verify gap-free ascending sequence, then yield starting at fromSeq.
         var all = new List<PlanMutation>();
-        await using (var fstream = new FileStream(this.path.Value, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true))
+        await using (var fstream = await this.fs.OpenReadAsync(this.path, ct).ConfigureAwait(false))
         using (var reader = new StreamReader(fstream, System.Text.Encoding.UTF8))
         {
             string? line;

@@ -47,4 +47,48 @@ public sealed class FakeFileSystem : IFileSystem
     /// <inheritdoc/>
     public ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct)
         => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(AbsolutePath directory, string searchPattern, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(AbsolutePath directory, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct)
+        => throw new NotSupportedException();
 }

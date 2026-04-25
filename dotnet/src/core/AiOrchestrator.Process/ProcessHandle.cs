@@ -5,6 +5,7 @@
 using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.Abstractions.Telemetry;
 using AiOrchestrator.Abstractions.Time;
@@ -31,6 +32,7 @@ public sealed class ProcessHandle : IProcessHandle
     private readonly IProcessLifecycle lifecycle;
     private readonly IClock clock;
     private readonly ITelemetrySink telemetry;
+    private readonly IFileSystem fs;
     private readonly Pipe stdoutPipe = new();
     private readonly Pipe stderrPipe = new();
     private readonly Pipe stdinPipe = new();
@@ -47,16 +49,19 @@ public sealed class ProcessHandle : IProcessHandle
     /// <param name="lifecycle">Lifecycle handler for crash-dump capture.</param>
     /// <param name="clock">Clock for elapsed-time measurements.</param>
     /// <param name="telemetry">Telemetry sink for metrics.</param>
+    /// <param name="fs">Filesystem abstraction for I/O operations.</param>
     internal ProcessHandle(
         System.Diagnostics.Process process,
         IProcessLifecycle lifecycle,
         IClock clock,
-        ITelemetrySink telemetry)
+        ITelemetrySink telemetry,
+        IFileSystem fs)
     {
         this.process = process;
         this.lifecycle = lifecycle;
         this.clock = clock;
         this.telemetry = telemetry;
+        this.fs = fs;
 
         this.process.EnableRaisingEvents = true;
         this.process.Exited += this.OnProcessExited;
@@ -267,7 +272,7 @@ public sealed class ProcessHandle : IProcessHandle
         // INV-9 cleanup: remove cgroup slice
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            RLimitsLinux.Cleanup(this.ProcessId);
+            _ = RLimitsLinux.CleanupAsync(this.ProcessId, this.fs, CancellationToken.None);
         }
 
         this.telemetry.RecordCounter("process.exit", 1, new Dictionary<string, object>
@@ -282,7 +287,9 @@ public sealed class ProcessHandle : IProcessHandle
     {
         try
         {
-            _ = Directory.CreateDirectory(Path.GetDirectoryName(dumpPath.Value)!);
+            await this.fs.CreateDirectoryAsync(
+                new AbsolutePath(Path.GetDirectoryName(dumpPath.Value)!),
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {

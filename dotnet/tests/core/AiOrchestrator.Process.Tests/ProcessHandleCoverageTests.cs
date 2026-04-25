@@ -17,7 +17,7 @@ public sealed class ProcessHandleCoverageTests
     private static readonly FakeProcessLifecycle Lifecycle = new();
     private static readonly FakeClock Clock = new();
     private static readonly FakeTelemetrySink Telemetry = new();
-    private static readonly ProcessSpawner Spawner = new(Lifecycle, Clock, Telemetry);
+    private static readonly ProcessSpawner Spawner = new(Lifecycle, Clock, Telemetry, NullFileSystem.Instance);
 
     private static bool IsWindows => System.Runtime.InteropServices.RuntimeInformation
         .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows);
@@ -94,7 +94,7 @@ public sealed class ProcessHandleCoverageTests
     public async Task NonZeroExit_TriggersCrashDumpCapture()
     {
         var lifecycle = new FakeProcessLifecycle();
-        var spawner = new ProcessSpawner(lifecycle, Clock, Telemetry);
+        var spawner = new ProcessSpawner(lifecycle, Clock, Telemetry, NullFileSystem.Instance);
         var spec = ExitSpec(1);
 
         await using var handle = await spawner.SpawnAsync(spec, CancellationToken.None);
@@ -170,7 +170,7 @@ public sealed class ProcessHandleCoverageTests
 
     /// <summary>ApplyLimits static method does not throw for the current platform.</summary>
     [Fact]
-    public void ApplyLimits_DoesNotThrow_ForCurrentPlatform()
+    public async Task ApplyLimits_DoesNotThrow_ForCurrentPlatform()
     {
         // Use a dummy PID; the call is best-effort and should not throw even for invalid PIDs.
         var limits = new ResourceLimits
@@ -181,7 +181,7 @@ public sealed class ProcessHandleCoverageTests
         };
 
         // Should not throw — best effort
-        ProcessSpawner.ApplyLimits(int.MaxValue, limits);
+        await ProcessSpawner.ApplyLimitsAsync(int.MaxValue, limits, NullFileSystem.Instance, CancellationToken.None);
     }
 
     /// <summary>Telemetry records process.spawn and process.exit counters.</summary>
@@ -189,7 +189,7 @@ public sealed class ProcessHandleCoverageTests
     public async Task Telemetry_RecordsSpawnAndExitCounters()
     {
         var telemetry = new FakeTelemetrySink();
-        var spawner = new ProcessSpawner(Lifecycle, Clock, telemetry);
+        var spawner = new ProcessSpawner(Lifecycle, Clock, telemetry, NullFileSystem.Instance);
         var spec = ExitSpec(0);
 
         await using var handle = await spawner.SpawnAsync(spec, CancellationToken.None);

@@ -61,7 +61,7 @@ public sealed class CrashDumpTests
         }
 
         var lifecycle = new FakeProcessLifecycle();
-        var spawner = new ProcessSpawner(lifecycle, Clock, Telemetry);
+        var spawner = new ProcessSpawner(lifecycle, Clock, Telemetry, NullFileSystem.Instance);
 
         var spec = new ProcessSpec
         {

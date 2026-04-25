@@ -1,4 +1,4 @@
-// <copyright file="PortabilityCoverageGapTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="PortabilityCoverageGapTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -42,7 +42,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
         catch { /* best effort */ }
     }
 
-    // ── ImportConflictException ──
+    // â”€â”€ ImportConflictException â”€â”€
 
     [Fact]
     public void ImportConflictException_DefaultCtor_HasMessage()
@@ -95,7 +95,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
         Assert.Equal(PlanStatus.Succeeded, ex.ExistingStatus);
     }
 
-    // ── PortabilitySchemaMismatchException ──
+    // â”€â”€ PortabilitySchemaMismatchException â”€â”€
 
     [Fact]
     public void SchemaMismatchException_DefaultCtor_HasMessage()
@@ -134,7 +134,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
         Assert.Same(inner, ex.InnerException);
     }
 
-    // ── PlanImporter edge cases ──
+    // â”€â”€ PlanImporter edge cases â”€â”€
 
     [Fact]
     public void Import_MissingPlanJson_Throws()
@@ -180,7 +180,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
         // Importer with a path validator that rejects everything
         var importer = new PlanImporter(
             MakeStore("dest"),
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(FixedTime),
             new StaticOptions<PortabilityOptions>(new PortabilityOptions()),
             new RejectAllPathValidator());
@@ -198,7 +198,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
 
         var exporter = new PlanExporter(
             store,
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(FixedTime),
             new StaticOptions<PortabilityOptions>(new PortabilityOptions()),
             new RejectAllPathValidator());
@@ -262,7 +262,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
         Assert.Equal("hello", Encoding.UTF8.GetString(archive.Artifacts["extra/readme.txt"]));
     }
 
-    // ── helpers ──
+    // â”€â”€ helpers â”€â”€
 
     private static readonly DateTimeOffset FixedTime = new(2025, 1, 15, 12, 0, 0, TimeSpan.Zero);
 
@@ -274,7 +274,7 @@ public sealed class PortabilityCoverageGapTests : IDisposable
         Directory.CreateDirectory(dir);
         return new PlanStore(
             new AbsolutePath(dir),
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(FixedTime),
             new NullEventBus(),
             new StaticOptions<PlanStoreOptions>(new PlanStoreOptions()),
@@ -282,11 +282,11 @@ public sealed class PortabilityCoverageGapTests : IDisposable
     }
 
     private PlanExporter MakeExporter(IPlanStore store) =>
-        new(store, new NullFileSystem(), new InMemoryClock(FixedTime),
+        new(store, new PassthroughFileSystem(), new InMemoryClock(FixedTime),
             new StaticOptions<PortabilityOptions>(new PortabilityOptions()));
 
     private PlanImporter MakeImporter(IPlanStore store) =>
-        new(store, new NullFileSystem(), new InMemoryClock(FixedTime),
+        new(store, new PassthroughFileSystem(), new InMemoryClock(FixedTime),
             new StaticOptions<PortabilityOptions>(new PortabilityOptions()));
 
     private static async Task<PlanId> CreateSamplePlanAsync(IPlanStore store)

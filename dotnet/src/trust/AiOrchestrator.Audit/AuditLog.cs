@@ -28,9 +28,7 @@ namespace AiOrchestrator.Audit;
 public sealed class AuditLog : IAuditLog, IAsyncDisposable
 {
     private readonly AbsolutePath segmentRoot;
-    #pragma warning disable CA1823, IDE0052
     private readonly IFileSystem fs;
-    #pragma warning restore CA1823, IDE0052
     private readonly IClock clock;
     private readonly IKeyMaterialProvider keys;
     private readonly IOptionsMonitor<AuditOptions> opts;
@@ -69,17 +67,17 @@ public sealed class AuditLog : IAuditLog, IAsyncDisposable
         this.opts = opts ?? throw new ArgumentNullException(nameof(opts));
         this.signer = new EcdsaSigner();
         this.chain = new HmacChain();
-        this.writer = new SegmentWriter(this.signer, this.chain);
-        this.reader = new SegmentReader();
+        this.writer = new SegmentWriter(this.signer, this.chain, fs);
+        this.reader = new SegmentReader(fs);
         this.activeTransitions = ImmutableArray<KeyTransitionRef>.Empty;
 
-        if (!Directory.Exists(auditRoot.Value))
+        if (!fs.DirectoryExistsAsync(auditRoot, CancellationToken.None).GetAwaiter().GetResult())
         {
-            _ = Directory.CreateDirectory(auditRoot.Value);
+            fs.CreateDirectoryAsync(auditRoot, CancellationToken.None).GetAwaiter().GetResult();
         }
 
         // INV-11 — clean up any leftover .tmp from a crash mid-write before resuming.
-        this.reader.CleanupTempFiles(auditRoot);
+        this.reader.CleanupTempFilesAsync(auditRoot, CancellationToken.None).GetAwaiter().GetResult();
 
         // Recover state from disk: highest seq + last hmac become our continuation point.
         var existing = this.reader.ReadAllAsync(auditRoot, CancellationToken.None).GetAwaiter().GetResult();

@@ -117,7 +117,7 @@ public sealed class AuditLogContractTests : IDisposable
         }
 
         // Verify with anchor on OLD key + transition trusting NEW key.
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, default);
         var anchor = new InstallAnchor
         {
@@ -177,7 +177,7 @@ Assert.Equal(2, segments.Count);
             InstallId = "test",
             InitialAuditKeyId = "install",
         };
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, default);
 
         var verifier = new ChainVerifier(anchor, Array.Empty<ReleaseManifest>(), new[] { badTransition }, clock);
@@ -200,7 +200,7 @@ Assert.Equal(ChainBreakReason.AuditChainKeyTransitionMissingCrossSignature, resu
         await log.FlushAsync(default);
         await log.DisposeAsync();
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, default);
 
         // Anchor with a DIFFERENT public key — chain must be rejected.
@@ -239,7 +239,7 @@ Assert.Equal(ChainBreakReason.AuditChainBrokenAtInstallAnchor, result.Reason);
             await log.FlushAsync(default);
         }
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, default);
 
         var anchor = new InstallAnchor
@@ -307,7 +307,7 @@ Assert.False(result.Ok, "an unsigned manifest cannot extend trust");
         await log.FlushAsync(default);
         await log.DisposeAsync();
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, default);
 
         var anchor = new InstallAnchor
@@ -373,7 +373,7 @@ Assert.True(resultStd.Ok);
             await l.FlushAsync(default);
         }
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, default);
 Assert.Equal(2, segments.Count);
 
@@ -524,7 +524,7 @@ Assert.True(files.Count >= 3);
         // Delete the middle file to introduce a sequence gap.
         File.Delete(files[1]);
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var remaining = await reader.ReadAllAsync(segRoot, default);
         var anchor = new InstallAnchor
         {

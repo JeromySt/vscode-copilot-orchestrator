@@ -1,1 +1,2 @@
 #nullable enable
+AiOrchestrator.Audit.Crypto.FileKeyMaterialProvider.FileKeyMaterialProvider(AiOrchestrator.Models.Paths.AbsolutePath! keyRoot, string! activeKeyId, AiOrchestrator.Abstractions.Io.IFileSystem! fs) -> void

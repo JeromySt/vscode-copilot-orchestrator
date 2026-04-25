@@ -2,11 +2,12 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.Audit.Chain;
@@ -14,27 +15,41 @@ namespace AiOrchestrator.Audit.Chain;
 /// <summary>Reads sealed segment files back from disk in monotonic sequence order.</summary>
 internal sealed class SegmentReader
 {
+    private readonly IFileSystem fs;
+
+    public SegmentReader(IFileSystem fs)
+    {
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
+    }
+
     /// <summary>Lists all sealed (non-tmp) segments, sorted by sequence number.</summary>
     /// <param name="segmentRoot">Directory containing segment files.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The full list of decoded segments.</returns>
     public async Task<IReadOnlyList<Segment>> ReadAllAsync(AbsolutePath segmentRoot, CancellationToken ct)
     {
-        if (!Directory.Exists(segmentRoot.Value))
+        if (!await this.fs.DirectoryExistsAsync(segmentRoot, ct).ConfigureAwait(false))
         {
-            return System.Array.Empty<Segment>();
+            return Array.Empty<Segment>();
         }
 
-        var files = Directory.EnumerateFiles(segmentRoot.Value, "*.aioa")
-            .Where(f => !f.EndsWith(".tmp", System.StringComparison.Ordinal))
-            .OrderBy(f => Path.GetFileName(f), System.StringComparer.Ordinal)
-            .ToList();
+        var files = new List<AbsolutePath>();
+        await foreach (var f in this.fs.EnumerateFilesAsync(segmentRoot, "*.aioa", ct).ConfigureAwait(false))
+        {
+            if (!f.Value.EndsWith(".tmp", StringComparison.Ordinal))
+            {
+                files.Add(f);
+            }
+        }
+
+        files.Sort((a, b) => string.Compare(
+            Path.GetFileName(a.Value), Path.GetFileName(b.Value), StringComparison.Ordinal));
 
         var segments = new List<Segment>(files.Count);
         foreach (var f in files)
         {
             ct.ThrowIfCancellationRequested();
-            var raw = await File.ReadAllBytesAsync(f, ct).ConfigureAwait(false);
+            var raw = await this.fs.ReadAllBytesAsync(f, ct).ConfigureAwait(false);
             segments.Add(SegmentCodec.Decode(raw, out _));
         }
 
@@ -43,18 +58,20 @@ internal sealed class SegmentReader
 
     /// <summary>Removes any leftover <c>.tmp</c> files from a crash mid-write (INV-11 recovery).</summary>
     /// <param name="segmentRoot">Directory containing segment files.</param>
-    public void CleanupTempFiles(AbsolutePath segmentRoot)
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A task that completes when cleanup is finished.</returns>
+    public async Task CleanupTempFilesAsync(AbsolutePath segmentRoot, CancellationToken ct)
     {
-        if (!Directory.Exists(segmentRoot.Value))
+        if (!await this.fs.DirectoryExistsAsync(segmentRoot, ct).ConfigureAwait(false))
         {
             return;
         }
 
-        foreach (var f in Directory.EnumerateFiles(segmentRoot.Value, "*.aioa.tmp"))
+        await foreach (var f in this.fs.EnumerateFilesAsync(segmentRoot, "*.aioa.tmp", ct).ConfigureAwait(false))
         {
             try
             {
-                File.Delete(f);
+                await this.fs.DeleteAsync(f, ct).ConfigureAwait(false);
             }
             catch (IOException)
             {

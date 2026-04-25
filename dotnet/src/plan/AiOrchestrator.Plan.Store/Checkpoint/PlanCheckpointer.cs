@@ -22,9 +22,7 @@ namespace AiOrchestrator.Plan.Store;
 internal sealed class PlanCheckpointer
 {
     private readonly AbsolutePath path;
-    #pragma warning disable CA1823, IDE0052
     private readonly IFileSystem fs;
-    #pragma warning restore CA1823, IDE0052
 
     /// <summary>Initializes a new <see cref="PlanCheckpointer"/>.</summary>
     /// <param name="path">Destination path of the final checkpoint file.</param>
@@ -43,23 +41,26 @@ internal sealed class PlanCheckpointer
     public async ValueTask WriteAsync(AiOrchestrator.Plan.Models.Plan plan, long upToSeq, CancellationToken ct)
     {
         var dir = Path.GetDirectoryName(this.path.Value);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        if (!string.IsNullOrEmpty(dir))
         {
-            _ = Directory.CreateDirectory(dir);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(dir), ct).ConfigureAwait(false);
         }
 
         var planJson = PlanJson.Serialize(plan);
         var wrapper = "{\"upToSeq\":" + upToSeq.ToString(CultureInfo.InvariantCulture) + ",\"plan\":" + planJson + "}";
 
-        var tmpPath = this.path.Value + ".tmp";
-        await using (var fstream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+        var tmpPath = new AbsolutePath(this.path.Value + ".tmp");
+        await using (var fstream = await this.fs.OpenWriteAsync(tmpPath, ct).ConfigureAwait(false))
         {
             var bytes = Encoding.UTF8.GetBytes(wrapper);
             await fstream.WriteAsync(bytes, ct).ConfigureAwait(false);
             await fstream.FlushAsync(ct).ConfigureAwait(false);
             try
             {
-                fstream.Flush(flushToDisk: true);
+                if (fstream is FileStream fileStream)
+                {
+                    fileStream.Flush(flushToDisk: true);
+                }
             }
             catch
             {
@@ -68,7 +69,7 @@ internal sealed class PlanCheckpointer
         }
 
         // Atomic move (INV-6).
-        File.Move(tmpPath, this.path.Value, overwrite: true);
+        await this.fs.MoveAtomicAsync(tmpPath, this.path, ct).ConfigureAwait(false);
     }
 
     /// <summary>Loads the latest checkpoint from disk, or <see langword="null"/> if none exists.</summary>
@@ -76,13 +77,13 @@ internal sealed class PlanCheckpointer
     /// <returns>A tuple of (plan, upToSeq) or <see langword="null"/>.</returns>
     public async ValueTask<(AiOrchestrator.Plan.Models.Plan Plan, long UpToSeq)?> LoadLatestAsync(CancellationToken ct)
     {
-        if (!File.Exists(this.path.Value))
+        if (!await this.fs.FileExistsAsync(this.path, ct).ConfigureAwait(false))
         {
             return null;
         }
 
         string text;
-        await using (var fstream = new FileStream(this.path.Value, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true))
+        await using (var fstream = await this.fs.OpenReadAsync(this.path, ct).ConfigureAwait(false))
         using (var reader = new StreamReader(fstream, Encoding.UTF8))
         {
             text = await reader.ReadToEndAsync(ct).ConfigureAwait(false);

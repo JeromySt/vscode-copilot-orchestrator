@@ -153,7 +153,7 @@ public sealed class AuditCoverageTests : IDisposable
         File.WriteAllBytes(Path.Combine(keyDir, "k1.priv"), priv);
         File.WriteAllBytes(Path.Combine(keyDir, "k1.pub"), pub);
 
-        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "k1");
+        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "k1", new PassthroughFileSystem());
 
         Assert.Equal("k1", provider.ActiveKeyId);
         Assert.Equal(priv, provider.GetActivePrivateKey().ToArray());
@@ -170,7 +170,7 @@ public sealed class AuditCoverageTests : IDisposable
         File.WriteAllBytes(Path.Combine(keyDir, "active.priv"), priv);
         File.WriteAllBytes(Path.Combine(keyDir, "active.pub"), pub);
 
-        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "active");
+        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "active", new PassthroughFileSystem());
         var result = provider.TryGetPublicKey("active");
 
         Assert.NotNull(result);
@@ -193,7 +193,7 @@ public sealed class AuditCoverageTests : IDisposable
         EcdsaSigner.GenerateKeyPair(out _, out var oldPub);
         File.WriteAllBytes(Path.Combine(histDir, "old-key.pub"), oldPub);
 
-        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "current");
+        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "current", new PassthroughFileSystem());
         var result = provider.TryGetPublicKey("old-key");
 
         Assert.NotNull(result);
@@ -210,7 +210,7 @@ public sealed class AuditCoverageTests : IDisposable
         File.WriteAllBytes(Path.Combine(keyDir, "k.priv"), priv);
         File.WriteAllBytes(Path.Combine(keyDir, "k.pub"), pub);
 
-        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "k");
+        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "k", new PassthroughFileSystem());
 
         Assert.Null(provider.TryGetPublicKey(null!));
         Assert.Null(provider.TryGetPublicKey(string.Empty));
@@ -226,7 +226,7 @@ public sealed class AuditCoverageTests : IDisposable
         File.WriteAllBytes(Path.Combine(keyDir, "k.priv"), priv);
         File.WriteAllBytes(Path.Combine(keyDir, "k.pub"), pub);
 
-        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "k");
+        var provider = new FileKeyMaterialProvider(new AbsolutePath(keyDir), "k", new PassthroughFileSystem());
         var result = provider.TryGetPublicKey("nonexistent");
         // The ternary `pk : null` returns a byte[] null that gets implicitly converted
         // to a default ReadOnlyMemory<byte> (length 0) — not a null Nullable.
@@ -238,7 +238,7 @@ public sealed class AuditCoverageTests : IDisposable
     {
         var keyDir = Path.Combine(this.root, "keys-nullid");
         Directory.CreateDirectory(keyDir);
-        Assert.ThrowsAny<ArgumentException>(() => new FileKeyMaterialProvider(new AbsolutePath(keyDir), null!));
+        Assert.ThrowsAny<ArgumentException>(() => new FileKeyMaterialProvider(new AbsolutePath(keyDir), null!, new PassthroughFileSystem()));
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public sealed class AuditCoverageTests : IDisposable
     {
         var keyDir = Path.Combine(this.root, "keys-emptyid");
         Directory.CreateDirectory(keyDir);
-        Assert.ThrowsAny<ArgumentException>(() => new FileKeyMaterialProvider(new AbsolutePath(keyDir), string.Empty));
+        Assert.ThrowsAny<ArgumentException>(() => new FileKeyMaterialProvider(new AbsolutePath(keyDir), string.Empty, new PassthroughFileSystem()));
     }
 
     // ─────────── SegmentReader ───────────
@@ -254,29 +254,29 @@ public sealed class AuditCoverageTests : IDisposable
     [Fact]
     public async Task SegmentReader_ReadAllAsync_NonExistentDir_ReturnsEmpty()
     {
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var result = await reader.ReadAllAsync(new AbsolutePath(Path.Combine(this.root, "no-such-dir")), CancellationToken.None);
         Assert.Empty(result);
     }
 
     [Fact]
-    public void SegmentReader_CleanupTempFiles_NonExistentDir_NoThrow()
+    public async Task SegmentReader_CleanupTempFiles_NonExistentDir_NoThrow()
     {
-        var reader = new SegmentReader();
-        reader.CleanupTempFiles(new AbsolutePath(Path.Combine(this.root, "no-dir")));
+        var reader = new SegmentReader(new PassthroughFileSystem());
+        await reader.CleanupTempFilesAsync(new AbsolutePath(Path.Combine(this.root, "no-dir")), CancellationToken.None);
         // Should not throw
     }
 
     [Fact]
-    public void SegmentReader_CleanupTempFiles_RemovesTmpFiles()
+    public async Task SegmentReader_CleanupTempFiles_RemovesTmpFiles()
     {
         var dir = Path.Combine(this.root, "cleanup");
         Directory.CreateDirectory(dir);
         var tmpFile = Path.Combine(dir, "test.aioa.tmp");
         File.WriteAllBytes(tmpFile, new byte[] { 1, 2, 3 });
 
-        var reader = new SegmentReader();
-        reader.CleanupTempFiles(new AbsolutePath(dir));
+        var reader = new SegmentReader(new PassthroughFileSystem());
+        await reader.CleanupTempFilesAsync(new AbsolutePath(dir), CancellationToken.None);
 
         Assert.False(File.Exists(tmpFile));
     }
@@ -288,7 +288,7 @@ public sealed class AuditCoverageTests : IDisposable
         Directory.CreateDirectory(dir);
         File.WriteAllBytes(Path.Combine(dir, "something.aioa.tmp"), new byte[] { 0xFF });
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var result = await reader.ReadAllAsync(new AbsolutePath(dir), CancellationToken.None);
         Assert.Empty(result);
     }
@@ -405,7 +405,7 @@ public sealed class AuditCoverageTests : IDisposable
         await log.FlushAsync(CancellationToken.None);
         await log.DisposeAsync();
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, CancellationToken.None);
         var anchor = new InstallAnchor
         {
@@ -430,7 +430,7 @@ public sealed class AuditCoverageTests : IDisposable
         await log.FlushAsync(CancellationToken.None);
         await log.DisposeAsync();
 
-        var reader = new SegmentReader();
+        var reader = new SegmentReader(new PassthroughFileSystem());
         var segments = await reader.ReadAllAsync(segRoot, CancellationToken.None);
         var anchor = new InstallAnchor
         {

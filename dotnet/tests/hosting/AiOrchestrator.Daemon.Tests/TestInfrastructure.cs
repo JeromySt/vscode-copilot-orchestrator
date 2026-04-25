@@ -200,6 +200,62 @@ public sealed class InMemoryFileSystem : IFileSystem
 
     public ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct) =>
         ValueTask.FromResult(MountKind.Local);
+
+    public ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult(this.Files.ContainsKey(path.Value));
+
+    public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult(false);
+
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct) =>
+        ValueTask.CompletedTask;
+
+    public ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct)
+    {
+        if (this.Files.TryGetValue(path.Value, out var b))
+        {
+            return ValueTask.FromResult(b);
+        }
+
+        throw new FileNotFoundException(path.Value);
+    }
+
+    public ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct)
+    {
+        this.Files[path.Value] = contents;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct)
+    {
+        if (this.Files.TryGetValue(source.Value, out var b))
+        {
+            this.Files[destination.Value] = b;
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(AbsolutePath directory, string searchPattern, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(AbsolutePath directory, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    public ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult<Stream>(new MemoryStream());
+
+    public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult<Stream>(new MemoryStream());
 }
 
 public static class TestPrincipals

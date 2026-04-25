@@ -1,4 +1,4 @@
-// <copyright file="PortabilityContractTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="PortabilityContractTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -212,7 +212,7 @@ public sealed class PortabilityContractTests : IDisposable
     public async Task PORT_5_OverwriteIfArchivedOnly()
     {
         var srcStore = this.MakeStore();
-        // Existing plan is Pending — not Archived — so OverwriteIfArchived must throw.
+        // Existing plan is Pending â€” not Archived â€” so OverwriteIfArchived must throw.
         var planId = await CreateSamplePlanAsync(srcStore);
         var exporter = this.MakeExporter(srcStore);
         var outputPath = this.MakeOutput("ovr.aioplan");
@@ -276,13 +276,13 @@ public sealed class PortabilityContractTests : IDisposable
 
         var exporter = this.MakeExporter(store);
 
-        // Default (IncludeAttempts = false) → stripped.
+        // Default (IncludeAttempts = false) â†’ stripped.
         var stripped = this.MakeOutput("strip.aioplan");
         await exporter.ExportAsync(planId, stripped, new ExportOptions { OverrideCreatedAt = FixedTime }, CancellationToken.None);
         var strippedJson = ExtractText(stripped.Value, "plan.json");
         Assert.DoesNotContain("\"attemptNumber\"", strippedJson);
 
-        // With flag → retained.
+        // With flag â†’ retained.
         var kept = this.MakeOutput("keep.aioplan");
         await exporter.ExportAsync(planId, kept, new ExportOptions { IncludeAttempts = true, OverrideCreatedAt = FixedTime }, CancellationToken.None);
         var keptJson = ExtractText(kept.Value, "plan.json");
@@ -321,7 +321,7 @@ public sealed class PortabilityContractTests : IDisposable
     public void ConstructorGuards_ThrowOnNullDependencies()
     {
         var store = this.MakeStore();
-        var fs = new NullFileSystem();
+        var fs = new PassthroughFileSystem();
         var clock = new InMemoryClock(FixedTime);
         var opts = new StaticOptions<PortabilityOptions>(new PortabilityOptions());
 
@@ -408,7 +408,7 @@ public sealed class PortabilityContractTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(act);
     }
 
-    // ───────────────────────────── helpers ─────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private static readonly DateTimeOffset FixedTime = new(2025, 1, 15, 12, 0, 0, TimeSpan.Zero);
 
@@ -423,7 +423,7 @@ public sealed class PortabilityContractTests : IDisposable
         _ = Directory.CreateDirectory(dir);
         return new PlanStore(
             new AbsolutePath(dir),
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(FixedTime),
             new NullEventBus(),
             new StaticOptions<PlanStoreOptions>(new PlanStoreOptions()),
@@ -433,14 +433,14 @@ public sealed class PortabilityContractTests : IDisposable
     private PlanExporter MakeExporter(IPlanStore store) =>
         new(
             store,
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(FixedTime),
             new StaticOptions<PortabilityOptions>(new PortabilityOptions()));
 
     private PlanImporter MakeImporter(IPlanStore store) =>
         new(
             store,
-            new NullFileSystem(),
+            new PassthroughFileSystem(),
             new InMemoryClock(FixedTime),
             new StaticOptions<PortabilityOptions>(new PortabilityOptions()));
 
@@ -519,23 +519,99 @@ internal sealed class StaticOptions<T> : IOptionsMonitor<T>
     }
 }
 
-internal sealed class NullFileSystem : IFileSystem
+internal sealed class PassthroughFileSystem : IFileSystem
 {
-    public ValueTask<bool> ExistsAsync(AbsolutePath path, CancellationToken ct) => new(false);
+    public ValueTask<bool> ExistsAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult(File.Exists(path.Value) || Directory.Exists(path.Value));
 
-    public ValueTask<string> ReadAllTextAsync(AbsolutePath path, CancellationToken ct) => new(string.Empty);
+    public ValueTask<bool> FileExistsAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult(File.Exists(path.Value));
 
-    public ValueTask WriteAllTextAsync(AbsolutePath path, string contents, CancellationToken ct) => default;
+    public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult(Directory.Exists(path.Value));
 
-    public ValueTask<Stream> OpenReadAsync(AbsolutePath path, CancellationToken ct) => new((Stream)new MemoryStream());
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct)
+    {
+        _ = Directory.CreateDirectory(path.Value);
+        return ValueTask.CompletedTask;
+    }
 
-    public ValueTask<Stream> OpenWriteExclusiveAsync(AbsolutePath path, FilePermissions perms, CancellationToken ct) => new((Stream)new MemoryStream());
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct)
+    {
+        Directory.Delete(path.Value, recursive);
+        return ValueTask.CompletedTask;
+    }
 
-    public ValueTask MoveAtomicAsync(AbsolutePath source, AbsolutePath destination, CancellationToken ct) => default;
+    public ValueTask<string> ReadAllTextAsync(AbsolutePath path, CancellationToken ct) =>
+        new(File.ReadAllTextAsync(path.Value, ct));
 
-    public ValueTask DeleteAsync(AbsolutePath path, CancellationToken ct) => default;
+    public ValueTask WriteAllTextAsync(AbsolutePath path, string contents, CancellationToken ct) =>
+        new(File.WriteAllTextAsync(path.Value, contents, ct));
 
-    public ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct) => new(MountKind.Local);
+    public ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct) =>
+        new(File.ReadAllBytesAsync(path.Value, ct));
+
+    public ValueTask WriteAllBytesAsync(AbsolutePath path, byte[] contents, CancellationToken ct) =>
+        new(File.WriteAllBytesAsync(path.Value, contents, ct));
+
+    public ValueTask<Stream> OpenReadAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true));
+
+    public ValueTask<Stream> OpenWriteExclusiveAsync(AbsolutePath path, FilePermissions perms, CancellationToken ct) =>
+        ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true));
+
+    public ValueTask<Stream> OpenWriteAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true));
+
+    public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, useAsync: true));
+
+    public ValueTask MoveAtomicAsync(AbsolutePath source, AbsolutePath destination, CancellationToken ct)
+    {
+        File.Move(source.Value, destination.Value, overwrite: true);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask CopyAsync(AbsolutePath source, AbsolutePath destination, bool overwrite, CancellationToken ct)
+    {
+        File.Copy(source.Value, destination.Value, overwrite);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DeleteAsync(AbsolutePath path, CancellationToken ct)
+    {
+        if (File.Exists(path.Value)) { File.Delete(path.Value); }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<MountKind> GetMountKindAsync(AbsolutePath path, CancellationToken ct) =>
+        ValueTask.FromResult(MountKind.Local);
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateFilesAsync(
+        AbsolutePath directory, string searchPattern, [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (!Directory.Exists(directory.Value)) { yield break; }
+        foreach (var f in Directory.EnumerateFiles(directory.Value, searchPattern))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(f);
+        }
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    public async IAsyncEnumerable<AbsolutePath> EnumerateDirectoriesAsync(
+        AbsolutePath directory, [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (!Directory.Exists(directory.Value)) { yield break; }
+        foreach (var d in Directory.EnumerateDirectories(directory.Value))
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return new AbsolutePath(d);
+        }
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
 }
 
 internal sealed class NullEventBus : IEventBus
