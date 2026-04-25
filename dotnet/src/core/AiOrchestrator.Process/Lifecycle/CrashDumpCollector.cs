@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using AiOrchestrator.Models.Paths;
 using AiOrchestrator.Process.Native.Windows;
@@ -14,6 +15,7 @@ namespace AiOrchestrator.Process.Lifecycle;
 /// on Windows via <c>MiniDumpWriteDump</c> and on Linux by reading core dump files
 /// from the OS-configured core dump path.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class CrashDumpCollector : IProcessLifecycle
 {
     private readonly ILogger<CrashDumpCollector> logger;

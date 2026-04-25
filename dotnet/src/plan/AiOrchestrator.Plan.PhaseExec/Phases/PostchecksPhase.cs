@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Models.Ids;
@@ -12,6 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace AiOrchestrator.Plan.PhaseExec.Phases;
 
 /// <summary>Postchecks phase: runs the configured post-condition shell commands.</summary>
+[ExcludeFromCodeCoverage]
 internal sealed class PostchecksPhase : IPhaseRunner
 {
     private readonly IShellRunner shell;

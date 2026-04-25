@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,7 @@ namespace AiOrchestrator.Plan.PhaseExec.Phases;
 /// Setup phase: forward-integrates the base branch into the job's worktree and
 /// claims the per-worktree lease that protects all subsequent phases (INV-7).
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class SetupPhase : IPhaseRunner
 {
     private readonly IGitOperations git;

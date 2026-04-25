@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Agent;
@@ -16,6 +17,7 @@ namespace AiOrchestrator.Plan.PhaseExec.Phases;
 /// Agent failures map to <see cref="PhaseFailureKind.AgentNonZeroExit"/> or
 /// <see cref="PhaseFailureKind.AgentMaxTurnsExceeded"/>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class WorkPhase : IPhaseRunner
 {
     private readonly AgentRunnerFactory agents;

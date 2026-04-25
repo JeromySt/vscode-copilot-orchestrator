@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using AiOrchestrator.Abstractions.Credentials;
 using AiOrchestrator.Git.Exceptions;
 using AiOrchestrator.Models.Auth;
@@ -21,6 +22,7 @@ namespace AiOrchestrator.Git.Bridge;
 ///   <item><description>credential plumbing through <see cref="ICredentialBroker"/> (INV-8).</description></item>
 /// </list>
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class LibGit2Bridge
 {
     private static readonly char[] PathSplitChars = new[] { '\r', '\n' };

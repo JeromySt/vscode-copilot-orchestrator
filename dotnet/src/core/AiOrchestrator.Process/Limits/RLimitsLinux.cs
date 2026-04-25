@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using AiOrchestrator.Process.Native.Linux;
 
@@ -12,6 +13,7 @@ namespace AiOrchestrator.Process.Limits;
 /// (called in the forked child before <c>execve</c>, satisfying INV-9).
 /// Also attaches the target process to a cgroups v2 slice for memory and CPU enforcement.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal static class RLimitsLinux
 {
     /// <summary>

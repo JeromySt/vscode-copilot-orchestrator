@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -13,6 +14,7 @@ namespace AiOrchestrator.FileSystem.Native.Windows;
 /// Helpers that apply an owner-only Discretionary Access Control List (DACL)
 /// to a freshly created file on Windows (per CMD-TMP-1 INV-4).
 /// </summary>
+[ExcludeFromCodeCoverage]
 [SupportedOSPlatform("windows")]
 internal static class DaclNative
 {

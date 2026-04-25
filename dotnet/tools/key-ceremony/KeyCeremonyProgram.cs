@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -18,6 +19,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace AiOrchestrator.Tools.KeyCeremony;
 
 /// <summary>Entry point for the offline M-of-N HSM key ceremony binary.</summary>
+[ExcludeFromCodeCoverage]
 public sealed class KeyCeremonyProgram
 {
     // J43-PC-6: reference KeyCeremonyToolingStub from AiOrchestrator.SkewManifest so the OE0043 allowlist closes the loop.

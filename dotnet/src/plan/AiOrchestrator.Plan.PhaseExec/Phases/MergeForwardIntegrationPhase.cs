@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Models.Ids;
@@ -12,6 +13,7 @@ namespace AiOrchestrator.Plan.PhaseExec.Phases;
 /// MergeForwardIntegration phase: merges the base branch onto the worktree before
 /// setup so the job starts from the latest integrated state.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class MergeForwardIntegrationPhase : IPhaseRunner
 {
     /// <inheritdoc/>

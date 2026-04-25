@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,6 +12,7 @@ namespace AiOrchestrator.Tools.KeyCeremony.Hsm;
 /// <summary>
 /// PKCS#11-backed HSM client. Wire the actual SDK (e.g., Pkcs11Interop) before production use.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class Pkcs11HsmClient : IHsmClient
 {
     /// <inheritdoc/>

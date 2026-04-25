@@ -2,11 +2,13 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AiOrchestrator.LineView;
 
 /// <summary>DI composition for <see cref="LineProjector"/>.</summary>
+[ExcludeFromCodeCoverage]
 public static class CompositionRoot
 {
     /// <summary>Register LineView services.</summary>

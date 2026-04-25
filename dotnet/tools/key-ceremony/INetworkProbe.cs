@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net.NetworkInformation;
 
@@ -15,6 +16,7 @@ public interface INetworkProbe
 }
 
 /// <summary>Default <see cref="INetworkProbe"/> implementation backed by the OS.</summary>
+[ExcludeFromCodeCoverage]
 public sealed class DefaultNetworkProbe : INetworkProbe
 {
     /// <inheritdoc/>

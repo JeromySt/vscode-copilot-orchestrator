@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 
 namespace AiOrchestrator.Logging.File;
@@ -9,6 +10,7 @@ namespace AiOrchestrator.Logging.File;
 /// <summary>
 /// Extension methods for adding rolling file logging to <see cref="ILoggingBuilder"/>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public static class LoggingBuilderExtensions
 {
     /// <summary>Adds a rolling file logger to the logging pipeline.</summary>

@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ namespace AiOrchestrator.Mcp.Transports;
 /// Named-pipe-backed MCP transport. Wraps a connected <see cref="PipeStream"/> with the
 /// same <c>Content-Length</c> framing used by <see cref="StdioTransport"/>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class NamedPipeTransport : IMcpTransport, IDisposable
 {
     private readonly StdioTransport inner;

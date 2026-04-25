@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using AiOrchestrator.Process.Native.Windows;
 using Microsoft.Win32.SafeHandles;
@@ -12,6 +13,7 @@ namespace AiOrchestrator.Process.Pty;
 /// Windows implementation of <see cref="IPtyAllocator"/> using the ConPTY API
 /// (<c>CreatePseudoConsole</c> / <c>ClosePseudoConsole</c>).
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed partial class ConPtyAllocatorWindows : IPtyAllocator
 {
     /// <inheritdoc/>

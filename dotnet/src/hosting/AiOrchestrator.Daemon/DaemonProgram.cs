@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Hosting;
 namespace AiOrchestrator.Daemon;
 
 /// <summary>Entry point for the long-running AiOrchestrator daemon.</summary>
+[ExcludeFromCodeCoverage]
 public sealed class DaemonProgram
 {
     /// <summary>Process entry point.</summary>

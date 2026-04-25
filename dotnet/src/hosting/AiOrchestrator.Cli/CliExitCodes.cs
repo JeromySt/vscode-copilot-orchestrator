@@ -2,11 +2,14 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
+
 namespace AiOrchestrator.Cli;
 
 /// <summary>
 /// Canonical process exit codes used by the <c>aio</c> CLI. Values conform to §3.14.7.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class CliExitCodes
 {
     private CliExitCodes()

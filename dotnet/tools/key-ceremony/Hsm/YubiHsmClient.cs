@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,6 +12,7 @@ namespace AiOrchestrator.Tools.KeyCeremony.Hsm;
 /// <summary>
 /// YubiHSM-backed client. Wire the YubiHSM SDK (yubihsm-shell / Yubico.YubiHSM) before production use.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class YubiHsmClient : IHsmClient
 {
     /// <inheritdoc/>

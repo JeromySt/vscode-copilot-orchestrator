@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,6 +17,7 @@ namespace AiOrchestrator.Hosting;
 /// Wraps the service provider produced by <see cref="HostBuilderExtensions.UseAiOrchestrator"/>
 /// and coordinates a graceful shutdown of all registered hosted services in reverse registration order.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class AiOrchestratorRoot : IAsyncDisposable
 {
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(30);

@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
 namespace AiOrchestrator.Process.Native.Linux;
@@ -10,6 +11,7 @@ namespace AiOrchestrator.Process.Native.Linux;
 /// Attaches a process to a cgroups v2 hierarchy and applies resource limits
 /// by writing to the unified cgroup filesystem at <c>/sys/fs/cgroup</c>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal static class CGroupV2
 {
     private const string CGroupRoot = "/sys/fs/cgroup";

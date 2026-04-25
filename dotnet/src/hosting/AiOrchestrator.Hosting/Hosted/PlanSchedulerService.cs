@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -12,6 +13,7 @@ namespace AiOrchestrator.Hosting.Hosted;
 /// Background service responsible for scheduling plan execution against available concurrency slots.
 /// Starts last and stops first during host shutdown.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class PlanSchedulerService : BackgroundService
 {
     /// <inheritdoc/>

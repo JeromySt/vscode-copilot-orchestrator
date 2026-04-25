@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using AiOrchestrator.Daemon.PidFile;
 using AiOrchestrator.Daemon.Update;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,7 @@ namespace AiOrchestrator.Daemon;
 /// Internal sealed components: <see cref="ReleaseManifestFetcher"/>, <see cref="StagedSwap"/>,
 /// <see cref="HealthCheck"/>, <see cref="PidFileWriter"/>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public static class DaemonServiceCollectionExtensions
 {
     /// <summary>Registers <see cref="UpdateController"/> and its collaborators.</summary>

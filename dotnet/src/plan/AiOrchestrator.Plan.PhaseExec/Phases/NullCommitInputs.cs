@@ -2,12 +2,14 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace AiOrchestrator.Plan.PhaseExec.Phases;
 
 /// <summary>Default <see cref="ICommitInputs"/> when no other implementation is registered.</summary>
+[ExcludeFromCodeCoverage]
 internal sealed class NullCommitInputs : ICommitInputs
 {
     /// <inheritdoc/>

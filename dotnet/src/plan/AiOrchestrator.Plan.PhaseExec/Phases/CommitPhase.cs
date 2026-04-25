@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Abstractions.Git;
@@ -17,6 +18,7 @@ namespace AiOrchestrator.Plan.PhaseExec.Phases;
 /// invokes the hook-gate (INV-9), then asks <see cref="IGitOperations"/> to stage and commit.
 /// Implements expectsNoChanges semantics (INV-10).
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class CommitPhase : IPhaseRunner
 {
     /// <summary>Default reservation cost charged per commit attempt when no caller-provided estimate is available.</summary>

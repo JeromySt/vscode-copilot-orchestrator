@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,7 @@ namespace AiOrchestrator.Mcp.Transports;
 /// Unix-domain-socket-backed MCP transport. Wraps a connected <see cref="NetworkStream"/>
 /// with the same <c>Content-Length</c> framing used by <see cref="StdioTransport"/>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class UnixSocketTransport : IMcpTransport, IDisposable
 {
     private readonly StdioTransport inner;

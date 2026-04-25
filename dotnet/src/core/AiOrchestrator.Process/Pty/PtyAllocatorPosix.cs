@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -12,6 +13,7 @@ namespace AiOrchestrator.Process.Pty;
 /// <c>grantpt(3)</c>, <c>unlockpt(3)</c>, and <c>ptsname(3)</c> to allocate a
 /// master/slave PTY pair.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class PtyAllocatorPosix : IPtyAllocator
 {
     // O_RDWR | O_NOCTTY

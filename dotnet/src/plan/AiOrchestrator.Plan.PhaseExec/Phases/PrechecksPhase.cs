@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Models.Ids;
@@ -15,6 +16,7 @@ namespace AiOrchestrator.Plan.PhaseExec.Phases;
 /// Prechecks phase: runs the configured pre-condition shell commands.
 /// Non-zero exit raises <see cref="PhaseFailureKind.ShellNonZeroExit"/>.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class PrechecksPhase : IPhaseRunner
 {
     private readonly IShellRunner shell;

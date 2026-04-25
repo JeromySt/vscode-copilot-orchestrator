@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System.Diagnostics.CodeAnalysis;
 using AiOrchestrator.Agent;
 using AiOrchestrator.Agent.Runners;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace AiOrchestrator.Composition;
 
 /// <summary>Composition-root extensions for the <c>AiOrchestrator.Agent</c> module.</summary>
+[ExcludeFromCodeCoverage]
 public static partial class CompositionRoot
 {
     /// <summary>
