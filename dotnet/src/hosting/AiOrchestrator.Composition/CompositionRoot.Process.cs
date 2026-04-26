@@ -24,6 +24,7 @@ public static partial class CompositionRoot
     {
         _ = services.AddSingleton<IProcessLifecycle, CrashDumpCollector>();
         _ = services.AddSingleton<IProcessSpawner, ProcessSpawner>();
+        _ = services.AddSingleton<IProcessHandleRegistry, ProcessHandleRegistry>();
         _ = services.AddSingleton<IPtyAllocator>(static _ =>
             System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
                 System.Runtime.InteropServices.OSPlatform.Windows)

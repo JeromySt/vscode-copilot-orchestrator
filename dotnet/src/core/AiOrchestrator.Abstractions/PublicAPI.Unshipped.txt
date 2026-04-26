@@ -1,5 +1,9 @@
 #nullable enable
 AiOrchestrator.Abstractions.Process.IProcessHandle.GetProcessTreeAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Abstractions.Process.ProcessTreeNode?>
+AiOrchestrator.Abstractions.Process.IProcessHandleRegistry
+AiOrchestrator.Abstractions.Process.IProcessHandleRegistry.Get(AiOrchestrator.Models.Ids.PlanId planId, string! jobId) -> AiOrchestrator.Abstractions.Process.IProcessHandle?
+AiOrchestrator.Abstractions.Process.IProcessHandleRegistry.Register(AiOrchestrator.Models.Ids.PlanId planId, string! jobId, AiOrchestrator.Abstractions.Process.IProcessHandle! handle) -> void
+AiOrchestrator.Abstractions.Process.IProcessHandleRegistry.Unregister(AiOrchestrator.Models.Ids.PlanId planId, string! jobId) -> void
 AiOrchestrator.Abstractions.Process.ProcessStats
 AiOrchestrator.Abstractions.Process.ProcessStats.CommandLine.get -> string?
 AiOrchestrator.Abstractions.Process.ProcessStats.CommandLine.init -> void

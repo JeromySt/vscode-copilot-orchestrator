@@ -135,7 +135,11 @@ internal sealed class McpServeHandler : VerbBase
             sp.GetRequiredService<IOptionsMonitor<PlanStoreOptions>>(),
             sp.GetRequiredService<ILogger<PlanStore>>()));
 
-        // MCP tools (19 plan + log tools, registry, and server skeleton).
+        // Process handle registry (empty — standalone CLI doesn't run jobs, but
+        // GetCopilotJobProcessTreeTool needs the interface registered).
+        _ = services.AddSingleton<Abstractions.Process.IProcessHandleRegistry, AiOrchestrator.Process.ProcessHandleRegistry>();
+
+        // MCP tools (20 plan + log tools, registry, and server skeleton).
         _ = services.AddMcpServer(config);
 
         ServiceProvider provider = services.BuildServiceProvider();

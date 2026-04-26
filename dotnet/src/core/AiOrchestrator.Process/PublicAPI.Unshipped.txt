@@ -15,6 +15,11 @@ AiOrchestrator.Process.ProcessHandle.StandardError.get -> System.IO.Pipelines.Pi
 AiOrchestrator.Process.ProcessHandle.StandardIn.get -> System.IO.Pipelines.PipeWriter!
 AiOrchestrator.Process.ProcessHandle.StandardOut.get -> System.IO.Pipelines.PipeReader!
 AiOrchestrator.Process.ProcessHandle.WaitForExitAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.Task<int>!
+AiOrchestrator.Process.ProcessHandleRegistry
+AiOrchestrator.Process.ProcessHandleRegistry.Get(AiOrchestrator.Models.Ids.PlanId planId, string! jobId) -> AiOrchestrator.Abstractions.Process.IProcessHandle?
+AiOrchestrator.Process.ProcessHandleRegistry.ProcessHandleRegistry() -> void
+AiOrchestrator.Process.ProcessHandleRegistry.Register(AiOrchestrator.Models.Ids.PlanId planId, string! jobId, AiOrchestrator.Abstractions.Process.IProcessHandle! handle) -> void
+AiOrchestrator.Process.ProcessHandleRegistry.Unregister(AiOrchestrator.Models.Ids.PlanId planId, string! jobId) -> void
 AiOrchestrator.Process.ProcessSpawner
 AiOrchestrator.Process.ProcessSpawner.ApplyLimits(int pid, AiOrchestrator.Process.ResourceLimits! limits) -> void
 AiOrchestrator.Process.ProcessSpawner.ProcessSpawner(AiOrchestrator.Process.Lifecycle.IProcessLifecycle! lifecycle, AiOrchestrator.Abstractions.Time.IClock! clock, AiOrchestrator.Abstractions.Telemetry.ITelemetrySink! telemetry) -> void

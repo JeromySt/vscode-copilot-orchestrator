@@ -33,7 +33,7 @@ public static partial class CompositionRoot
         // the underlying pipe/socket handle and register them explicitly.
         _ = services.AddSingleton<IMcpTransport>(_ => new StdioTransport());
 
-        // Tools — 19 total. The registry rejects duplicates at construction time.
+        // Tools — 20 total. The registry rejects duplicates at construction time.
         _ = services.AddSingleton<IMcpTool, ScaffoldCopilotPlanTool>();
         _ = services.AddSingleton<IMcpTool, AddCopilotPlanJobTool>();
         _ = services.AddSingleton<IMcpTool, AddCopilotPlanJobsTool>();
@@ -53,6 +53,7 @@ public static partial class CompositionRoot
         _ = services.AddSingleton<IMcpTool, RunCopilotIntegrationTestTool>();
         _ = services.AddSingleton<IMcpTool, DeleteCopilotPlanTool>();
         _ = services.AddSingleton<IMcpTool, GetOrchestratorLogsTool>();
+        _ = services.AddSingleton<IMcpTool, GetCopilotJobProcessTreeTool>();
 
         _ = services.AddSingleton<McpToolRegistry>();
         _ = services.AddSingleton<McpServer>();
