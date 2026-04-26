@@ -32,6 +32,9 @@ let currentAuthNonce: string | undefined;
 /** Whether the MCP server feature is enabled in user settings. */
 let isEnabled = true;
 
+/** Which engine backs the MCP server: TS (default) or .NET. */
+let currentEngineKind: 'typescript' | 'dotnet' = 'typescript';
+
 /**
  * Create and register the MCP Server Definition Provider with VS Code.
  *
@@ -95,32 +98,51 @@ export function registerMcpDefinitionProvider(
         return [];
       }
 
-      // Require IPC path for the stdio server to connect back
-      if (!currentIpcPath) {
-        console.log('[MCP Provider] Returning empty list (no IPC path)');
-        return [];
+      const extensionPath = context.extensionPath;
+      let server: vscode.McpServerDefinition;
+
+      if (currentEngineKind === 'dotnet') {
+        // .NET engine: spawn the native aio CLI binary with "mcp serve"
+        const platformDir = process.platform === 'win32' ? 'win-x64'
+          : process.platform === 'darwin' ? 'osx-x64'
+          : 'linux-x64';
+        const exe = process.platform === 'win32' ? 'aio.exe' : 'aio';
+        const binaryPath = path.join(extensionPath, 'dotnet-bin', platformDir, exe);
+
+        server = new (vscode as any).McpStdioServerDefinition(
+          'Copilot Orchestrator (.NET)',  // label
+          binaryPath,                     // command — native .NET binary
+          ['mcp', 'serve', '--repo-root', currentWorkspacePath],
+          {},                             // no special env vars needed
+          context.extension.packageJSON.version
+        );
+        (server as any).cwd = vscode.Uri.file(currentWorkspacePath);
+        console.log(`[MCP Provider] Returning .NET stdio server: ${(server as any).label}`);
+      } else {
+        // TypeScript engine (default): spawn via VS Code's bundled Node.js
+        // Require IPC path for the stdio server to connect back
+        if (!currentIpcPath) {
+          console.log('[MCP Provider] Returning empty list (no IPC path)');
+          return [];
+        }
+
+        const serverScript = path.join(extensionPath, 'dist', 'mcp-stdio-server.js');
+        server = new (vscode as any).McpStdioServerDefinition(
+          'Copilot Orchestrator',  // label
+          process.execPath,        // command — VS Code's bundled Electron/Node binary
+          [serverScript],          // args - no variable args, keeps shape stable
+          {
+            ELECTRON_RUN_AS_NODE: '1',           // Run Electron as plain Node.js
+            MCP_IPC_PATH: currentIpcPath,        // IPC connection path
+            MCP_AUTH_NONCE: currentAuthNonce,    // Security: auth nonce for IPC
+          },
+          context.extension.packageJSON.version  // version
+        );
+        // Set cwd separately (it's a property, not a constructor param)
+        (server as any).cwd = vscode.Uri.file(currentWorkspacePath);
+        console.log(`[MCP Provider] Returning TS stdio server: ${(server as any).label}, ipc: ${currentIpcPath}`);
       }
 
-      const extensionPath = context.extensionPath;
-      const serverScript = path.join(extensionPath, 'dist', 'mcp-stdio-server.js');
-
-      // Use VS Code's bundled Node.js runtime (process.execPath + ELECTRON_RUN_AS_NODE)
-      // so users don't need Node.js installed separately on their system.
-      const server = new (vscode as any).McpStdioServerDefinition(
-        'Copilot Orchestrator',  // label
-        process.execPath,        // command — VS Code's bundled Electron/Node binary
-        [serverScript],          // args - no variable args, keeps shape stable
-        {
-          ELECTRON_RUN_AS_NODE: '1',           // Run Electron as plain Node.js
-          MCP_IPC_PATH: currentIpcPath,        // IPC connection path
-          MCP_AUTH_NONCE: currentAuthNonce,    // Security: auth nonce for IPC
-        },
-        context.extension.packageJSON.version  // version
-      );
-      // Set cwd separately (it's a property, not a constructor param)
-      server.cwd = vscode.Uri.file(currentWorkspacePath);
-
-      console.log(`[MCP Provider] Returning stdio server: ${server.label}, ipc: ${currentIpcPath}`);
       return [server];
     },
     
@@ -182,6 +204,21 @@ export function notifyServerChanged(): void {
 export function setMcpServerEnabled(enabled: boolean): void {
   if (isEnabled !== enabled) {
     isEnabled = enabled;
+    serverChangedEmitter.fire();
+  }
+}
+
+/**
+ * Switch the MCP server between the TypeScript and .NET engines.
+ *
+ * Fires a change notification when the kind actually changes, causing
+ * VS Code to re-query the provider and pick up the new server definition.
+ *
+ * @param kind - `'typescript'` for the Node.js stdio server, `'dotnet'` for the native CLI.
+ */
+export function setMcpEngineKind(kind: 'typescript' | 'dotnet'): void {
+  if (currentEngineKind !== kind) {
+    currentEngineKind = kind;
     serverChangedEmitter.fire();
   }
 }

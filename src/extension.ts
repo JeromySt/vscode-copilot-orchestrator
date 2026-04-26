@@ -38,6 +38,7 @@ import type { IDotNetDaemonManager } from './interfaces/IDotNetDaemonManager';
 import { TsOrchestrationEngine } from './core/tsEngine';
 import { DotNetOrchestrationEngine } from './core/dotnetEngine';
 import { DotNetDaemonManager } from './core/dotnetDaemonManager';
+import { setMcpEngineKind } from './mcp/mcpDefinitionProvider';
 
 // ============================================================================
 // MODULE STATE
@@ -134,6 +135,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   container.registerSingleton<IOrchestrationEngine>(Tokens.IOrchestrationEngine, () => engine!);
   await engine.initialize();
+
+  // Sync MCP server definition to match the active engine
+  setMcpEngineKind(useDotNet ? 'dotnet' : 'typescript');
 
   // ── Power Manager ──────────────────────────────────────────────────────
   const spawner = container.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);

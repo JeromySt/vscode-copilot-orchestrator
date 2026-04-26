@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.CommandLine;
 using AiOrchestrator.Cli.Verbs;
 using AiOrchestrator.Cli.Verbs.Daemon;
+using AiOrchestrator.Cli.Verbs.Mcp;
 using AiOrchestrator.Cli.Verbs.Plan;
 
 namespace AiOrchestrator.Cli;
@@ -68,6 +69,18 @@ public sealed class Program
 
         root.Subcommands.Add(daemonRoot);
 
+        // mcp <verb>
+        var mcpRoot = new Command("mcp", "MCP server verbs.");
+        foreach (ICliVerbHandler h in new ICliVerbHandler[]
+        {
+            new McpServeHandler(sp),
+        })
+        {
+            mcpRoot.Subcommands.Add(h.Build());
+        }
+
+        root.Subcommands.Add(mcpRoot);
+
         // top-level version
         root.Subcommands.Add(new VersionHandler(sp).Build());
 
@@ -99,6 +112,7 @@ public sealed class Program
             new DaemonStartHandler(sp),
             new DaemonStopHandler(sp),
             new DaemonStatusHandler(sp),
+            new McpServeHandler(sp),
             new VersionHandler(sp),
         };
     }
