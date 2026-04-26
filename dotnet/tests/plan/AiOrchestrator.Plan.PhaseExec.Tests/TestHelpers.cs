@@ -254,6 +254,8 @@ internal sealed class TestProcessSpawner : IProcessSpawner
         public PipeReader StandardError => this.errPipe.Reader;
         public PipeWriter StandardIn => this.inPipe.Writer;
 
+        public ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<ProcessTreeNode?>(null);
+
         public async Task<int> WaitForExitAsync(CancellationToken ct)
         {
             await this.process.WaitForExitAsync(ct).ConfigureAwait(false);

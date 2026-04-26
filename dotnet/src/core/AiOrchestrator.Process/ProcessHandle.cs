@@ -14,6 +14,7 @@ using AiOrchestrator.Process.Lifecycle;
 using AiOrchestrator.Process.Limits;
 using AiOrchestrator.Process.Native.Linux;
 using AiOrchestrator.Process.Native.Windows;
+using Microsoft.Win32.SafeHandles;
 
 namespace AiOrchestrator.Process;
 
@@ -41,6 +42,12 @@ public sealed class ProcessHandle : IProcessHandle
 
     private readonly CancellationTokenSource pumpCts = new();
     private int disposed;
+
+    // Process tree monitoring — lazy, cached
+    private SafeFileHandle? jobObjectHandle; // Windows: retained for PID enumeration
+    private ProcessTreeNode? cachedTree;
+    private long cacheTimestamp;
+    private const long CacheTtlMs = 1000;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProcessHandle"/> class.
@@ -113,6 +120,53 @@ public sealed class ProcessHandle : IProcessHandle
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Sets the Job Object handle for process tree enumeration on Windows.
+    /// Called by <see cref="ProcessSpawner"/> after applying resource limits.
+    /// </summary>
+    /// <param name="handle">The retained Job Object handle.</param>
+    internal void SetJobObjectHandle(SafeFileHandle handle) => this.jobObjectHandle = handle;
+
+    /// <inheritdoc/>
+    public async ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct)
+    {
+        if (this.process.HasExited)
+        {
+            return null;
+        }
+
+        // Check cache
+        long nowMs = this.clock.MonotonicMilliseconds;
+        if (this.cachedTree is not null && (nowMs - this.cacheTimestamp) < CacheTtlMs)
+        {
+            return this.cachedTree;
+        }
+
+        ProcessTreeNode? tree;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            tree = this.jobObjectHandle is not null
+                ? ProcessTreeBuilder.BuildFromJobObject(this.jobObjectHandle, this.ProcessId)
+                : null;
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            tree = await ProcessTreeBuilder.BuildFromCgroupAsync(this.ProcessId, this.fs, ct).ConfigureAwait(false);
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            tree = ProcessTreeBuilder.BuildFromProcListChildPids(this.ProcessId);
+        }
+        else
+        {
+            tree = null;
+        }
+
+        this.cachedTree = tree;
+        this.cacheTimestamp = nowMs;
+        return tree;
+    }
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
@@ -139,6 +193,10 @@ public sealed class ProcessHandle : IProcessHandle
         }
 
         this.process.Dispose();
+
+        // Dispose Job Object handle (Windows)
+        this.jobObjectHandle?.Dispose();
+        this.jobObjectHandle = null;
 
         this.stdoutPipe.Writer.Complete();
         this.stderrPipe.Writer.Complete();

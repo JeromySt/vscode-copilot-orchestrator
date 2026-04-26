@@ -8,6 +8,7 @@ AiOrchestrator.Process.EnvScope.Inherited(System.Collections.Immutable.Immutable
 AiOrchestrator.Process.EnvScope.Restricted(System.Collections.Immutable.ImmutableDictionary<string!, string!>! vars) -> AiOrchestrator.Process.EnvScope!
 AiOrchestrator.Process.ProcessHandle
 AiOrchestrator.Process.ProcessHandle.DisposeAsync() -> System.Threading.Tasks.ValueTask
+AiOrchestrator.Process.ProcessHandle.GetProcessTreeAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Abstractions.Process.ProcessTreeNode?>
 AiOrchestrator.Process.ProcessHandle.ProcessId.get -> int
 AiOrchestrator.Process.ProcessHandle.SignalAsync(AiOrchestrator.Abstractions.Process.ProcessSignal signal, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask
 AiOrchestrator.Process.ProcessHandle.StandardError.get -> System.IO.Pipelines.PipeReader!
@@ -18,6 +19,7 @@ AiOrchestrator.Process.ProcessSpawner
 AiOrchestrator.Process.ProcessSpawner.ApplyLimits(int pid, AiOrchestrator.Process.ResourceLimits! limits) -> void
 AiOrchestrator.Process.ProcessSpawner.ProcessSpawner(AiOrchestrator.Process.Lifecycle.IProcessLifecycle! lifecycle, AiOrchestrator.Abstractions.Time.IClock! clock, AiOrchestrator.Abstractions.Telemetry.ITelemetrySink! telemetry) -> void
 AiOrchestrator.Process.ProcessSpawner.SpawnAsync(AiOrchestrator.Models.ProcessSpec! spec, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Abstractions.Process.IProcessHandle!>
+static AiOrchestrator.Process.ProcessSpawner.ApplyLimitsAndRetainHandleAsync(int pid, AiOrchestrator.Process.ResourceLimits! limits, AiOrchestrator.Abstractions.Io.IFileSystem! fs, System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<Microsoft.Win32.SafeHandles.SafeFileHandle?>
 AiOrchestrator.Process.ResourceLimits
 AiOrchestrator.Process.ResourceLimits.MaxCpuTime.get -> System.TimeSpan?
 AiOrchestrator.Process.ResourceLimits.MaxCpuTime.init -> void

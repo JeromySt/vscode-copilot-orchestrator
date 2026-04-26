@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using AiOrchestrator.Process.Native.Windows;
 
 namespace AiOrchestrator.Process.Limits;
@@ -22,26 +23,41 @@ internal static class JobObjectsWindows
     /// <param name="limits">The resource limits to apply.</param>
     internal static void Apply(int pid, ResourceLimits limits)
     {
+        using var handle = ApplyAndRetainHandle(pid, limits);
+    }
+
+    /// <summary>
+    /// Creates a Job Object, assigns <paramref name="pid"/> to it, applies
+    /// constraints, and returns the Job Object handle for ongoing process tree queries.
+    /// The caller owns the returned handle and must dispose it when done.
+    /// </summary>
+    /// <param name="pid">The process identifier to limit.</param>
+    /// <param name="limits">The resource limits to apply.</param>
+    /// <returns>The Job Object handle, or <see langword="null"/> if assignment failed.</returns>
+    internal static SafeFileHandle? ApplyAndRetainHandle(int pid, ResourceLimits limits)
+    {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            return;
+            return null;
         }
 
-        using var job = JobObjectNative.CreateJobObject(0, null);
+        var job = JobObjectNative.CreateJobObject(0, null);
         if (job.IsInvalid)
         {
-            return;
+            return null;
         }
 
         using var processHandle = CreateProcessNative.OpenProcess(CreateProcessNative.PROCESS_ALL_ACCESS, false, pid);
         if (processHandle.IsInvalid)
         {
-            return;
+            job.Dispose();
+            return null;
         }
 
         if (!JobObjectNative.AssignProcessToJobObject(job, processHandle.DangerousGetHandle()))
         {
-            return;
+            job.Dispose();
+            return null;
         }
 
         var extInfo = default(JobObjectNative.JobObjectExtendedLimitInfo);
@@ -76,5 +92,7 @@ internal static class JobObjectsWindows
                 ref extInfo,
                 (uint)Marshal.SizeOf<JobObjectNative.JobObjectExtendedLimitInfo>());
         }
+
+        return job;
     }
 }

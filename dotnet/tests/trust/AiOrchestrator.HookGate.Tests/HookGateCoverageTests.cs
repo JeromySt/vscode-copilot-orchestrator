@@ -750,6 +750,8 @@ Assert.Empty(stdout);
             return 0;
         }
 
+        public ValueTask<AiOrchestrator.Abstractions.Process.ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<AiOrchestrator.Abstractions.Process.ProcessTreeNode?>(null);
+
         public ValueTask SignalAsync(AiOrchestrator.Abstractions.Process.ProcessSignal signal, CancellationToken ct) => default;
 
         public ValueTask DisposeAsync()

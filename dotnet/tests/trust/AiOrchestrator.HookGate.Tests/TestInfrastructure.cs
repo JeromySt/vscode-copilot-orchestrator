@@ -167,6 +167,8 @@ internal sealed class FakeProcessHandle : IProcessHandle
 
     public Task<int> WaitForExitAsync(CancellationToken ct) => Task.FromResult(this.exit);
 
+    public ValueTask<AiOrchestrator.Abstractions.Process.ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<AiOrchestrator.Abstractions.Process.ProcessTreeNode?>(null);
+
     public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct) => ValueTask.CompletedTask;
 
     public ValueTask DisposeAsync()

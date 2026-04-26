@@ -11,6 +11,7 @@ namespace AiOrchestrator.Process.Native.Windows;
 internal static partial class JobObjectNative
 {
     internal const int JobObjectBasicLimitInformation = 2;
+    internal const int JobObjectBasicProcessIdList = 3;
     internal const int JobObjectExtendedLimitInformation = 9;
 
 #pragma warning disable SA1310 // Field names should not contain underscores — these match Win32 constant names
@@ -37,6 +38,48 @@ internal static partial class JobObjectNative
         int jobObjectInformationClass,
         ref JobObjectExtendedLimitInfo lpJobObjectInformation,
         uint cbJobObjectInformationLength);
+
+    /// <summary>Queries information about a job object.</summary>
+    [LibraryImport("kernel32", EntryPoint = "QueryInformationJobObject", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool QueryInformationJobObject(
+        SafeFileHandle hJob,
+        int jobObjectInformationClass,
+        nint lpJobObjectInformation,
+        uint cbJobObjectInformationLength,
+        out uint lpReturnLength);
+
+    /// <summary>
+    /// Enumerates process IDs assigned to a job object via <c>JobObjectBasicProcessIdList</c>.
+    /// </summary>
+    /// <param name="jobHandle">A valid job object handle.</param>
+    /// <returns>An array of PIDs currently in the job, or empty if the query fails.</returns>
+    internal static int[] GetJobProcessIds(SafeFileHandle jobHandle)
+    {
+        const int maxPids = 256;
+        int bufferSize = 8 + (maxPids * IntPtr.Size); // two uint32s + PID pointer array
+        var buffer = Marshal.AllocHGlobal(bufferSize);
+        try
+        {
+            if (!QueryInformationJobObject(jobHandle, JobObjectBasicProcessIdList, buffer, (uint)bufferSize, out _))
+            {
+                return Array.Empty<int>();
+            }
+
+            int count = Marshal.ReadInt32(buffer, 4); // NumberOfProcessIdsInList
+            var pids = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                pids[i] = (int)Marshal.ReadIntPtr(buffer, 8 + (i * IntPtr.Size));
+            }
+
+            return pids;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
 
     /// <summary>IO counters for job object extended info.</summary>
     [StructLayout(LayoutKind.Sequential)]

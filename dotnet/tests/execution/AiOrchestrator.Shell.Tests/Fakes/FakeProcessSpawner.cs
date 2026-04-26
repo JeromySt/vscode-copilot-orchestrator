@@ -62,7 +62,8 @@ public sealed class FakeProcessHandle : IProcessHandle
 
     /// <summary>Gets the signals sent so far.</summary>
     public List<ProcessSignal> SignalsSent { get; } = new();
-
+    /// <inheritdoc/>
+    public ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<ProcessTreeNode?>(null);
     /// <summary>Optional handler invoked when a signal arrives — useful to model timeout behavior.</summary>
     public Action<ProcessSignal>? OnSignal { get; set; }
 

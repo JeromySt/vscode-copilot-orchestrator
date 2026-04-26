@@ -35,4 +35,13 @@ public interface IProcessHandle : IAsyncDisposable
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A <see cref="ValueTask"/> that completes when the signal has been delivered.</returns>
     ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the full process tree rooted at this handle's process.
+    /// Returns <see langword="null"/> if the process has exited. Lazy — first call activates monitoring.
+    /// Results are cached for ~1 second to avoid excessive OS queries.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The process tree, or <see langword="null"/> if the process has exited.</returns>
+    ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct);
 }

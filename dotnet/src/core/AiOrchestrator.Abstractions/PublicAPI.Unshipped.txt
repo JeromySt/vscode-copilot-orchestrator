@@ -1,1 +1,24 @@
 #nullable enable
+AiOrchestrator.Abstractions.Process.IProcessHandle.GetProcessTreeAsync(System.Threading.CancellationToken ct) -> System.Threading.Tasks.ValueTask<AiOrchestrator.Abstractions.Process.ProcessTreeNode?>
+AiOrchestrator.Abstractions.Process.ProcessStats
+AiOrchestrator.Abstractions.Process.ProcessStats.CommandLine.get -> string?
+AiOrchestrator.Abstractions.Process.ProcessStats.CommandLine.init -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.CpuPercent.get -> double
+AiOrchestrator.Abstractions.Process.ProcessStats.CpuPercent.init -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.MemoryBytes.get -> long
+AiOrchestrator.Abstractions.Process.ProcessStats.MemoryBytes.init -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.Name.get -> string!
+AiOrchestrator.Abstractions.Process.ProcessStats.Name.init -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.ParentPid.get -> int
+AiOrchestrator.Abstractions.Process.ProcessStats.ParentPid.init -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.Pid.get -> int
+AiOrchestrator.Abstractions.Process.ProcessStats.Pid.init -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.ProcessStats() -> void
+AiOrchestrator.Abstractions.Process.ProcessStats.ThreadCount.get -> int
+AiOrchestrator.Abstractions.Process.ProcessStats.ThreadCount.init -> void
+AiOrchestrator.Abstractions.Process.ProcessTreeNode
+AiOrchestrator.Abstractions.Process.ProcessTreeNode.Children.get -> System.Collections.Generic.IReadOnlyList<AiOrchestrator.Abstractions.Process.ProcessTreeNode!>!
+AiOrchestrator.Abstractions.Process.ProcessTreeNode.Children.init -> void
+AiOrchestrator.Abstractions.Process.ProcessTreeNode.ProcessTreeNode() -> void
+AiOrchestrator.Abstractions.Process.ProcessTreeNode.Stats.get -> AiOrchestrator.Abstractions.Process.ProcessStats!
+AiOrchestrator.Abstractions.Process.ProcessTreeNode.Stats.init -> void

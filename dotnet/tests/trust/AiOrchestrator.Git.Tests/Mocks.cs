@@ -112,6 +112,8 @@ internal sealed class FakeProcessHandle : IProcessHandle
         return this.ExitCodeValue;
     }
 
+    public ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<ProcessTreeNode?>(null);
+
     public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct) => ValueTask.CompletedTask;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -188,6 +190,8 @@ internal sealed class RealProcessHandle : IProcessHandle
         await Task.WhenAll(this.outPump, this.errPump).ConfigureAwait(false);
         return this.process.ExitCode;
     }
+
+    public ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<ProcessTreeNode?>(null);
 
     public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct)
     {

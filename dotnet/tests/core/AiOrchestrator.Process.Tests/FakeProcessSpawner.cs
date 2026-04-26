@@ -103,6 +103,9 @@ public sealed class FakeProcessHandle : IProcessHandle
         => ct.CanBeCanceled ? _exitTcs.Task.WaitAsync(ct) : _exitTcs.Task;
 
     /// <inheritdoc/>
+    public ValueTask<ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<ProcessTreeNode?>(null);
+
+    /// <inheritdoc/>
     public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

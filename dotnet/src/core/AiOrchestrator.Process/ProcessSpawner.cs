@@ -65,6 +65,32 @@ public sealed class ProcessSpawner : IProcessSpawner
         }
     }
 
+    /// <summary>
+    /// Applies resource limits and returns a retained Job Object handle (Windows) for process tree queries.
+    /// On Linux, limits are applied via cgroups; the cgroup path is deterministic from the PID.
+    /// On Windows, the returned handle must be passed to <see cref="ProcessHandle.SetJobObjectHandle"/>.
+    /// </summary>
+    /// <param name="pid">The process to limit.</param>
+    /// <param name="limits">The limits to apply.</param>
+    /// <param name="fs">Filesystem abstraction for cgroup I/O.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The retained Job Object handle on Windows, or <see langword="null"/> on other platforms.</returns>
+    public static async ValueTask<Microsoft.Win32.SafeHandles.SafeFileHandle?> ApplyLimitsAndRetainHandleAsync(
+        int pid, ResourceLimits limits, IFileSystem fs, CancellationToken ct)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            await RLimitsLinux.ApplyAsync(pid, limits, fs, ct).ConfigureAwait(false);
+            return null;
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return JobObjectsWindows.ApplyAndRetainHandle(pid, limits);
+        }
+
+        return null;
+    }
+
     /// <inheritdoc/>
     /// <remarks>
     /// INV-1: The executable is always passed as an argv vector; <c>UseShellExecute</c> is

@@ -232,6 +232,8 @@ public sealed class ScriptedProcessHandle : IProcessHandle
         return ct.CanBeCanceled ? this.exit.Task.WaitAsync(ct) : this.exit.Task;
     }
 
+    public ValueTask<AiOrchestrator.Abstractions.Process.ProcessTreeNode?> GetProcessTreeAsync(CancellationToken ct) => ValueTask.FromResult<AiOrchestrator.Abstractions.Process.ProcessTreeNode?>(null);
+
     public ValueTask SignalAsync(ProcessSignal signal, CancellationToken ct)
     {
         _ = this.exit.TrySetResult(-1);
