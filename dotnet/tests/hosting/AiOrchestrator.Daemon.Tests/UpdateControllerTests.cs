@@ -281,7 +281,7 @@ public sealed class UpdateControllerTests : IDisposable
         optsMon = new StaticOptionsMonitor<DaemonOptions>(opts);
 
         var fetcher = new ReleaseManifestFetcher(factory, NullLogger<ReleaseManifestFetcher>.Instance);
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
         var health = new HealthCheck(spawner, NullLogger<HealthCheck>.Instance);
         var ctl = new UpdateController(factory, fs, clock, audit, bus, optsMon, NullLogger<UpdateController>.Instance, fetcher, swap, health);
         return (ctl, audit, bus, http);

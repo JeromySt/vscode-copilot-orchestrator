@@ -33,6 +33,11 @@ import * as Tokens from './core/tokens';
 import type { ServiceContainer } from './core/container';
 import type { IConfigProvider } from './interfaces';
 import type { IPulseEmitter } from './interfaces/IPulseEmitter';
+import type { IOrchestrationEngine } from './interfaces/IOrchestrationEngine';
+import type { IDotNetDaemonManager } from './interfaces/IDotNetDaemonManager';
+import { TsOrchestrationEngine } from './core/tsEngine';
+import { DotNetOrchestrationEngine } from './core/dotnetEngine';
+import { DotNetDaemonManager } from './core/dotnetDaemonManager';
 
 // ============================================================================
 // MODULE STATE
@@ -61,6 +66,12 @@ let gitignoreDebouncer: import('./interfaces/IGitignoreDebouncer').IGitignoreDeb
 
 /** Isolated Repo Manager - retained for cleanup */
 let isolatedRepoManager: import('./interfaces/IIsolatedRepoManager').IIsolatedRepoManager | undefined;
+
+/** Orchestration Engine - retained for shutdown */
+let engine: IOrchestrationEngine | undefined;
+
+/** .NET Daemon Manager - retained for cleanup (only when dotnet engine active) */
+let daemonManager: IDotNetDaemonManager | undefined;
 
 /** Process event handlers - retained for cleanup */
 let exitHandler: (() => void) | undefined;
@@ -105,6 +116,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git, debouncer);
   processMonitor = pm;
   planRunner = runner;
+
+  // ── Engine Selection ─────────────────────────────────────────────────
+  const useDotNet = configProvider.getConfig<boolean>('copilotOrchestrator', 'experimental.useDotNetEngine', false);
+
+  if (useDotNet) {
+    extLog.info('Using .NET orchestration engine (experimental)');
+    const workspaceId = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      ? Buffer.from(vscode.workspace.workspaceFolders[0].uri.fsPath).toString('base64url').slice(0, 16)
+      : 'default';
+    daemonManager = new DotNetDaemonManager(context.extensionPath, workspaceId);
+    engine = new DotNetOrchestrationEngine(daemonManager);
+    context.subscriptions.push(daemonManager);
+  } else {
+    engine = new TsOrchestrationEngine(runner);
+  }
+
+  container.registerSingleton<IOrchestrationEngine>(Tokens.IOrchestrationEngine, () => engine!);
+  await engine.initialize();
 
   // ── Power Manager ──────────────────────────────────────────────────────
   const spawner = container.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
@@ -368,12 +397,20 @@ export function deactivate(): void {
   // Release all wake locks
   powerMgr?.releaseAll();
   
-  // Persist state synchronously before shutdown
+  // Shut down engine and persist state synchronously before shutdown
+  try {
+    engine?.persistSync();
+  } catch (e) {
+    console.error('Failed to persist engine state on deactivate:', e);
+  }
   try {
     planRunner?.persistSync();
   } catch (e) {
     console.error('Failed to persist state on deactivate:', e);
   }
+  void engine?.shutdown().catch((e: unknown) => {
+    console.error('Failed to shutdown engine:', e);
+  });
   
   // Shutdown global capacity manager
   void globalCapacity?.shutdown().catch((e: unknown) => {
@@ -404,4 +441,6 @@ export function deactivate(): void {
   planRunner = undefined;
   powerMgr = undefined;
   gitignoreDebouncer = undefined;
+  engine = undefined;
+  daemonManager = undefined;
 }

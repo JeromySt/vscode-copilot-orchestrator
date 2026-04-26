@@ -139,6 +139,7 @@ public sealed class KeyCeremonyProgram
     }
 
     /// <summary>Minimal IFileSystem impl backed by System.IO for the offline binary.</summary>
+#pragma warning disable OE0004, OE0011 // This class IS the IFileSystem boundary implementation
     private sealed class MinimalFileSystem : IFileSystem
     {
         public ValueTask<bool> ExistsAsync(AbsolutePath path, CancellationToken ct)
@@ -243,4 +244,5 @@ public sealed class KeyCeremonyProgram
         public ValueTask<Stream> OpenAppendAsync(AbsolutePath path, CancellationToken ct)
             => ValueTask.FromResult<Stream>(new FileStream(path.Value, FileMode.Append, FileAccess.Write));
     }
+#pragma warning restore OE0004, OE0011
 }

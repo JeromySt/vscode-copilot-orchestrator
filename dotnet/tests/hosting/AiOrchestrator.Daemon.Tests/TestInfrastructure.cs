@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -152,9 +153,10 @@ public sealed class FakeHttpClientFactory : IHttpClientFactory
 public sealed class InMemoryFileSystem : IFileSystem
 {
     public ConcurrentDictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> Directories { get; } = new(StringComparer.Ordinal);
 
     public ValueTask<bool> ExistsAsync(AbsolutePath path, CancellationToken ct) =>
-        ValueTask.FromResult(this.Files.ContainsKey(path.Value));
+        ValueTask.FromResult(this.Files.ContainsKey(path.Value) || this.Directories.Contains(path.Value));
 
     public ValueTask<string> ReadAllTextAsync(AbsolutePath path, CancellationToken ct)
     {
@@ -184,12 +186,37 @@ public sealed class InMemoryFileSystem : IFileSystem
 
     public ValueTask MoveAtomicAsync(AbsolutePath source, AbsolutePath destination, CancellationToken ct)
     {
+        // File move
         if (this.Files.TryRemove(source.Value, out var b))
         {
             this.Files[destination.Value] = b;
+            return ValueTask.CompletedTask;
         }
 
-        return ValueTask.CompletedTask;
+        // Directory move — relocate the directory and all children
+        if (this.Directories.Remove(source.Value))
+        {
+            this.Directories.Add(destination.Value);
+            var srcPrefix = source.Value.TrimEnd('/', '\\') + System.IO.Path.DirectorySeparatorChar;
+            var dstPrefix = destination.Value.TrimEnd('/', '\\') + System.IO.Path.DirectorySeparatorChar;
+            foreach (var key in this.Files.Keys.Where(k => k.StartsWith(srcPrefix, StringComparison.Ordinal)).ToList())
+            {
+                if (this.Files.TryRemove(key, out var val))
+                {
+                    this.Files[dstPrefix + key[srcPrefix.Length..]] = val;
+                }
+            }
+
+            foreach (var dir in this.Directories.Where(d => d.StartsWith(srcPrefix, StringComparison.Ordinal)).ToList())
+            {
+                this.Directories.Remove(dir);
+                this.Directories.Add(dstPrefix + dir[srcPrefix.Length..]);
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        throw new DirectoryNotFoundException($"Source not found: {source.Value}");
     }
 
     public ValueTask DeleteAsync(AbsolutePath path, CancellationToken ct)
@@ -205,13 +232,33 @@ public sealed class InMemoryFileSystem : IFileSystem
         ValueTask.FromResult(this.Files.ContainsKey(path.Value));
 
     public ValueTask<bool> DirectoryExistsAsync(AbsolutePath path, CancellationToken ct) =>
-        ValueTask.FromResult(false);
+        ValueTask.FromResult(this.Directories.Contains(path.Value));
 
-    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct) =>
-        ValueTask.CompletedTask;
+    public ValueTask CreateDirectoryAsync(AbsolutePath path, CancellationToken ct)
+    {
+        this.Directories.Add(path.Value);
+        return ValueTask.CompletedTask;
+    }
 
-    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct) =>
-        ValueTask.CompletedTask;
+    public ValueTask DeleteDirectoryAsync(AbsolutePath path, bool recursive, CancellationToken ct)
+    {
+        this.Directories.Remove(path.Value);
+        if (recursive)
+        {
+            var prefix = path.Value.TrimEnd('/', '\\') + System.IO.Path.DirectorySeparatorChar;
+            foreach (var key in this.Files.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+            {
+                this.Files.TryRemove(key, out _);
+            }
+
+            foreach (var dir in this.Directories.Where(d => d.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+            {
+                this.Directories.Remove(dir);
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
 
     public ValueTask<byte[]> ReadAllBytesAsync(AbsolutePath path, CancellationToken ct)
     {

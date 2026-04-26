@@ -37,7 +37,7 @@ internal sealed partial class PidFileWriter
         var dir = Path.GetDirectoryName(path.Value);
         if (!string.IsNullOrEmpty(dir))
         {
-            Directory.CreateDirectory(dir);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(dir), ct).ConfigureAwait(false);
         }
 
         var tmpName = path.Value + ".tmp-" + this.clock.MonotonicMilliseconds.ToString(CultureInfo.InvariantCulture);

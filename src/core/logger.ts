@@ -47,7 +47,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 /**
  * Components that can have logging enabled
  */
-export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'plan-archiver' | 'job-executor' | 'init' | 'global-capacity' | 'gitignore-debouncer' | 'cli-log-parser' | 'context-pressure' | 'checkpoint-manager' | 'job-splitter' | 'process-output-bus';
+export type LogComponent = 'mcp' | 'http' | 'jobs' | 'plans' | 'git' | 'ui' | 'extension' | 'scheduler' | 'plan' | 'plan-runner' | 'plan-state' | 'plan-persistence' | 'plan-archiver' | 'job-executor' | 'init' | 'global-capacity' | 'gitignore-debouncer' | 'cli-log-parser' | 'context-pressure' | 'checkpoint-manager' | 'job-splitter' | 'process-output-bus' | 'dotnet-engine' | 'dotnet-daemon' | 'ts-engine';
 
 /**
  * Configuration keys for logging settings
@@ -81,6 +81,9 @@ interface DebugConfig {
   'checkpoint-manager': boolean;
   'job-splitter': boolean;
   'process-output-bus': boolean;
+  'dotnet-engine': boolean;
+  'dotnet-daemon': boolean;
+  'ts-engine': boolean;
 }
 
 /**
@@ -115,7 +118,10 @@ export class Logger {
     'context-pressure': false,
     'checkpoint-manager': false,
     'job-splitter': false,
-    'process-output-bus': false
+    'process-output-bus': false,
+    'dotnet-engine': false,
+    'dotnet-daemon': false,
+    'ts-engine': false
   };
   private configListener: { dispose: () => void } | undefined;
   private configProvider?: IConfigProvider;
@@ -220,6 +226,9 @@ export class Logger {
         'checkpoint-manager': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'checkpoint-manager', false),
         'job-splitter': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'job-splitter', false),
         'process-output-bus': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'process-output-bus', false),
+        'dotnet-engine': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'dotnet-engine', false),
+        'dotnet-daemon': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'dotnet-daemon', false),
+        'ts-engine': this.configProvider.getConfig('copilotOrchestrator.logging.debug', 'ts-engine', false),
       };
     } else if (vscode) {
       // Use VS Code directly (backward compatibility)
@@ -249,6 +258,9 @@ export class Logger {
         'checkpoint-manager': vscodeConfig.get('debug.checkpoint-manager', false),
         'job-splitter': vscodeConfig.get('debug.job-splitter', false),
         'process-output-bus': vscodeConfig.get('debug.process-output-bus', false),
+        'dotnet-engine': vscodeConfig.get('debug.dotnet-engine', false),
+        'dotnet-daemon': vscodeConfig.get('debug.dotnet-daemon', false),
+        'ts-engine': vscodeConfig.get('debug.ts-engine', false),
       };
     } else {
       // Not in VS Code and no provider, keep default config (all false)

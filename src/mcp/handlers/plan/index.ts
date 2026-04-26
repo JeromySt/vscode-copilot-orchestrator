@@ -49,3 +49,6 @@ export * from './prLifecycleHandlers';
 
 // Integration test handler
 export * from './runIntegrationTestHandler';
+
+// Log handler
+export * from './logHandler';

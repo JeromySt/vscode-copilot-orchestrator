@@ -6,6 +6,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Time;
 using AiOrchestrator.Models.Paths;
 using Microsoft.Extensions.Logging;
@@ -15,60 +16,64 @@ namespace AiOrchestrator.Daemon.Update;
 /// <summary>Atomically swaps a staged install directory into the live install root, with rollback support.</summary>
 internal sealed class StagedSwap
 {
+    private readonly IFileSystem fs;
     private readonly IClock clock;
     private readonly ILogger<StagedSwap> logger;
 
-    public StagedSwap(IClock clock, ILogger<StagedSwap> logger)
+    public StagedSwap(IFileSystem fs, IClock clock, ILogger<StagedSwap> logger)
     {
+        ArgumentNullException.ThrowIfNull(fs);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(logger);
+        this.fs = fs;
         this.clock = clock;
         this.logger = logger;
     }
 
-    public ValueTask<AbsolutePath> SwapAsync(AbsolutePath installRoot, AbsolutePath stagingRoot, CancellationToken ct)
+    public async ValueTask<AbsolutePath> SwapAsync(AbsolutePath installRoot, AbsolutePath stagingRoot, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var ts = this.clock.UtcNow.ToUnixTimeMilliseconds();
         var backup = new AbsolutePath(installRoot.Value + ".bak-" + ts.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-        if (Directory.Exists(installRoot.Value))
+        if (await this.fs.DirectoryExistsAsync(installRoot, ct).ConfigureAwait(false))
         {
             this.logger.LogInformation("Backing up {Install} -> {Backup}", installRoot.Value, backup.Value);
-            Directory.Move(installRoot.Value, backup.Value);
+            await this.fs.MoveAtomicAsync(installRoot, backup, ct).ConfigureAwait(false);
         }
 
         try
         {
             this.logger.LogInformation("Promoting {Staging} -> {Install}", stagingRoot.Value, installRoot.Value);
-            Directory.Move(stagingRoot.Value, installRoot.Value);
+            await this.fs.MoveAtomicAsync(stagingRoot, installRoot, ct).ConfigureAwait(false);
         }
         catch
         {
-            if (Directory.Exists(backup.Value) && !Directory.Exists(installRoot.Value))
+            if (await this.fs.DirectoryExistsAsync(backup, ct).ConfigureAwait(false) &&
+                !await this.fs.DirectoryExistsAsync(installRoot, ct).ConfigureAwait(false))
             {
-                Directory.Move(backup.Value, installRoot.Value);
+                await this.fs.MoveAtomicAsync(backup, installRoot, ct).ConfigureAwait(false);
             }
 
             throw;
         }
 
-        return ValueTask.FromResult(backup);
+        return backup;
     }
 
-    public ValueTask RollbackAsync(AbsolutePath installRoot, AbsolutePath previousBackupRoot, CancellationToken ct)
+    public async ValueTask RollbackAsync(AbsolutePath installRoot, AbsolutePath previousBackupRoot, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         try
         {
-            if (Directory.Exists(installRoot.Value))
+            if (await this.fs.DirectoryExistsAsync(installRoot, ct).ConfigureAwait(false))
             {
-                Directory.Delete(installRoot.Value, recursive: true);
+                await this.fs.DeleteDirectoryAsync(installRoot, recursive: true, ct).ConfigureAwait(false);
             }
 
-            if (Directory.Exists(previousBackupRoot.Value))
+            if (await this.fs.DirectoryExistsAsync(previousBackupRoot, ct).ConfigureAwait(false))
             {
-                Directory.Move(previousBackupRoot.Value, installRoot.Value);
+                await this.fs.MoveAtomicAsync(previousBackupRoot, installRoot, ct).ConfigureAwait(false);
             }
 
             this.logger.LogWarning("Rolled back to {Backup}", previousBackupRoot.Value);
@@ -78,7 +83,5 @@ internal sealed class StagedSwap
             this.logger.LogError(ex, "Rollback failed");
             throw;
         }
-
-        return ValueTask.CompletedTask;
     }
 }

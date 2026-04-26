@@ -11,7 +11,7 @@
 // INV-7: cancellation tokens propagate from VS Code into .NET.
 // INV-8: errors preserve the .NET exception type name on `code`.
 
-import type { AioOrchestrator } from '../../bindings/node/src/index';
+import type { AioOrchestrator } from '../types/bindings';
 
 export interface TransportEvent {
     readonly kind: string;

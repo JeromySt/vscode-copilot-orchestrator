@@ -46,3 +46,5 @@ export * from './IProcessOutputBus';
 export * from './IManagedProcess';
 export * from './IManagedProcessFactory';
 export * from './IOutputHandlerRegistry';
+export * from './IOrchestrationEngine';
+export * from './IDotNetDaemonManager';

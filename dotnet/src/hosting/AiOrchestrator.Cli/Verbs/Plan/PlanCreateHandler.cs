@@ -58,7 +58,7 @@ internal sealed class PlanCreateHandler : VerbBase
         }
 
         string? store = result.GetValue(this.storeOption);
-        string root = string.IsNullOrEmpty(store) ? Directory.GetCurrentDirectory() : Path.GetFullPath(store);
+        string root = string.IsNullOrEmpty(store) ? Environment.CurrentDirectory : Path.GetFullPath(store);
         if (!this.ValidateOptionalPath(store, new AbsolutePath(root)))
         {
             return CliExitCodes.PermissionDenied;

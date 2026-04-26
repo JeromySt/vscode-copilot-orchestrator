@@ -48,6 +48,9 @@ yarn-error.log*
 # .NET build artifacts
 **/bin/
 **/obj/
+
+# .NET self-contained publish output
+dotnet-bin/
 *.csproj.user
 *.suo
 .vs/

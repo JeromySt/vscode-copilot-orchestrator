@@ -8,11 +8,13 @@ export { getPlanToolDefinitions, PRODUCER_ID_PATTERN } from './planTools';
 export { getJobToolDefinitions } from './jobTools';
 export { getReleaseToolDefinitions } from './releaseTools';
 export { getTestToolDefinitions } from './testTools';
+export { getLogToolDefinitions } from './logTools';
 
 import { McpTool } from '../types';
 import { getPlanToolDefinitions } from './planTools';
 import { getJobToolDefinitions } from './jobTools';
 import { getReleaseToolDefinitions } from './releaseTools';
+import { getLogToolDefinitions } from './logTools';
 
 /**
  * Get all MCP tool definitions across all tool modules.
@@ -26,5 +28,6 @@ export async function getAllToolDefinitions(): Promise<McpTool[]> {
     ...(await getPlanToolDefinitions()),
     ...(await getJobToolDefinitions()),
     ...(await getReleaseToolDefinitions()),
+    ...getLogToolDefinitions(),
   ];
 }

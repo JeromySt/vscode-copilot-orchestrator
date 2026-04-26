@@ -20,6 +20,7 @@ import { getJobToolDefinitions } from './tools/jobTools';
 import { getReleaseToolDefinitions } from './tools/releaseTools';
 import { getTestToolDefinitions } from './tools/testTools';
 import { getPRLifecycleToolDefinitions } from './tools/prLifecycleTools';
+import { getLogToolDefinitions } from './tools/logTools';
 import { validateInput, hasSchema, validatePostchecksPresence } from './validation';
 import { BUILD_COMMIT, BUILD_TIMESTAMP, BUILD_VERSION } from '../core/buildInfo';
 import {
@@ -70,6 +71,7 @@ import {
   handleAbandonPR,
   handleRemovePR,
   handleRunIntegrationTest,
+  handleGetOrchestratorLogs,
 } from './handlers';
 
 /** MCP component logger */
@@ -254,6 +256,7 @@ export class McpHandler implements IMcpRequestRouter {
       ...(this._enableReleaseManagement ? await getReleaseToolDefinitions() : []),
       ...(this._enableReleaseManagement ? await getPRLifecycleToolDefinitions() : []),
       ...getTestToolDefinitions(),
+      ...getLogToolDefinitions(),
     ];
     log.info('Tools list requested', { toolCount: tools.length });
     log.debug('Tools list - tool names', { tools: tools.map(t => t.name) });
@@ -493,6 +496,10 @@ export class McpHandler implements IMcpRequestRouter {
 
       case 'run_copilot_integration_test':
         result = await handleRunIntegrationTest(args || {}, this.context);
+        break;
+
+      case 'get_orchestrator_logs':
+        result = await handleGetOrchestratorLogs(args || {}, this.context);
         break;
         
       default:

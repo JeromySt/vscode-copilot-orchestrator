@@ -256,3 +256,15 @@ export const IOutputHandlerRegistry = Symbol('IOutputHandlerRegistry');
  * Provides factory for wrapping spawned processes with output bus + handlers.
  */
 export const IManagedProcessFactory = Symbol('IManagedProcessFactory');
+
+/**
+ * Token for IOrchestrationEngine service.
+ * Provides the engine abstraction for plan orchestration (TS or .NET).
+ */
+export const IOrchestrationEngine = Symbol('IOrchestrationEngine');
+
+/**
+ * Token for IDotNetDaemonManager service.
+ * Provides .NET daemon process lifecycle management.
+ */
+export const IDotNetDaemonManager = Symbol('IDotNetDaemonManager');

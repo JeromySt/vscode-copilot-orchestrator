@@ -98,7 +98,8 @@ internal sealed class CeremonyOrchestrator
         }
 
         var transcriptPath = new AbsolutePath(request.CeremonyTranscriptPath);
-        var transcript = new CeremonyTranscriptWriter(transcriptPath.Value, this.clock);
+        var transcript = new CeremonyTranscriptWriter(transcriptPath.Value, this.fs, this.clock);
+        await transcript.EnsureDirectoryAsync(ct).ConfigureAwait(false);
 
         // INV-4: load + parse the unsigned manifest.
         var unsignedJson = await this.fs.ReadAllTextAsync(request.UnsignedManifestPath, ct).ConfigureAwait(false);
@@ -125,7 +126,7 @@ internal sealed class CeremonyOrchestrator
             ct.ThrowIfCancellationRequested();
             this.logger.LogInformation("Connecting to HSM for operator {Operator}", op.Value);
             var device = await this.hsm.ConnectAsync(op, ct).ConfigureAwait(false);
-            transcript.Append("connect", op, device.DeviceSerial, string.Empty);
+            await transcript.AppendAsync("connect", op, device.DeviceSerial, string.Empty, ct).ConfigureAwait(false);
 
             // INV-2: refuse a second sign on the same operator within one ceremony.
             if (!signedOnce.Add(op.Value))
@@ -135,7 +136,7 @@ internal sealed class CeremonyOrchestrator
             }
 
             var sig = await this.hsm.SignAsync(op, payloadHashBytes, ct).ConfigureAwait(false);
-            transcript.Append("sign", op, device.DeviceSerial, payloadHashHex);
+            await transcript.AppendAsync("sign", op, device.DeviceSerial, payloadHashHex, ct).ConfigureAwait(false);
 
             signatures.Add(new HsmSignature
             {
@@ -145,7 +146,7 @@ internal sealed class CeremonyOrchestrator
             actualSigners.Add(op);
 
             await this.hsm.DisconnectAsync(op, ct).ConfigureAwait(false);
-            transcript.Append("disconnect", op, device.DeviceSerial, string.Empty);
+            await transcript.AppendAsync("disconnect", op, device.DeviceSerial, string.Empty, ct).ConfigureAwait(false);
         }
 
         // INV-5: optional transparency log submission.

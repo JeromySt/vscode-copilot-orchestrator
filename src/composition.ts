@@ -235,6 +235,9 @@ export function createContainer(context: vscode.ExtensionContext): ServiceContai
   );
 
   // ─── MCP Manager ───────────────────────────────────────────────────
+  // Note: IOrchestrationEngine (Tokens.IOrchestrationEngine) is registered at
+  // activation time in extension.ts after PlanRunner is created, because the
+  // engine selection depends on runtime config and the PlanRunner instance.
   container.registerSingleton<import('./interfaces').IMcpManager>(
     Tokens.IMcpManager,
     () => new StdioMcpServerManager(context),

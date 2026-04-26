@@ -1245,6 +1245,20 @@ export const runIntegrationTestSchema = {
 } as const;
 
 /**
+ * Schema for get_orchestrator_logs input
+ */
+export const getOrchestratorLogsSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string', enum: ['daemon', 'repo'] },
+    repo_root: { type: 'string', minLength: 1, maxLength: 1000 },
+    tail_lines: { type: 'number', minimum: 0, maximum: 100000 },
+  },
+  required: ['kind'],
+  additionalProperties: false
+} as const;
+
+/**
  * All schemas indexed by tool name
  */
 export const schemas: Record<string, object> = {
@@ -1306,4 +1320,7 @@ export const schemas: Record<string, object> = {
 
   // Integration test tools
   run_copilot_integration_test: runIntegrationTestSchema,
+
+  // Log tools
+  get_orchestrator_logs: getOrchestratorLogsSchema,
 };

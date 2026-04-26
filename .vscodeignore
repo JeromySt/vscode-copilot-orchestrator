@@ -23,3 +23,6 @@ eslint.config.mjs
 .eslintrc.js
 .prettierrc
 *.vsix
+
+# Include .NET daemon binaries
+!dotnet-bin/**

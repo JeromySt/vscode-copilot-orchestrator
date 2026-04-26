@@ -53,7 +53,7 @@ internal sealed class PlanDiagnoseHandler : VerbBase
             return CliExitCodes.UsageError;
         }
 
-        string root = Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? Directory.GetCurrentDirectory();
+        string root = Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? Environment.CurrentDirectory;
         if (!this.ValidateOptionalPath(outPath, new AbsolutePath(root)))
         {
             return CliExitCodes.PermissionDenied;

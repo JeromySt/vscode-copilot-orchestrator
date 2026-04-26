@@ -43,7 +43,7 @@ internal sealed class PlanImportHandler : VerbBase
             return CliExitCodes.UsageError;
         }
 
-        string root = Path.GetDirectoryName(Path.GetFullPath(fromPath)) ?? Directory.GetCurrentDirectory();
+        string root = Path.GetDirectoryName(Path.GetFullPath(fromPath)) ?? Environment.CurrentDirectory;
         if (!this.ValidateOptionalPath(fromPath, new AbsolutePath(root)))
         {
             return CliExitCodes.PermissionDenied;

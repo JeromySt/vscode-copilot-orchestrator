@@ -4,6 +4,7 @@
 
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Daemon.Update;
@@ -13,143 +14,124 @@ using Xunit;
 
 namespace AiOrchestrator.Daemon.Tests;
 
-public sealed class StagedSwapTests : IDisposable
+public sealed class StagedSwapTests
 {
-    private readonly string tmpRoot;
-
-    public StagedSwapTests()
-    {
-        var repoRoot = FindRepoRoot();
-        this.tmpRoot = Path.Combine(repoRoot, ".orchestrator", "tmp", "swap-tests-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(this.tmpRoot);
-    }
-
-    public void Dispose()
-    {
-        try { Directory.Delete(this.tmpRoot, recursive: true); } catch { }
-    }
-
     [Fact]
     public async Task SwapAsync_MovesInstallToBackupAndStagingToInstall()
     {
+        var fs = new InMemoryFileSystem();
         var clock = new FakeClock();
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
 
-        var installRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "install"));
-        var stagingRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "staging"));
+        var installRoot = new AbsolutePath("/test/install");
+        var stagingRoot = new AbsolutePath("/test/staging");
 
-        Directory.CreateDirectory(installRoot.Value);
-        File.WriteAllText(Path.Combine(installRoot.Value, "v1.txt"), "v1");
+        fs.Directories.Add(installRoot.Value);
+        fs.Files[Path.Combine(installRoot.Value, "v1.txt")] = Encoding.UTF8.GetBytes("v1");
 
-        Directory.CreateDirectory(stagingRoot.Value);
-        File.WriteAllText(Path.Combine(stagingRoot.Value, "v2.txt"), "v2");
+        fs.Directories.Add(stagingRoot.Value);
+        fs.Files[Path.Combine(stagingRoot.Value, "v2.txt")] = Encoding.UTF8.GetBytes("v2");
 
         var backup = await swap.SwapAsync(installRoot, stagingRoot, CancellationToken.None);
 
-        Assert.True(Directory.Exists(backup.Value), "backup should exist");
-        Assert.True(File.Exists(Path.Combine(installRoot.Value, "v2.txt")), "staging promoted to install");
-        Assert.True(File.Exists(Path.Combine(backup.Value, "v1.txt")), "old install backed up");
-        Assert.False(Directory.Exists(stagingRoot.Value), "staging dir should be gone");
+        Assert.True(fs.Directories.Contains(backup.Value), "backup should exist");
+        Assert.True(fs.Files.ContainsKey(Path.Combine(installRoot.Value, "v2.txt")), "staging promoted to install");
+        Assert.True(fs.Files.ContainsKey(Path.Combine(backup.Value, "v1.txt")), "old install backed up");
+        Assert.False(fs.Directories.Contains(stagingRoot.Value), "staging dir should be gone");
     }
 
     [Fact]
     public async Task SwapAsync_NoExistingInstall_JustPromotes()
     {
+        var fs = new InMemoryFileSystem();
         var clock = new FakeClock();
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
 
-        var installRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "fresh-install"));
-        var stagingRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "staging2"));
+        var installRoot = new AbsolutePath("/test/fresh-install");
+        var stagingRoot = new AbsolutePath("/test/staging2");
 
-        Directory.CreateDirectory(stagingRoot.Value);
-        File.WriteAllText(Path.Combine(stagingRoot.Value, "app.bin"), "data");
+        fs.Directories.Add(stagingRoot.Value);
+        fs.Files[Path.Combine(stagingRoot.Value, "app.bin")] = Encoding.UTF8.GetBytes("data");
 
         var backup = await swap.SwapAsync(installRoot, stagingRoot, CancellationToken.None);
 
-        Assert.True(File.Exists(Path.Combine(installRoot.Value, "app.bin")));
+        Assert.True(fs.Files.ContainsKey(Path.Combine(installRoot.Value, "app.bin")));
     }
 
     [Fact]
     public async Task SwapAsync_CancellationRequested_Throws()
     {
+        var fs = new InMemoryFileSystem();
         var clock = new FakeClock();
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
             swap.SwapAsync(
-                new AbsolutePath(Path.Combine(this.tmpRoot, "a")),
-                new AbsolutePath(Path.Combine(this.tmpRoot, "b")),
+                new AbsolutePath("/test/a"),
+                new AbsolutePath("/test/b"),
                 cts.Token).AsTask());
     }
 
     [Fact]
     public async Task RollbackAsync_RestoresFromBackup()
     {
+        var fs = new InMemoryFileSystem();
         var clock = new FakeClock();
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
 
-        var installRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "rb-install"));
-        var backupRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "rb-backup"));
+        var installRoot = new AbsolutePath("/test/rb-install");
+        var backupRoot = new AbsolutePath("/test/rb-backup");
 
         // Simulate a bad install and a backup.
-        Directory.CreateDirectory(installRoot.Value);
-        File.WriteAllText(Path.Combine(installRoot.Value, "bad.txt"), "bad");
+        fs.Directories.Add(installRoot.Value);
+        fs.Files[Path.Combine(installRoot.Value, "bad.txt")] = Encoding.UTF8.GetBytes("bad");
 
-        Directory.CreateDirectory(backupRoot.Value);
-        File.WriteAllText(Path.Combine(backupRoot.Value, "good.txt"), "good");
+        fs.Directories.Add(backupRoot.Value);
+        fs.Files[Path.Combine(backupRoot.Value, "good.txt")] = Encoding.UTF8.GetBytes("good");
 
         await swap.RollbackAsync(installRoot, backupRoot, CancellationToken.None);
 
-        Assert.True(File.Exists(Path.Combine(installRoot.Value, "good.txt")));
-        Assert.False(Directory.Exists(backupRoot.Value));
+        Assert.True(fs.Files.ContainsKey(Path.Combine(installRoot.Value, "good.txt")));
+        Assert.False(fs.Directories.Contains(backupRoot.Value));
     }
 
     [Fact]
     public async Task RollbackAsync_CancellationRequested_Throws()
     {
+        var fs = new InMemoryFileSystem();
         var clock = new FakeClock();
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() =>
             swap.RollbackAsync(
-                new AbsolutePath(Path.Combine(this.tmpRoot, "a")),
-                new AbsolutePath(Path.Combine(this.tmpRoot, "b")),
+                new AbsolutePath("/test/a"),
+                new AbsolutePath("/test/b"),
                 cts.Token).AsTask());
     }
 
     [Fact]
     public async Task SwapAsync_StagingMoveFails_RollsBackInstall()
     {
+        var fs = new InMemoryFileSystem();
         var clock = new FakeClock();
-        var swap = new StagedSwap(clock, NullLogger<StagedSwap>.Instance);
+        var swap = new StagedSwap(fs, clock, NullLogger<StagedSwap>.Instance);
 
-        var installRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "swap-fail-install"));
-        var stagingRoot = new AbsolutePath(Path.Combine(this.tmpRoot, "nonexistent-staging"));
+        var installRoot = new AbsolutePath("/test/swap-fail-install");
+        var stagingRoot = new AbsolutePath("/test/nonexistent-staging");
 
-        Directory.CreateDirectory(installRoot.Value);
-        File.WriteAllText(Path.Combine(installRoot.Value, "marker.txt"), "original");
+        fs.Directories.Add(installRoot.Value);
+        fs.Files[Path.Combine(installRoot.Value, "marker.txt")] = Encoding.UTF8.GetBytes("original");
 
-        // Staging doesn't exist → Directory.Move will throw
+        // Staging doesn't exist → MoveAtomicAsync will throw DirectoryNotFoundException
         await Assert.ThrowsAsync<DirectoryNotFoundException>(() =>
             swap.SwapAsync(installRoot, stagingRoot, CancellationToken.None).AsTask());
 
         // The install root should be restored from backup.
-        Assert.True(File.Exists(Path.Combine(installRoot.Value, "marker.txt")),
+        Assert.True(fs.Files.ContainsKey(Path.Combine(installRoot.Value, "marker.txt")),
             "Rollback should restore install after staging move failure");
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "dotnet", "AiOrchestrator.slnx")))
-        {
-            dir = Path.GetDirectoryName(dir);
-        }
-
-        return dir ?? AppContext.BaseDirectory;
     }
 }

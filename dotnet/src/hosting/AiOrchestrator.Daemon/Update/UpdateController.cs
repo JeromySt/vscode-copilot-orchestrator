@@ -220,7 +220,7 @@ public sealed class UpdateController : BackgroundService
 
     private async ValueTask DownloadAndVerifyAsync(SignedReleaseManifest mfst, AbsolutePath stagingRoot, CancellationToken ct)
     {
-        Directory.CreateDirectory(stagingRoot.Value);
+        await this.fs.CreateDirectoryAsync(stagingRoot, ct).ConfigureAwait(false);
         using var client = this.http.CreateClient(nameof(UpdateController));
         foreach (var artifact in mfst.Artifacts)
         {
@@ -232,8 +232,8 @@ public sealed class UpdateController : BackgroundService
                 throw new IOException($"SHA-256 mismatch for {artifact.Filename}: expected {artifact.Sha256}, got {actualHex}");
             }
 
-            var dest = System.IO.Path.Combine(stagingRoot.Value, artifact.Filename);
-            await File.WriteAllBytesAsync(dest, bytes, ct).ConfigureAwait(false);
+            var dest = new AbsolutePath(System.IO.Path.Combine(stagingRoot.Value, artifact.Filename));
+            await this.fs.WriteAllBytesAsync(dest, bytes, ct).ConfigureAwait(false);
         }
     }
 
