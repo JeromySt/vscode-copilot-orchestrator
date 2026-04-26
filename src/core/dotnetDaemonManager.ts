@@ -4,11 +4,13 @@
  * Manages the AiOrchestrator .NET daemon child process. The daemon provides
  * the execution engine when experimental.useDotNetEngine is enabled.
  *
+ * Spawns `AiOrchestrator.Cli.exe daemon start --pipe-name <name> --repo-root <path>`
+ * and waits for the READY signal on stderr before resolving.
+ *
  * @module core/dotnetDaemonManager
  */
 
 import * as path from 'path';
-import * as net from 'net';
 import { ChildProcess, spawn } from 'child_process';
 import type { IDotNetDaemonManager, DaemonStatus } from '../interfaces/IDotNetDaemonManager';
 import { Logger } from './logger';
@@ -17,7 +19,7 @@ const log = Logger.for('dotnet-daemon');
 
 /** Max restart attempts before giving up. */
 const MAX_RESTARTS = 3;
-/** Timeout waiting for daemon pipe to become connectable. */
+/** Timeout waiting for daemon READY signal on stderr. */
 const READY_TIMEOUT_MS = 15_000;
 /** Cooldown between restart attempts. */
 const RESTART_DELAY_MS = 2_000;
@@ -34,6 +36,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
   constructor(
     private readonly extensionPath: string,
     private readonly workspaceId: string,
+    private readonly repoRoot: string,
     private readonly platform: NodeJS.Platform = process.platform,
   ) {
     this._pipeName = this.buildPipeName();
@@ -52,22 +55,10 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
       this.process = spawn(binaryPath, [
         'daemon', 'start',
         '--pipe-name', this._pipeName!,
+        '--repo-root', this.repoRoot,
       ], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          AIO_PIPE_NAME: this._pipeName,
-          AIO_WORKSPACE_ID: this.workspaceId,
-        },
-        detached: false,
-      });
-
-      this.process.stdout?.on('data', (data: Buffer) => {
-        log.debug(`[daemon stdout] ${data.toString().trim()}`);
-      });
-
-      this.process.stderr?.on('data', (data: Buffer) => {
-        log.warn(`[daemon stderr] ${data.toString().trim()}`);
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
       });
 
       this.process.on('exit', (code, signal) => {
@@ -83,7 +74,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
         }
       });
 
-      // Wait for pipe to become connectable
+      // Wait for READY signal on stderr
       await this.waitForReady();
       this._isRunning = true;
       this._startedAt = Date.now();
@@ -162,35 +153,29 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
     // Short deterministic name from workspace ID
     const hash = this.workspaceId.slice(0, 12);
     return this.platform === 'win32'
-      ? `\\\\.\\pipe\\aio-daemon-${hash}`
+      ? `aio-daemon-${hash}`
       : `/tmp/aio-daemon-${hash}.sock`;
   }
 
   private waitForReady(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const deadline = Date.now() + READY_TIMEOUT_MS;
+      const timer = setTimeout(() => {
+        reject(new Error(`Daemon did not signal READY within ${READY_TIMEOUT_MS}ms`));
+      }, READY_TIMEOUT_MS);
 
-      const tryConnect = () => {
-        if (Date.now() > deadline) {
-          reject(new Error(`Daemon did not become ready within ${READY_TIMEOUT_MS}ms`));
-          return;
-        }
-
-        const client = net.connect(this._pipeName!);
-
-        client.on('connect', () => {
-          client.destroy();
+      this.process!.stderr!.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        log.debug(`[daemon stderr] ${text.trim()}`);
+        if (text.includes('READY')) {
+          clearTimeout(timer);
           resolve();
-        });
+        }
+      });
 
-        client.on('error', () => {
-          client.destroy();
-          setTimeout(tryConnect, 200);
-        });
-      };
-
-      // Give the process a moment to start
-      setTimeout(tryConnect, 500);
+      this.process!.on('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`Daemon exited with code ${code} before signaling READY`));
+      });
     });
   }
 }

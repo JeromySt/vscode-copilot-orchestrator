@@ -25,7 +25,7 @@ public static partial class CompositionRoot
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(config);
 
-        _ = services.Configure<EventLogOptions>(config.GetSection("EventLog"));
+        // EventLogOptions is already bound in AddConfiguration — don't rebind.
         _ = services.AddSingleton<TieredEventLog>();
         _ = services.AddSingleton<IEventStore>(sp => sp.GetRequiredService<TieredEventLog>());
         _ = services.AddSingleton<IEventReader>(sp => sp.GetRequiredService<TieredEventLog>());

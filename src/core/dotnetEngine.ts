@@ -2,8 +2,9 @@
  * @fileoverview .NET Orchestration Engine
  *
  * Implements IOrchestrationEngine by communicating with the .NET AiOrchestrator
- * daemon via MCP protocol over named pipes. Plan operations are forwarded as
- * MCP tool calls; events are received via a streaming connection.
+ * daemon via MCP protocol over a named pipe. The engine connects to the daemon's
+ * named pipe and uses Content-Length framed JSON-RPC for communication, supporting
+ * concurrent requests via request ID multiplexing on a persistent connection.
  *
  * @module core/dotnetEngine
  */
@@ -14,7 +15,6 @@ import type {
   IOrchestrationEngine,
   EngineKind,
 } from '../interfaces/IOrchestrationEngine';
-import type { IDotNetDaemonManager } from '../interfaces/IDotNetDaemonManager';
 import type {
   PlanSpec,
   PlanInstance,
@@ -22,9 +22,9 @@ import type {
   NodeStatus,
   ExecutionPhase,
   AttemptRecord,
-  NodeExecutionState,
 } from '../plan/types';
 import type { RetryNodeOptions } from '../interfaces/IPlanRunner';
+import type { IDotNetDaemonManager } from '../interfaces/IDotNetDaemonManager';
 import { computePlanStatus } from '../plan/helpers';
 import { Logger } from './logger';
 
@@ -34,9 +34,9 @@ const log = Logger.for('dotnet-engine');
 let nextRequestId = 1;
 
 /**
- * MCP-based orchestration engine backed by the .NET daemon.
+ * MCP-based orchestration engine backed by the .NET CLI daemon.
  *
- * All plan operations are sent as MCP tool calls over a named pipe.
+ * All plan operations are sent as MCP tool calls over a persistent named pipe.
  * Plan state is queried via get_copilot_plan_status and similar tools.
  */
 export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestrationEngine {
@@ -45,13 +45,26 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
   /** Cached plan state from daemon queries. */
   private planCache = new Map<string, PlanInstance>();
 
-  constructor(private readonly daemonManager: IDotNetDaemonManager) {
+  /** Persistent named pipe connection. */
+  private connection: net.Socket | undefined;
+
+  /** Pending JSON-RPC requests awaiting responses. */
+  private pending = new Map<number, { resolve: (value: any) => void; reject: (reason: Error) => void }>();
+
+  /** Buffer for accumulating data for Content-Length framing. */
+  private buffer = '';
+
+  constructor(
+    private readonly daemonManager: IDotNetDaemonManager,
+  ) {
     super();
   }
 
   async initialize(): Promise<void> {
-    log.info('Initializing .NET engine — starting daemon');
+    log.info('Initializing .NET engine — starting daemon and connecting');
+
     await this.daemonManager.start();
+    await this.connect();
 
     // Send initialize handshake
     await this.callMcp('initialize', {
@@ -64,11 +77,91 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
 
   async shutdown(): Promise<void> {
     log.info('Shutting down .NET engine');
+
+    this.rejectAllPending(new Error('Engine shut down'));
+
+    if (this.connection) {
+      this.connection.destroy();
+      this.connection = undefined;
+    }
+
     await this.daemonManager.stop();
   }
 
   persistSync(): void {
     // .NET daemon persists its own state
+  }
+
+  // ── Connection ─────────────────────────────────────────────────────
+
+  private async connect(): Promise<void> {
+    const pipeName = this.daemonManager.getPipeName();
+    if (!pipeName) throw new Error('Daemon pipe name not available');
+
+    // On Windows: \\.\pipe\<name> → net.connect({path})
+    // On Unix: /tmp/<name>.sock → net.connect({path})
+    const pipePath = process.platform === 'win32'
+      ? `\\\\.\\pipe\\${pipeName}`
+      : pipeName;
+
+    return new Promise<void>((resolve, reject) => {
+      const socket = net.connect({ path: pipePath }, () => {
+        this.connection = socket;
+        log.info('Connected to daemon pipe', { pipePath });
+        resolve();
+      });
+
+      socket.on('data', (chunk: Buffer) => {
+        this.buffer += chunk.toString();
+        this.drainResponses();
+      });
+
+      socket.on('error', (err) => {
+        log.error('Pipe connection error', { error: err.message });
+        if (!this.connection) {
+          reject(new Error(`Failed to connect to daemon pipe: ${err.message}`));
+        } else {
+          this.rejectAllPending(new Error(`Pipe connection lost: ${err.message}`));
+          this.connection = undefined;
+        }
+      });
+
+      socket.on('close', () => {
+        log.info('Pipe connection closed');
+        this.rejectAllPending(new Error('Pipe connection closed'));
+        this.connection = undefined;
+      });
+    });
+  }
+
+  private drainResponses(): void {
+    while (true) {
+      const headerEnd = this.buffer.indexOf('\r\n\r\n');
+      if (headerEnd === -1) break;
+      const header = this.buffer.slice(0, headerEnd);
+      const match = header.match(/Content-Length:\s*(\d+)/i);
+      if (!match) break;
+      const len = parseInt(match[1], 10);
+      const bodyStart = headerEnd + 4;
+      if (this.buffer.length < bodyStart + len) break;
+      const body = this.buffer.slice(bodyStart, bodyStart + len);
+      this.buffer = this.buffer.slice(bodyStart + len);
+
+      try {
+        const response = JSON.parse(body);
+        const p = this.pending.get(response.id);
+        if (p) {
+          this.pending.delete(response.id);
+          if (response.error) {
+            p.reject(new Error(`MCP error ${response.error.code}: ${response.error.message}`));
+          } else {
+            p.resolve(response.result);
+          }
+        }
+      } catch (e) {
+        log.error('Failed to parse MCP response', { error: String(e) });
+      }
+    }
   }
 
   // ── Plan Creation ──────────────────────────────────────────────────
@@ -215,12 +308,16 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
   // ── MCP Communication ──────────────────────────────────────────────
 
   private async callTool(toolName: string, args: Record<string, unknown>): Promise<any> {
-    return this.callMcp('tools/call', { name: toolName, arguments: args });
+    const result = await this.callMcp('tools/call', { name: toolName, arguments: args });
+    // For tools/call, the result is in result.content[0].text
+    if (result?.content?.[0]?.text) {
+      try { return JSON.parse(result.content[0].text); } catch { return result; }
+    }
+    return result;
   }
 
-  private async callMcp(method: string, params: unknown): Promise<any> {
-    const pipeName = this.daemonManager.getPipeName();
-    if (!pipeName) throw new Error('Daemon not started');
+  private callMcp(method: string, params: unknown): Promise<any> {
+    if (!this.connection) throw new Error('Not connected to daemon');
 
     const id = nextRequestId++;
     const request = JSON.stringify({
@@ -229,55 +326,26 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
       method,
       params,
     });
+    const frame = `Content-Length: ${Buffer.byteLength(request)}\r\n\r\n${request}`;
 
     return new Promise((resolve, reject) => {
-      const client = net.connect(pipeName, () => {
-        const frame = `Content-Length: ${Buffer.byteLength(request)}\r\n\r\n${request}`;
-        client.write(frame);
-      });
-
-      let buffer = '';
-      client.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString();
-        // Parse Content-Length framing
-        const headerEnd = buffer.indexOf('\r\n\r\n');
-        if (headerEnd === -1) return;
-        const header = buffer.slice(0, headerEnd);
-        const match = header.match(/Content-Length:\s*(\d+)/i);
-        if (!match) return;
-        const contentLength = parseInt(match[1], 10);
-        const bodyStart = headerEnd + 4;
-        if (buffer.length < bodyStart + contentLength) return;
-        const body = buffer.slice(bodyStart, bodyStart + contentLength);
-        client.destroy();
-
-        try {
-          const response = JSON.parse(body);
-          if (response.error) {
-            reject(new Error(`MCP error ${response.error.code}: ${response.error.message}`));
-          } else {
-            // For tools/call, the result is in response.result.content[0].text
-            if (method === 'tools/call' && response.result?.content?.[0]?.text) {
-              try { resolve(JSON.parse(response.result.content[0].text)); } catch { resolve(response.result); }
-            } else {
-              resolve(response.result);
-            }
-          }
-        } catch (e) {
-          reject(new Error(`Failed to parse MCP response: ${e}`));
-        }
-      });
-
-      client.on('error', (err) => {
-        client.destroy();
-        reject(new Error(`MCP pipe connection failed: ${err.message}`));
-      });
+      this.pending.set(id, { resolve, reject });
+      this.connection!.write(frame);
 
       setTimeout(() => {
-        client.destroy();
-        reject(new Error('MCP call timed out'));
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error('MCP call timed out'));
+        }
       }, 30_000);
     });
+  }
+
+  private rejectAllPending(error: Error): void {
+    for (const p of this.pending.values()) {
+      p.reject(error);
+    }
+    this.pending.clear();
   }
 
   private parsePlanResult(result: any): PlanInstance {
