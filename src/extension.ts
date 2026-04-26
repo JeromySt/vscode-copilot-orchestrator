@@ -121,20 +121,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Engine Selection ─────────────────────────────────────────────────
   const useDotNet = configProvider.getConfig<boolean>('copilotOrchestrator', 'experimental.useDotNetEngine', false);
 
-  if (useDotNet) {
-    extLog.info('Using .NET orchestration engine (experimental)');
-    const workspaceId = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-      ? Buffer.from(vscode.workspace.workspaceFolders[0].uri.fsPath).toString('base64url').slice(0, 16)
-      : 'default';
-    daemonManager = new DotNetDaemonManager(context.extensionPath, workspaceId);
-    engine = new DotNetOrchestrationEngine(daemonManager);
-    context.subscriptions.push(daemonManager);
-  } else {
-    engine = new TsOrchestrationEngine(runner);
-  }
+  // The TS PlanRunner always handles UI, commands, and the sidebar.
+  // When useDotNetEngine is true, we swap the MCP server definition so
+  // VS Code spawns the .NET binary (AiOrchestrator.Cli.exe mcp serve)
+  // instead of the TS stdio bridge. VS Code manages the process lifecycle.
+  engine = new TsOrchestrationEngine(runner);
 
   container.registerSingleton<IOrchestrationEngine>(Tokens.IOrchestrationEngine, () => engine!);
   await engine.initialize();
+
+  if (useDotNet) {
+    extLog.info('Using .NET MCP server (experimental) — VS Code will spawn AiOrchestrator.Cli.exe on demand');
+  }
 
   // Sync MCP server definition to match the active engine
   setMcpEngineKind(useDotNet ? 'dotnet' : 'typescript');
