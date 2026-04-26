@@ -106,7 +106,7 @@ export function registerMcpDefinitionProvider(
         const platformDir = process.platform === 'win32' ? 'win-x64'
           : process.platform === 'darwin' ? 'osx-x64'
           : 'linux-x64';
-        const exe = process.platform === 'win32' ? 'aio.exe' : 'aio';
+        const exe = process.platform === 'win32' ? 'AiOrchestrator.Cli.exe' : 'AiOrchestrator.Cli';
         const binaryPath = path.join(extensionPath, 'dotnet-bin', platformDir, exe);
 
         server = new (vscode as any).McpStdioServerDefinition(

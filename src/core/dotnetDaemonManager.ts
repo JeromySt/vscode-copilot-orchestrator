@@ -154,7 +154,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
     const platformDir = this.platform === 'win32' ? 'win-x64'
       : this.platform === 'darwin' ? 'osx-x64'
       : 'linux-x64';
-    const exe = this.platform === 'win32' ? 'aio.exe' : 'aio';
+    const exe = this.platform === 'win32' ? 'AiOrchestrator.Cli.exe' : 'AiOrchestrator.Cli';
     return path.join(this.extensionPath, 'dotnet-bin', platformDir, exe);
   }
 

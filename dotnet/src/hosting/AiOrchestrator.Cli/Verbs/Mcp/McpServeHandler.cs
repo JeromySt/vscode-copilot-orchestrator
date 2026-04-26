@@ -110,12 +110,16 @@ internal sealed class McpServeHandler : VerbBase
     /// </summary>
     private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>
     {
+        /// <summary>Initializes a new instance of the <see cref="StaticOptionsMonitor{T}"/> class.</summary>
         public StaticOptionsMonitor(T value) => this.CurrentValue = value;
 
+        /// <inheritdoc/>
         public T CurrentValue { get; }
 
+        /// <inheritdoc/>
         public T Get(string? name) => this.CurrentValue;
 
+        /// <inheritdoc/>
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }
