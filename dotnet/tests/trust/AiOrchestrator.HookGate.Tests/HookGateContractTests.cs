@@ -1,4 +1,4 @@
-// <copyright file="HookGateContractTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="HookGateContractTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -76,7 +76,7 @@ public sealed class HookGateContractTests
             bus,
             opts,
             NullLogger<HookGateDaemon>.Instance,
-            audit);
+            audit, new PassthroughFileSystem());
         return (daemon, rpc, audit, bus, clock, nonces);
     }
 
@@ -93,7 +93,7 @@ public sealed class HookGateContractTests
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner { ExitCodeForNextSpawn = 0 };
-        var mgr = new LinuxRedirectionManager(sink, spawner, NullLogger<LinuxRedirectionManager>.Instance);
+        var mgr = new LinuxRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<LinuxRedirectionManager>.Instance);
         var wt = MakeWorktree();
         var target = new AbsolutePath(System.IO.Path.Combine(wt.Value, "dispatcher"));
         _ = System.IO.Directory.CreateDirectory(target.Value);
@@ -119,7 +119,7 @@ Assert.Contains("--bind", spawner.SpawnedSpecs[0].Arguments);
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner { ExitCodeForNextSpawn = 0 };
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
         var wt = MakeWorktree();
         var target = new AbsolutePath(System.IO.Path.Combine(wt.Value, "dispatcher"));
         _ = System.IO.Directory.CreateDirectory(target.Value);

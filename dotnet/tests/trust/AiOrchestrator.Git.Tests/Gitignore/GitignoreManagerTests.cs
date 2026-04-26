@@ -1,4 +1,4 @@
-// <copyright file="GitignoreManagerTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="GitignoreManagerTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -35,7 +35,7 @@ public sealed class GitignoreManagerTests : IDisposable
     [Fact]
     public async Task EnsureEntries_CreatesNewFile_WhenNoneExists()
     {
-        var result = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(this.tempDir);
+        var result = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(new PassthroughFileSystem(), this.tempDir);
 
         Assert.True(result);
 
@@ -53,7 +53,7 @@ public sealed class GitignoreManagerTests : IDisposable
         var gitignorePath = Path.Combine(this.tempDir, ".gitignore");
         await File.WriteAllTextAsync(gitignorePath, "node_modules/\n.aio/\n");
 
-        var result = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(this.tempDir);
+        var result = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(new PassthroughFileSystem(), this.tempDir);
 
         Assert.True(result);
 
@@ -62,7 +62,7 @@ public sealed class GitignoreManagerTests : IDisposable
         // Original content preserved
         Assert.Contains("node_modules/", content);
 
-        // .aio/ should NOT be duplicated — only the missing entries are added
+        // .aio/ should NOT be duplicated â€” only the missing entries are added
         Assert.Contains(".worktrees/", content);
         Assert.Contains(".orchestrator/", content);
         Assert.Contains(".copilot-cli/", content);
@@ -76,7 +76,7 @@ public sealed class GitignoreManagerTests : IDisposable
         var allEntries = string.Join('\n', GitignoreManager.OrchestratorEntries) + "\n";
         await File.WriteAllTextAsync(gitignorePath, allEntries);
 
-        var result = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(this.tempDir);
+        var result = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(new PassthroughFileSystem(), this.tempDir);
 
         Assert.False(result);
 
@@ -88,7 +88,7 @@ public sealed class GitignoreManagerTests : IDisposable
     [Fact]
     public async Task IsConfigured_ReturnsFalse_WhenFileDoesNotExist()
     {
-        var result = await GitignoreManager.IsConfiguredAsync(this.tempDir);
+        var result = await GitignoreManager.IsConfiguredAsync(new PassthroughFileSystem(), this.tempDir);
 
         Assert.False(result);
     }
@@ -96,9 +96,9 @@ public sealed class GitignoreManagerTests : IDisposable
     [Fact]
     public async Task IsConfigured_ReturnsTrue_WhenAllEntriesPresent()
     {
-        await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(this.tempDir);
+        await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(new PassthroughFileSystem(), this.tempDir);
 
-        var result = await GitignoreManager.IsConfiguredAsync(this.tempDir);
+        var result = await GitignoreManager.IsConfiguredAsync(new PassthroughFileSystem(), this.tempDir);
 
         Assert.True(result);
     }
@@ -114,7 +114,7 @@ public sealed class GitignoreManagerTests : IDisposable
             @@ -1,2 +1,7 @@
              node_modules/
             +
-            +# Copilot Orchestrator — managed entries (do not remove)
+            +# Copilot Orchestrator â€” managed entries (do not remove)
             +.aio/
             +.worktrees/
             +.orchestrator/
@@ -151,7 +151,7 @@ public sealed class GitignoreCommitterTests : IDisposable
     {
         this.repoPath = Path.Combine(Path.GetTempPath(), "aio-committer-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(this.repoPath);
-        this.committer = new GitignoreCommitter(new RealProcessSpawner());
+        this.committer = new GitignoreCommitter(new RealProcessSpawner(), new PassthroughFileSystem());
 
         // Initialize a real git repo
         RunGit(this.repoPath, "init -b main");
@@ -212,11 +212,11 @@ public sealed class GitignoreCommitterTests : IDisposable
     [Fact]
     public async Task EnsureAndCommitAsync_NoOp_WhenAlreadyCommitted()
     {
-        // First call — commits
+        // First call â€” commits
         var first = await this.committer.EnsureAndCommitAsync(this.repoPath);
         Assert.True(first);
 
-        // Second call — no-op
+        // Second call â€” no-op
         var second = await this.committer.EnsureAndCommitAsync(this.repoPath);
         Assert.False(second);
 

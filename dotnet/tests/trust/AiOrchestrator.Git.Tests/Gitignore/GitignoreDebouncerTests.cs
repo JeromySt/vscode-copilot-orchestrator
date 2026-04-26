@@ -1,4 +1,4 @@
-// <copyright file="GitignoreDebouncerTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="GitignoreDebouncerTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -47,7 +47,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task RequestEnsure_CommitsAfterDelay()
     {
-        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromMilliseconds(500));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, new PassthroughFileSystem(), delay: TimeSpan.FromMilliseconds(500));
 
         debouncer.RequestEnsure(this.repoRoot);
 
@@ -65,21 +65,21 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task RequestEnsure_ResetsTimer_OnRapidCalls()
     {
-        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromSeconds(1));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, new PassthroughFileSystem(), delay: TimeSpan.FromSeconds(1));
 
         // T=0: first request
         debouncer.RequestEnsure(this.repoRoot);
 
-        // T≈500ms: second request — should reset the timer
+        // Tâ‰ˆ500ms: second request â€” should reset the timer
         await Task.Delay(TimeSpan.FromMilliseconds(500));
         debouncer.RequestEnsure(this.repoRoot);
 
-        // T≈1.2s: NOT yet committed (timer was reset at T=500ms, fires at T≈1.5s)
+        // Tâ‰ˆ1.2s: NOT yet committed (timer was reset at T=500ms, fires at Tâ‰ˆ1.5s)
         await Task.Delay(TimeSpan.FromMilliseconds(700));
         var logEarly = await RunGitAsync(this.repoRoot, "log --oneline");
         Assert.DoesNotContain(GitignoreCommitter.CommitMessage, logEarly);
 
-        // T≈2.5s: IS committed
+        // Tâ‰ˆ2.5s: IS committed
         await Task.Delay(TimeSpan.FromMilliseconds(1300));
         var logLate = await RunGitAsync(this.repoRoot, "log --oneline");
         Assert.Contains(GitignoreCommitter.CommitMessage, logLate);
@@ -101,7 +101,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
         Assert.NotEmpty(statusBefore);
 
         // OnBranchSwitch should stash the change
-        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromMilliseconds(500));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, new PassthroughFileSystem(), delay: TimeSpan.FromMilliseconds(500));
         await debouncer.OnBranchSwitchAsync(this.repoRoot);
 
         // Working tree should be clean after stash
@@ -117,7 +117,7 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task EnsureNow_BypassesDebounce()
     {
-        await using var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromSeconds(60));
+        await using var debouncer = new GitignoreDebouncer(this.spawner, new PassthroughFileSystem(), delay: TimeSpan.FromSeconds(60));
 
         var committed = await debouncer.EnsureNowAsync(this.repoRoot);
 
@@ -129,10 +129,10 @@ public sealed class GitignoreDebouncerTests : IDisposable
     [Fact]
     public async Task Dispose_CancelsPending()
     {
-        var debouncer = new GitignoreDebouncer(this.spawner, delay: TimeSpan.FromSeconds(5));
+        var debouncer = new GitignoreDebouncer(this.spawner, new PassthroughFileSystem(), delay: TimeSpan.FromSeconds(5));
         debouncer.RequestEnsure(this.repoRoot);
 
-        // Dispose immediately — should cancel the pending write
+        // Dispose immediately â€” should cancel the pending write
         await debouncer.DisposeAsync();
 
         // Wait past what the delay would have been

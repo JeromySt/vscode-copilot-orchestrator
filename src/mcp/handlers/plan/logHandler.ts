@@ -53,14 +53,32 @@ export async function handleGetOrchestratorLogs(
   }
 }
 
-function getDaemonLogPath(): string {
+function getDaemonLogDir(): string {
   if (process.platform === 'win32') {
     return path.join(
       process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
-      'ai-orchestrator', 'logs', 'aio-daemon.log',
+      'ai-orchestrator', 'logs',
     );
   }
-  return path.join(os.homedir(), '.local', 'share', 'ai-orchestrator', 'logs', 'aio-daemon.log');
+  return path.join(os.homedir(), '.local', 'share', 'ai-orchestrator', 'logs');
+}
+
+/**
+ * Find the most recent aio-daemon-{pid}.log in the daemon log directory.
+ * Each daemon instance writes to its own PID-scoped file.
+ */
+function getDaemonLogPath(): string {
+  const logDir = getDaemonLogDir();
+  if (!fs.existsSync(logDir)) {
+    return path.join(logDir, 'aio-daemon.log'); // fallback for error message
+  }
+
+  const files = fs.readdirSync(logDir)
+    .filter(f => f.startsWith('aio-daemon-') && f.endsWith('.log'))
+    .sort()
+    .reverse();
+
+  return files.length > 0 ? path.join(logDir, files[0]) : path.join(logDir, 'aio-daemon.log');
 }
 
 function getRepoLogPath(repoRoot: string): string {

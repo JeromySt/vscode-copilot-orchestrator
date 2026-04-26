@@ -1,4 +1,4 @@
-// <copyright file="HookGateCoverageGap2Tests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="HookGateCoverageGap2Tests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -38,7 +38,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
     }
 
     // ================================================================
-    // WindowsRedirectionManager — constructor null guards
+    // WindowsRedirectionManager â€” constructor null guards
     // ================================================================
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
 
         Assert.Throws<ArgumentNullException>(() =>
-            new WindowsRedirectionManager(null!, new NullProcessSpawner(), NullLogger<WindowsRedirectionManager>.Instance));
+            new WindowsRedirectionManager(null!, new NullProcessSpawner(), new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance));
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
 
         Assert.Throws<ArgumentNullException>(() =>
-            new WindowsRedirectionManager(new InMemoryImmutabilitySink(), null!, NullLogger<WindowsRedirectionManager>.Instance));
+            new WindowsRedirectionManager(new InMemoryImmutabilitySink(), null!, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance));
     }
 
     [Fact]
@@ -65,11 +65,11 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
 
         Assert.Throws<ArgumentNullException>(() =>
-            new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), null!));
+            new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), new PassthroughFileSystem(), null!));
     }
 
     // ================================================================
-    // WindowsRedirectionManager — GetActiveMode for regular (non-reparse) directory
+    // WindowsRedirectionManager â€” GetActiveMode for regular (non-reparse) directory
     // ================================================================
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         // A regular directory without a reparse point
         var dir = MakeTempDir();
@@ -90,7 +90,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
     }
 
     // ================================================================
-    // WindowsRedirectionManager — Uninstall cancellation
+    // WindowsRedirectionManager â€” Uninstall cancellation
     // ================================================================
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
@@ -110,7 +110,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
     }
 
     // ================================================================
-    // WindowsRedirectionManager — Install cancellation
+    // WindowsRedirectionManager â€” Install cancellation
     // ================================================================
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
@@ -130,7 +130,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
     }
 
     // ================================================================
-    // ImmutabilityProbe — BuildEvent with valid result
+    // ImmutabilityProbe â€” BuildEvent with valid result
     // ================================================================
 
     [Fact]
@@ -155,7 +155,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
     }
 
     // ================================================================
-    // ImmutabilityProbe — IsImmutabilitySupported true path
+    // ImmutabilityProbe â€” IsImmutabilitySupported true path
     // ================================================================
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
     }
 
     // ================================================================
-    // LinkValidator — cancellation
+    // LinkValidator â€” cancellation
     // ================================================================
 
     [Fact]
@@ -185,7 +185,7 @@ public sealed class HookGateCoverageGap2Tests : IDisposable
 
         var parentDir = Path.GetDirectoryName(dir)!;
 
-        var validator = new LinkValidator();
+        var validator = new LinkValidator(new PassthroughFileSystem());
         var result = await validator.ValidateAsync(
             new AbsolutePath(hookFile),
             new AbsolutePath(parentDir),

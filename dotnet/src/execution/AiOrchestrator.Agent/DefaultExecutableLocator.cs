@@ -3,6 +3,8 @@
 // </copyright>
 
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
+using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.Agent;
 
@@ -10,6 +12,14 @@ namespace AiOrchestrator.Agent;
 public sealed class DefaultExecutableLocator : IExecutableLocator
 {
     private static readonly string[] WindowsExtensions = [".exe", ".cmd", ".bat", ".com"];
+    private readonly IFileSystem fs;
+
+    /// <summary>Initializes a new instance of the <see cref="DefaultExecutableLocator"/> class.</summary>
+    /// <param name="fs">File system abstraction.</param>
+    public DefaultExecutableLocator(IFileSystem fs)
+    {
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
+    }
 
     /// <inheritdoc/>
     public string? Locate(string executableName)
@@ -31,7 +41,7 @@ public sealed class DefaultExecutableLocator : IExecutableLocator
             foreach (var ext in extensions)
             {
                 var candidate = Path.Combine(dir, executableName + ext);
-                if (File.Exists(candidate))
+                if (this.fs.FileExistsAsync(new AbsolutePath(candidate), CancellationToken.None).AsTask().GetAwaiter().GetResult())
                 {
                     return candidate;
                 }

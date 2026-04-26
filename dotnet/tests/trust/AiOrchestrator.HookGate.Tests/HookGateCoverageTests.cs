@@ -1,4 +1,4 @@
-// <copyright file="HookGateCoverageTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="HookGateCoverageTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -80,7 +80,7 @@ Assert.False(string.IsNullOrEmpty(o.SocketPath.Value));
     }
 
     // ================================================================
-    // NonceManager — rotation event + ForceRotate
+    // NonceManager â€” rotation event + ForceRotate
     // ================================================================
 
     [Fact]
@@ -107,7 +107,7 @@ Assert.Equal(before.Value, observed.Previous!.Value);
         var opts = Monitor();
         var mgr = new NonceManager(clock, opts);
 
-        // Advance past 2× rotation, then trigger a rotation.
+        // Advance past 2Ã— rotation, then trigger a rotation.
         clock.Advance(TimeSpan.FromMinutes(11));
         _ = mgr.Current;
 
@@ -180,7 +180,7 @@ Assert.NotEmpty(approval.Hmac);
     }
 
     // ================================================================
-    // HookGateDaemon — null-arg constructor guards + Dispose + Client
+    // HookGateDaemon â€” null-arg constructor guards + Dispose + Client
     // ================================================================
 
     private sealed class NoopRedirection : IRedirectionManager
@@ -205,7 +205,8 @@ Assert.NotEmpty(approval.Hmac);
             new InMemoryEventBus(),
             opts,
             NullLogger<HookGateDaemon>.Instance,
-            new InMemoryAuditLog());
+            new InMemoryAuditLog(),
+            new PassthroughFileSystem());
 
         await d.DisposeAsync();
         await d.DisposeAsync();  // no throw
@@ -226,7 +227,7 @@ Assert.NotEmpty(approval.Hmac);
             new InMemoryEventBus(),
             opts,
             NullLogger<HookGateDaemon>.Instance,
-            audit);
+            audit, new PassthroughFileSystem());
         await d.StartAsync(CancellationToken.None);
         var client = new HookGateClient(d);
         var wt = Worktree(out var wtPath);
@@ -257,7 +258,7 @@ Assert.Contains(audit.Records, r => r.EventType == "hook.approve");
     }
 
     // ================================================================
-    // InProcessRpcServer — null handler / StopAsync rejects new / idempotent dispose
+    // InProcessRpcServer â€” null handler / StopAsync rejects new / idempotent dispose
     // ================================================================
 
     [Fact]
@@ -319,7 +320,7 @@ Assert.Contains(audit.Records, r => r.EventType == "hook.approve");
     }
 
     // ================================================================
-    // ToolRunner — timeout + spawn error + success w/ stdout
+    // ToolRunner â€” timeout + spawn error + success w/ stdout
     // ================================================================
 
     [Fact]
@@ -354,13 +355,13 @@ Assert.Equal("hello-world", stdout);
     }
 
     // ================================================================
-    // LinkValidator — success on a normal file
+    // LinkValidator â€” success on a normal file
     // ================================================================
 
     [Fact]
     public async Task LinkValidator_OkForNormalHookInsideWorktree()
     {
-        var v = new LinkValidator();
+        var v = new LinkValidator(new PassthroughFileSystem());
         var wt = Worktree(out var wtPath);
         var hook = Path.Combine(wtPath, ".git", "hooks", "pre-commit");
         File.WriteAllText(hook, "#!/bin/sh\nexit 0\n");
@@ -373,7 +374,7 @@ Assert.True(r.Ok);
     [Fact]
     public async Task LinkValidator_RejectsNonExistentHook()
     {
-        var v = new LinkValidator();
+        var v = new LinkValidator(new PassthroughFileSystem());
         var wt = Worktree(out var wtPath);
         var missing = new AbsolutePath(Path.Combine(wtPath, ".git", "hooks", "ghost"));
 
@@ -384,7 +385,7 @@ Assert.False(string.IsNullOrEmpty(r.FailureReason));
     }
 
     // ================================================================
-    // WindowsRedirectionManager — success path via ok spawner; failure branch too
+    // WindowsRedirectionManager â€” success path via ok spawner; failure branch too
     // ================================================================
 
     [Fact]
@@ -397,7 +398,7 @@ Assert.False(string.IsNullOrEmpty(r.FailureReason));
 
         var events = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner { ExitCodeForNextSpawn = 0 };
-        var mgr = new WindowsRedirectionManager(events, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(events, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
         var wt = Worktree(out var wtPath);
         var src = Path.Combine(wtPath, "dispatcher");
         _ = Directory.CreateDirectory(src);
@@ -416,7 +417,7 @@ Assert.NotEmpty(spawner.SpawnedSpecs);
             return;
         }
 
-        var mgr = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
         var mode = await mgr.GetActiveModeAsync(new AbsolutePath(Path.Combine(Path.GetTempPath(), "ghost-" + Guid.NewGuid().ToString("N"))), CancellationToken.None);
 
 Assert.Equal(RedirectionMode.NotInstalled, mode);
@@ -425,16 +426,16 @@ Assert.Equal(RedirectionMode.NotInstalled, mode);
     [Fact]
     public void WindowsRedirectionManager_Constructor_RejectsNulls()
     {
-        Action a = () => _ = new WindowsRedirectionManager(null!, new NullProcessSpawner(), NullLogger<WindowsRedirectionManager>.Instance);
-        Action b = () => _ = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), null!, NullLogger<WindowsRedirectionManager>.Instance);
-        Action c = () => _ = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), null!);
+        Action a = () => _ = new WindowsRedirectionManager(null!, new NullProcessSpawner(), new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
+        Action b = () => _ = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), null!, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
+        Action c = () => _ = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), new PassthroughFileSystem(), null!);
         Assert.Throws<ArgumentNullException>(a);
         Assert.Throws<ArgumentNullException>(b);
         Assert.Throws<ArgumentNullException>(c);
     }
 
     // ================================================================
-    // NamedPipeRpcServer — start/stop/dispose on Windows
+    // NamedPipeRpcServer â€” start/stop/dispose on Windows
     // ================================================================
 
     [Fact]
@@ -462,7 +463,7 @@ Assert.Equal(RedirectionMode.NotInstalled, mode);
     }
 
     // ================================================================
-    // UnixSocketRpcServer — Windows guard path
+    // UnixSocketRpcServer â€” Windows guard path
     // ================================================================
 
     [Fact]
@@ -473,7 +474,7 @@ Assert.Equal(RedirectionMode.NotInstalled, mode);
             return;
         }
 
-        var s = new UnixSocketRpcServer(new AbsolutePath(@"C:\tmp\x.sock"), NullLogger<UnixSocketRpcServer>.Instance);
+        var s = new UnixSocketRpcServer(new AbsolutePath(@"C:\tmp\x.sock"), new PassthroughFileSystem(), NullLogger<UnixSocketRpcServer>.Instance);
         Func<Task> act = async () => await s.StartAsync((_, _) => ValueTask.FromResult<HookApproval>(null!), CancellationToken.None);
 
         await Assert.ThrowsAsync<PlatformNotSupportedException>(act);
@@ -483,12 +484,12 @@ Assert.Equal(RedirectionMode.NotInstalled, mode);
     [Fact]
     public void UnixSocketRpcServer_Constructor_RejectsNullLogger()
     {
-        Action a = () => _ = new UnixSocketRpcServer(new AbsolutePath("/tmp/x.sock"), null!);
+        Action a = () => _ = new UnixSocketRpcServer(new AbsolutePath("/tmp/x.sock"), new PassthroughFileSystem(), null!);
         Assert.Throws<ArgumentNullException>(a);
     }
 
     // ================================================================
-    // ImmutabilityProbe — Windows path returns a result (supported or not)
+    // ImmutabilityProbe â€” Windows path returns a result (supported or not)
     // ================================================================
 
     [Fact]
@@ -520,7 +521,7 @@ Assert.Equal("DACL-deny", r.Mechanism);
     }
 
     // ================================================================
-    // HookGateDaemon — null-arg constructor guards
+    // HookGateDaemon â€” null-arg constructor guards
     // ================================================================
 
     [Fact]
@@ -535,18 +536,18 @@ Assert.Equal("DACL-deny", r.Mechanism);
         var audit = new InMemoryAuditLog();
         var log = NullLogger<HookGateDaemon>.Instance;
 
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(null!, rpc, redirect, clock, bus, opts, log, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, null!, redirect, clock, bus, opts, log, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, null!, clock, bus, opts, log, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, null!, bus, opts, log, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, null!, opts, log, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, bus, null!, log, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, bus, opts, null!, audit));
-        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, bus, opts, log, null!));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(null!, rpc, redirect, clock, bus, opts, log, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, null!, redirect, clock, bus, opts, log, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, null!, clock, bus, opts, log, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, null!, bus, opts, log, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, null!, opts, log, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, bus, null!, log, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, bus, opts, null!, audit, new PassthroughFileSystem()));
+        Assert.Throws<ArgumentNullException>(() => new HookGateDaemon(nonces, rpc, redirect, clock, bus, opts, log, null!, new PassthroughFileSystem()));
     }
 
     // ================================================================
-    // HookGateDaemon — ProcessAsync denial branch (link validation fails)
+    // HookGateDaemon â€” ProcessAsync denial branch (link validation fails)
     // ================================================================
 
     [Fact]
@@ -563,7 +564,7 @@ Assert.Equal("DACL-deny", r.Mechanism);
             new InMemoryEventBus(),
             opts,
             NullLogger<HookGateDaemon>.Instance,
-            audit);
+            audit, new PassthroughFileSystem());
         await d.StartAsync(CancellationToken.None);
         var wt = Worktree(out var wtPath);
 
@@ -598,8 +599,8 @@ Assert.Contains(audit.Records, r => r.EventType == "hook.deny");
             new InMemoryEventBus(),
             opts,
             NullLogger<HookGateDaemon>.Instance,
-            audit);
-        // Never start → running flag still 0
+            audit, new PassthroughFileSystem());
+        // Never start â†’ running flag still 0
         var wt = Worktree(out var wtPath);
         File.WriteAllText(Path.Combine(wtPath, ".git", "hooks", "pre-commit"), "#!/bin/sh\n");
         var req = new HookCheckInRequest
@@ -618,7 +619,7 @@ Assert.Contains(audit.Records, r => r.EventType == "hook.deny" && r.ContentJson!
     }
 
     // ================================================================
-    // NamedPipeRpcServer — full lifecycle with a client connecting (covers AcceptLoopAsync)
+    // NamedPipeRpcServer â€” full lifecycle with a client connecting (covers AcceptLoopAsync)
     // ================================================================
 
     [Fact]
@@ -651,7 +652,7 @@ Assert.True(s.PeerCredChecksPerformed >= 1);
     }
 
     // ================================================================
-    // WindowsRedirectionManager — spawner fails → symlink fallback; GetActiveMode on real dir
+    // WindowsRedirectionManager â€” spawner fails â†’ symlink fallback; GetActiveMode on real dir
     // ================================================================
 
     [Fact]
@@ -664,7 +665,7 @@ Assert.True(s.PeerCredChecksPerformed >= 1);
 
         var events = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner { ExitCodeForNextSpawn = 1 };  // junction fails
-        var mgr = new WindowsRedirectionManager(events, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(events, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
         var wt = Worktree(out var wtPath);
         var src = Path.Combine(wtPath, "disp");
         _ = Directory.CreateDirectory(src);
@@ -681,7 +682,7 @@ Assert.True(s.PeerCredChecksPerformed >= 1);
         }
         catch (IOException)
         {
-            // Developer Mode disabled — CreateSymbolicLink throws; the catch branch is still exercised.
+            // Developer Mode disabled â€” CreateSymbolicLink throws; the catch branch is still exercised.
         }
 
         await mgr.UninstallRedirectionAsync(new AbsolutePath(hooksDir), CancellationToken.None);
@@ -695,7 +696,7 @@ Assert.True(s.PeerCredChecksPerformed >= 1);
             return;
         }
 
-        var mgr = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(new InMemoryImmutabilitySink(), new NullProcessSpawner(), new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
         var tmp = Path.Combine(Path.GetTempPath(), "aio-hg-plain-" + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(tmp);
         try
@@ -710,7 +711,7 @@ Assert.Equal(RedirectionMode.NotInstalled, mode);
     }
 
     // ================================================================
-    // ToolRunner — timeout path (handle that never exits)
+    // ToolRunner â€” timeout path (handle that never exits)
     // ================================================================
 
     [Fact]
@@ -760,13 +761,13 @@ Assert.Empty(stdout);
     }
 
     // ================================================================
-    // LinkValidator — Windows-only cancellation guard
+    // LinkValidator â€” Windows-only cancellation guard
     // ================================================================
 
     [Fact]
     public async Task LinkValidator_ThrowsOnCancellation()
     {
-        var v = new LinkValidator();
+        var v = new LinkValidator(new PassthroughFileSystem());
         var wt = Worktree(out var wtPath);
         var hook = Path.Combine(wtPath, ".git", "hooks", "pre-commit");
         File.WriteAllText(hook, "#!/bin/sh\n");

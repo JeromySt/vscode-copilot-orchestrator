@@ -66,16 +66,21 @@ public sealed class TieredEventLog : IEventStore, IEventReader, IAsyncDisposable
         this.telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
 
         var current = opts.CurrentValue;
-        if (!Directory.Exists(logRoot.Value))
+
+        // Constructor must be synchronous — use synchronous fs check.
+        // The IFileSystem abstraction does not expose synchronous methods, so we use
+        // a blocking call on the ValueTask here. This is safe because the default
+        // IFileSystem implementation performs synchronous I/O under the hood.
+        if (!this.fs.DirectoryExistsAsync(logRoot, CancellationToken.None).AsTask().GetAwaiter().GetResult())
         {
-            _ = Directory.CreateDirectory(logRoot.Value);
+            this.fs.CreateDirectoryAsync(logRoot, CancellationToken.None).AsTask().GetAwaiter().GetResult();
         }
 
         var segmentPath = new AbsolutePath(Path.Combine(logRoot.Value, "events.log"));
         this.t2 = new AppendOnlyFile(segmentPath);
         this.t1 = new HotRingBuffer(current.HotRingCapacity);
         this.quota = new PerPlanDiskCap(current.PerPlanDiskCapBytes);
-        this.lastEmittedSeq = ReadInitialMaxSeq(segmentPath);
+        this.lastEmittedSeq = ReadInitialMaxSeq(segmentPath, this.fs);
     }
 
     /// <inheritdoc />
@@ -306,9 +311,9 @@ public sealed class TieredEventLog : IEventStore, IEventReader, IAsyncDisposable
             ?? throw new JsonException("Decoded envelope was null.");
     }
 
-    private static long ReadInitialMaxSeq(AbsolutePath segmentPath)
+    private static long ReadInitialMaxSeq(AbsolutePath segmentPath, IFileSystem fs)
     {
-        if (!File.Exists(segmentPath.Value))
+        if (!fs.FileExistsAsync(segmentPath, CancellationToken.None).AsTask().GetAwaiter().GetResult())
         {
             return 0;
         }

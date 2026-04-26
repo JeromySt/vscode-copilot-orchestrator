@@ -201,9 +201,9 @@ public sealed class Diagnoser
         // Pack the archive — deterministic order, fixed timestamps, no compression.
         var outputPath = request.OutputPath;
         var outDir = Path.GetDirectoryName(outputPath.Value);
-        if (!string.IsNullOrEmpty(outDir) && !Directory.Exists(outDir))
+        if (!string.IsNullOrEmpty(outDir) && !await this.fs.DirectoryExistsAsync(new AbsolutePath(outDir), ct).ConfigureAwait(false))
         {
-            Directory.CreateDirectory(outDir);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(outDir), ct).ConfigureAwait(false);
         }
 
         WriteZip(outputPath.Value, entries);

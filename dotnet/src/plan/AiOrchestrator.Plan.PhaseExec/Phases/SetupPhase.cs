@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Abstractions.Git;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Git.Gitignore;
 using AiOrchestrator.Models.Ids;
 using Microsoft.Extensions.Logging;
@@ -22,16 +23,20 @@ namespace AiOrchestrator.Plan.PhaseExec.Phases;
 internal sealed class SetupPhase : IPhaseRunner
 {
     private readonly IGitOperations git;
+    private readonly IFileSystem fs;
     private readonly ILogger<SetupPhase> logger;
 
     /// <summary>Initializes a new instance of the <see cref="SetupPhase"/> class.</summary>
     /// <param name="git">The git operations facade.</param>
+    /// <param name="fs">File system abstraction.</param>
     /// <param name="logger">The component logger.</param>
-    public SetupPhase(IGitOperations git, ILogger<SetupPhase> logger)
+    public SetupPhase(IGitOperations git, IFileSystem fs, ILogger<SetupPhase> logger)
     {
         ArgumentNullException.ThrowIfNull(git);
+        ArgumentNullException.ThrowIfNull(fs);
         ArgumentNullException.ThrowIfNull(logger);
         this.git = git;
+        this.fs = fs;
         this.logger = logger;
     }
 
@@ -54,7 +59,7 @@ internal sealed class SetupPhase : IPhaseRunner
         var repoRoot = ctx.Job.WorkSpec?.AllowedFolders.FirstOrDefault();
         if (repoRoot is not null)
         {
-            var modified = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(repoRoot, ct)
+            var modified = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(this.fs, repoRoot, ct)
                 .ConfigureAwait(false);
             if (modified)
             {

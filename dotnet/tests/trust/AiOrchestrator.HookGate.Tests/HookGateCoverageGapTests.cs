@@ -1,4 +1,4 @@
-// <copyright file="HookGateCoverageGapTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="HookGateCoverageGapTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -37,7 +37,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
     }
 
     // ================================================================
-    // ImmutabilityProbe — Windows DACL path + Classify branches
+    // ImmutabilityProbe â€” Windows DACL path + Classify branches
     // ================================================================
 
     [Fact]
@@ -133,13 +133,13 @@ public sealed class HookGateCoverageGapTests : IDisposable
     }
 
     // ================================================================
-    // LinkValidator — Windows path validation
+    // LinkValidator â€” Windows path validation
     // ================================================================
 
     [Fact]
     public async Task LinkValidator_FileDoesNotExist_ReturnsFailure()
     {
-        var validator = new LinkValidator();
+        var validator = new LinkValidator(new PassthroughFileSystem());
         var result = await validator.ValidateAsync(
             new AbsolutePath(Path.Combine(Path.GetTempPath(), "nonexistent-" + Guid.NewGuid())),
             new AbsolutePath(Path.GetTempPath()),
@@ -158,7 +158,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
         var hookFile = Path.Combine(dir, "pre-commit");
         File.WriteAllText(hookFile, "#!/bin/sh\nexit 0\n");
 
-        var validator = new LinkValidator();
+        var validator = new LinkValidator(new PassthroughFileSystem());
         var result = await validator.ValidateAsync(
             new AbsolutePath(hookFile),
             new AbsolutePath(dir),
@@ -171,7 +171,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
     [Fact]
     public async Task LinkValidator_Cancellation_Throws()
     {
-        var validator = new LinkValidator();
+        var validator = new LinkValidator(new PassthroughFileSystem());
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
@@ -183,7 +183,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
     }
 
     // ================================================================
-    // WindowsRedirectionManager — Uninstall + GetActiveMode branches
+    // WindowsRedirectionManager â€” Uninstall + GetActiveMode branches
     // ================================================================
 
     [Fact]
@@ -193,7 +193,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         var fakePath = Path.Combine(Path.GetTempPath(), "nonexistent-" + Guid.NewGuid().ToString("N"));
         await mgr.UninstallRedirectionAsync(new AbsolutePath(fakePath), CancellationToken.None);
@@ -207,7 +207,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         var dir = MakeTempDir();
         var subDir = Path.Combine(dir, "hooks");
@@ -225,7 +225,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         var dir = MakeTempDir();
         var filePath = Path.Combine(dir, "hooks");
@@ -243,7 +243,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         var mode = await mgr.GetActiveModeAsync(
             new AbsolutePath(Path.Combine(Path.GetTempPath(), "nonexistent-" + Guid.NewGuid())),
@@ -259,7 +259,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         var dir = MakeTempDir();
         var mode = await mgr.GetActiveModeAsync(new AbsolutePath(dir), CancellationToken.None);
@@ -274,7 +274,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner { ExitCodeForNextSpawn = 1 }; // mklink /J fails
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
 
         var dir = MakeTempDir();
         var hooksDir = Path.Combine(dir, "hooks-" + Guid.NewGuid().ToString("N"));
@@ -294,7 +294,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
         }
         catch (IOException)
         {
-            // Symlink creation failed (no Developer Mode) — expected on non-dev machines
+            // Symlink creation failed (no Developer Mode) â€” expected on non-dev machines
         }
     }
 
@@ -305,9 +305,9 @@ public sealed class HookGateCoverageGapTests : IDisposable
         var spawner = new NullProcessSpawner();
         var logger = NullLogger<WindowsRedirectionManager>.Instance;
 
-        Assert.Throws<ArgumentNullException>(() => new WindowsRedirectionManager(null!, spawner, logger));
-        Assert.Throws<ArgumentNullException>(() => new WindowsRedirectionManager(sink, null!, logger));
-        Assert.Throws<ArgumentNullException>(() => new WindowsRedirectionManager(sink, spawner, null!));
+        Assert.Throws<ArgumentNullException>(() => new WindowsRedirectionManager(null!, spawner, new PassthroughFileSystem(), logger));
+        Assert.Throws<ArgumentNullException>(() => new WindowsRedirectionManager(sink, null!, new PassthroughFileSystem(), logger));
+        Assert.Throws<ArgumentNullException>(() => new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), null!));
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
 
         var sink = new InMemoryImmutabilitySink();
         var spawner = new NullProcessSpawner();
-        var mgr = new WindowsRedirectionManager(sink, spawner, NullLogger<WindowsRedirectionManager>.Instance);
+        var mgr = new WindowsRedirectionManager(sink, spawner, new PassthroughFileSystem(), NullLogger<WindowsRedirectionManager>.Instance);
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
@@ -329,7 +329,7 @@ public sealed class HookGateCoverageGapTests : IDisposable
     }
 
     // ================================================================
-    // NamedPipeRpcServer — lifecycle + null guards
+    // NamedPipeRpcServer â€” lifecycle + null guards
     // ================================================================
 
     [Fact]

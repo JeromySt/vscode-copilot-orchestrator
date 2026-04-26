@@ -7,6 +7,7 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.Models;
 
@@ -25,14 +26,17 @@ public sealed class GitignoreCommitter
     public const string CommitMessage = "chore: add orchestrator .gitignore entries";
 
     private readonly IProcessSpawner spawner;
+    private readonly IFileSystem fs;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="GitignoreCommitter"/> class.
     /// </summary>
     /// <param name="spawner">Process spawner used to launch <c>git</c>.</param>
-    public GitignoreCommitter(IProcessSpawner spawner)
+    /// <param name="fs">File system abstraction.</param>
+    public GitignoreCommitter(IProcessSpawner spawner, IFileSystem fs)
     {
         this.spawner = spawner ?? throw new ArgumentNullException(nameof(spawner));
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
     }
 
     /// <summary>
@@ -47,7 +51,7 @@ public sealed class GitignoreCommitter
         ArgumentNullException.ThrowIfNull(repoRoot);
 
         // 1. Ensure entries in the working tree
-        var modified = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(repoRoot, ct)
+        var modified = await GitignoreManager.EnsureOrchestratorGitIgnoreAsync(this.fs, repoRoot, ct)
             .ConfigureAwait(false);
 
         if (!modified)

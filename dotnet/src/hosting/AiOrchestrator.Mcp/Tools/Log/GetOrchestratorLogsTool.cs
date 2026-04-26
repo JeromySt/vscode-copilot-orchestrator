@@ -87,8 +87,29 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
 
     private async ValueTask<JsonNode> ReadDaemonLogAsync(int tailLines, CancellationToken ct)
     {
-        var logPath = new AbsolutePath(AioLogPaths.GlobalDaemonLog);
-        return await this.ReadTailAsync(logPath, tailLines, ct).ConfigureAwait(false);
+        var logDir = new AbsolutePath(AioLogPaths.GlobalDaemonLogDir);
+        if (!await this.fs.DirectoryExistsAsync(logDir, ct).ConfigureAwait(false))
+        {
+            return new JsonObject { ["success"] = false, ["error"] = $"Log directory does not exist: {logDir}" };
+        }
+
+        // Each daemon instance writes to aio-daemon-{pid}.log.
+        // Return the most recent (lexically highest = largest PID number).
+        AbsolutePath? latestLog = null;
+        await foreach (AbsolutePath file in this.fs.EnumerateFilesAsync(logDir, AioLogPaths.GlobalDaemonLogPattern, ct).ConfigureAwait(false))
+        {
+            if (latestLog is null || string.Compare(file.Value, latestLog.Value.Value, StringComparison.OrdinalIgnoreCase) > 0)
+            {
+                latestLog = file;
+            }
+        }
+
+        if (latestLog is null)
+        {
+            return new JsonObject { ["success"] = false, ["error"] = $"No daemon log files found in {logDir}" };
+        }
+
+        return await this.ReadTailAsync(latestLog.Value, tailLines, ct).ConfigureAwait(false);
     }
 
     private async ValueTask<JsonNode> ReadRepoLogAsync(JsonElement parameters, int tailLines, CancellationToken ct)

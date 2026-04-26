@@ -5,6 +5,7 @@
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.Shell.Temp;
@@ -20,15 +21,18 @@ namespace AiOrchestrator.Shell.Temp;
 internal sealed class SecureTempScript : IAsyncDisposable
 {
     private readonly AbsolutePath tempDir;
+    private readonly IFileSystem? fs;
     private AbsolutePath? path;
     private long byteLength;
     private int disposed;
 
     /// <summary>Initializes a new instance of the <see cref="SecureTempScript"/> class.</summary>
     /// <param name="tempDir">The directory in which to create the temp script.</param>
-    public SecureTempScript(AbsolutePath tempDir)
+    /// <param name="fs">Optional file system abstraction for cleanup operations.</param>
+    public SecureTempScript(AbsolutePath tempDir, IFileSystem? fs = null)
     {
         this.tempDir = tempDir;
+        this.fs = fs;
     }
 
     /// <summary>Gets the path of the created script, or <see langword="null"/> if not created yet.</summary>
@@ -109,7 +113,11 @@ internal sealed class SecureTempScript : IAsyncDisposable
 
         try
         {
-            if (File.Exists(p.Value))
+            if (this.fs is not null
+                ? await this.fs.FileExistsAsync(p, CancellationToken.None).ConfigureAwait(false)
+#pragma warning disable OE0004 // Fallback when IFileSystem not provided
+                : File.Exists(p.Value))
+#pragma warning restore OE0004
             {
                 // Best-effort overwrite with zeros, then delete.
                 try
@@ -145,7 +153,16 @@ internal sealed class SecureTempScript : IAsyncDisposable
 
                 try
                 {
-                    File.Delete(p.Value);
+                    if (this.fs is not null)
+                    {
+                        await this.fs.DeleteAsync(p, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    else
+                    {
+#pragma warning disable OE0004 // Fallback when IFileSystem not provided
+                        File.Delete(p.Value);
+#pragma warning restore OE0004
+                    }
                 }
                 catch (IOException)
                 {
@@ -168,9 +185,11 @@ internal sealed class SecureTempScript : IAsyncDisposable
     private static void ApplyUnixOwnerOnly(string fullPath)
     {
         // 0600 — owner read+write only, no execute (INV-3: never set the executable bit)
+#pragma warning disable OE0004 // File.SetUnixFileMode has no IFileSystem equivalent — OS-specific permission API
         File.SetUnixFileMode(
             fullPath,
             UnixFileMode.UserRead | UnixFileMode.UserWrite);
+#pragma warning restore OE0004
     }
 
     [SupportedOSPlatform("windows")]

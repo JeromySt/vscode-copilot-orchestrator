@@ -1,4 +1,4 @@
-// <copyright file="TieredEventLogContractTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="TieredEventLogContractTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -63,7 +63,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // T2-LOG-1 — Frame layout matches spec
+    // T2-LOG-1 â€” Frame layout matches spec
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("T2-LOG-1")]
@@ -97,7 +97,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // T2-LOG-2 — CRC mismatch is flagged
+    // T2-LOG-2 â€” CRC mismatch is flagged
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("T2-LOG-2")]
@@ -121,7 +121,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // T2-READ-1 — Replay resumes from last valid record (tail truncation)
+    // T2-READ-1 â€” Replay resumes from last valid record (tail truncation)
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("T2-READ-1")]
@@ -153,7 +153,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // T2-READ-11 — Reassembly abandoned after budget
+    // T2-READ-11 â€” Reassembly abandoned after budget
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("T2-READ-11")]
@@ -173,7 +173,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // T2-READ-11-GAP — record-seq gap detected
+    // T2-READ-11-GAP â€” record-seq gap detected
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("T2-READ-11-GAP")]
@@ -195,7 +195,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // SUB-3 — Replay→live: no duplicates, no gaps
+    // SUB-3 â€” Replayâ†’live: no duplicates, no gaps
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("SUB-3")]
@@ -254,7 +254,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // DISK-PLAN-1 — Per-plan cap enforced
+    // DISK-PLAN-1 â€” Per-plan cap enforced
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("DISK-PLAN-1")]
@@ -286,7 +286,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // DISK-PLAN-2 — Exceeded exception includes plan-id and metadata
+    // DISK-PLAN-2 â€” Exceeded exception includes plan-id and metadata
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("DISK-PLAN-2")]
@@ -317,7 +317,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // T3-ARCHIVE-1 — Cold segments compressed after age
+    // T3-ARCHIVE-1 â€” Cold segments compressed after age
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("T3-ARCHIVE-1")]
@@ -336,7 +336,7 @@ public sealed class TieredEventLogContractTests : IDisposable
         var archiver = new CompressedArchiver(
             new AbsolutePath(dir),
             minAge: TimeSpan.FromMinutes(15),
-            clock);
+            clock, new InertFileSystem());
 
         await archiver.RunOnceAsync(CancellationToken.None);
 
@@ -352,7 +352,7 @@ public sealed class TieredEventLogContractTests : IDisposable
     }
 
     // ---------------------------------------------------------------------
-    // EL-ZERO-ALLOC — Per-record marginal allocation is bounded
+    // EL-ZERO-ALLOC â€” Per-record marginal allocation is bounded
     // ---------------------------------------------------------------------
     [Fact]
     [ContractTest("EL-ZERO-ALLOC")]
@@ -381,7 +381,7 @@ public sealed class TieredEventLogContractTests : IDisposable
         var after = GC.GetTotalAllocatedBytes(precise: true);
         var perRecord = (after - before) / (double)Iterations;
 
-        // Generous threshold — the goal is to flag regressions, not to be byte-exact.
+        // Generous threshold â€” the goal is to flag regressions, not to be byte-exact.
         Assert.True(perRecord < 8 * 1024, $"per-record allocation budget exceeded: {perRecord:F0} bytes/record");
     }
 

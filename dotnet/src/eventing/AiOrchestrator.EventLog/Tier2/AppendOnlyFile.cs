@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.EventLog.Tier2;
@@ -25,13 +26,29 @@ internal sealed class AppendOnlyFile : IAsyncDisposable
 
     /// <summary>Initializes a new instance of the <see cref="AppendOnlyFile"/> class.</summary>
     /// <param name="path">The fully-qualified destination file. Created if it does not yet exist.</param>
-    public AppendOnlyFile(AbsolutePath path)
+    /// <param name="fs">File system abstraction for directory operations.</param>
+    public AppendOnlyFile(AbsolutePath path, IFileSystem? fs = null)
     {
         this.path = path;
         var dir = System.IO.Path.GetDirectoryName(path.Value);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        if (!string.IsNullOrEmpty(dir))
         {
-            _ = Directory.CreateDirectory(dir);
+            if (fs is not null)
+            {
+                if (!fs.DirectoryExistsAsync(new AbsolutePath(dir), CancellationToken.None).AsTask().GetAwaiter().GetResult())
+                {
+                    fs.CreateDirectoryAsync(new AbsolutePath(dir), CancellationToken.None).AsTask().GetAwaiter().GetResult();
+                }
+            }
+            else
+            {
+#pragma warning disable OE0004 // Fallback when IFileSystem is not provided (backward compat)
+                if (!Directory.Exists(dir))
+                {
+                    _ = Directory.CreateDirectory(dir);
+                }
+#pragma warning restore OE0004
+            }
         }
 
         this.stream = new FileStream(

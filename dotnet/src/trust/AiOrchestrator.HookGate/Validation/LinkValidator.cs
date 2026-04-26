@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.HookGate.Validation;
@@ -16,21 +17,28 @@ namespace AiOrchestrator.HookGate.Validation;
 /// </summary>
 internal sealed partial class LinkValidator
 {
-    public ValueTask<LinkValidationResult> ValidateAsync(AbsolutePath hookFile, AbsolutePath worktreeRoot, CancellationToken ct)
+    private readonly IFileSystem fs;
+
+    public LinkValidator(IFileSystem fs)
+    {
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
+    }
+
+    public async ValueTask<LinkValidationResult> ValidateAsync(AbsolutePath hookFile, AbsolutePath worktreeRoot, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!File.Exists(hookFile.Value))
+        if (!await this.fs.FileExistsAsync(hookFile, ct).ConfigureAwait(false))
         {
-            return ValueTask.FromResult(new LinkValidationResult { Ok = false, FailureReason = "hook file does not exist" });
+            return new LinkValidationResult { Ok = false, FailureReason = "hook file does not exist" };
         }
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            return ValueTask.FromResult(ValidateWindows(hookFile, worktreeRoot));
+            return ValidateWindows(hookFile, worktreeRoot);
         }
 
-        return ValueTask.FromResult(ValidatePosix(hookFile, worktreeRoot));
+        return ValidatePosix(hookFile, worktreeRoot);
     }
 
     // ---- POSIX -----------------------------------------------------------

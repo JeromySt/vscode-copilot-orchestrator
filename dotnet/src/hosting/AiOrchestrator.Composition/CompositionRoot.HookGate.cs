@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.HookGate;
 using AiOrchestrator.HookGate.Immutability;
 using AiOrchestrator.HookGate.Nonce;
@@ -45,10 +46,10 @@ public static partial class CompositionRoot
             var spawner = sp.GetRequiredService<AiOrchestrator.Abstractions.Process.IProcessSpawner>();
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                return new WindowsRedirectionManager(sink, spawner, sp.GetRequiredService<ILogger<WindowsRedirectionManager>>());
+                return new WindowsRedirectionManager(sink, spawner, sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<ILogger<WindowsRedirectionManager>>());
             }
 
-            return new LinuxRedirectionManager(sink, spawner, sp.GetRequiredService<ILogger<LinuxRedirectionManager>>());
+            return new LinuxRedirectionManager(sink, spawner, sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<ILogger<LinuxRedirectionManager>>());
         });
 
         _ = services.AddSingleton<IRpcServer>(static sp =>
@@ -59,7 +60,7 @@ public static partial class CompositionRoot
                 return new NamedPipeRpcServer(opts.PipeName, sp.GetRequiredService<ILogger<NamedPipeRpcServer>>());
             }
 
-            return new UnixSocketRpcServer(opts.SocketPath, sp.GetRequiredService<ILogger<UnixSocketRpcServer>>());
+            return new UnixSocketRpcServer(opts.SocketPath, sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<ILogger<UnixSocketRpcServer>>());
         });
 
         _ = services.AddSingleton<HookGateDaemon>();

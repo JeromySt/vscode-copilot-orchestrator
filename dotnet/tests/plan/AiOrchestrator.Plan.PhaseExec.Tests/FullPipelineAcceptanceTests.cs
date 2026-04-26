@@ -1,4 +1,4 @@
-// <copyright file="FullPipelineAcceptanceTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="FullPipelineAcceptanceTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -67,13 +67,13 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════
-    // Test 1: Fan-out/fan-in with SV node — all events validated
-    // ══════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // Test 1: Fan-out/fan-in with SV node â€” all events validated
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Exercises a full fan-out/fan-in pipeline with an SV node:
-    /// <c>Root → {Work1, Work2, Work3} → SV(__snapshot-validation__) → Final</c>.
+    /// <c>Root â†’ {Work1, Work2, Work3} â†’ SV(__snapshot-validation__) â†’ Final</c>.
     ///
     /// Validates:
     /// <list type="bullet">
@@ -96,7 +96,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             new PlanModel { Name = "full-pipeline-fanout-sv", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // Build DAG: Root → {Work1, Work2, Work3} → SV → Final
+        // Build DAG: Root â†’ {Work1, Work2, Work3} â†’ SV â†’ Final
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("root"), "Root");
         await AddJob(store, planId, ids.Register("work1"), "Work1", ids["root"]);
@@ -127,13 +127,13 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         var handler = new PlanCompletionHandler(
             store, this.bus, this.clock, NullLogger<PlanCompletionHandler>.Instance);
 
-        // ── Execute Root ──
+        // â”€â”€ Execute Root â”€â”€
         fixture.CreateWorktree(ids.Key("root"));
         await this.ExecuteJobWithEvents(store, exec, planId, ids["root"]);
         fixture.MergeWorktreeToMain(ids.Key("root"));
         await handler.ProcessAsync(planId, CancellationToken.None);
 
-        // ── Fan-out: Work1, Work2, Work3 all ready ──
+        // â”€â”€ Fan-out: Work1, Work2, Work3 all ready â”€â”€
         var readyFanOut = await ComputeReadySet(store, planId);
         Assert.Equal(3, readyFanOut.Count);
 
@@ -146,7 +146,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
 
         await handler.ProcessAsync(planId, CancellationToken.None);
 
-        // ── SV ready ──
+        // â”€â”€ SV ready â”€â”€
         var readySv = await ComputeReadySet(store, planId);
         Assert.Single(readySv);
 
@@ -155,7 +155,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         fixture.MergeWorktreeToMain(ids.Key("sv"));
         await handler.ProcessAsync(planId, CancellationToken.None);
 
-        // ── Final ready ──
+        // â”€â”€ Final ready â”€â”€
         var readyFinal = await ComputeReadySet(store, planId);
         Assert.Single(readyFinal);
 
@@ -166,11 +166,11 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
         Assert.True(terminal);
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // EVENT ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-        // 1. Exactly 6 JobReadyEvent — one per job
+        // 1. Exactly 6 JobReadyEvent â€” one per job
         var readyEvents = this.bus.Of<JobReadyEvent>();
         Assert.Equal(6, readyEvents.Count);
         foreach (var name in new[] { "root", "work1", "work2", "work3", "sv", "final" })
@@ -178,7 +178,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             Assert.Contains(readyEvents, e => e.PlanId == planId && e.JobId == ids[name]);
         }
 
-        // 2. Exactly 6 PhaseAttemptCompletedEvent — each AttemptNumber=1, Succeeded
+        // 2. Exactly 6 PhaseAttemptCompletedEvent â€” each AttemptNumber=1, Succeeded
         var attemptEvents = this.bus.Of<PhaseAttemptCompletedEvent>();
         Assert.Equal(6, attemptEvents.Count);
         Assert.All(attemptEvents, e =>
@@ -216,8 +216,8 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.True(lastIdx(ids["sv"]) < firstIdx(ids["final"]),
             "SV should complete before Final starts");
 
-        // 5. JobStatusChangedEvent: 4 transitions per job × 6 jobs = 24
-        //    Each job: Pending→Ready, Ready→Scheduled, Scheduled→Running, Running→Succeeded
+        // 5. JobStatusChangedEvent: 4 transitions per job Ã— 6 jobs = 24
+        //    Each job: Pendingâ†’Ready, Readyâ†’Scheduled, Scheduledâ†’Running, Runningâ†’Succeeded
         var jobStatusEvents = this.bus.Of<JobStatusChangedEvent>();
         Assert.Equal(24, jobStatusEvents.Count);
 
@@ -231,15 +231,15 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             Assert.Contains(forJob, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Succeeded);
         }
 
-        // 6. PlanStatusChangedEvent: Running → Succeeded
+        // 6. PlanStatusChangedEvent: Running â†’ Succeeded
         var planStatusEvents = this.bus.Of<PlanStatusChangedEvent>();
         Assert.Single(planStatusEvents);
         Assert.Equal(PlanStatus.Running, planStatusEvents[0].PreviousStatus);
         Assert.Equal(PlanStatus.Succeeded, planStatusEvents[0].NewStatus);
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // GIT / FILE ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         // 5. All 6 files on main
         Assert.True(fixture.VerifyFileOnBranch("main", "root.txt"));
@@ -267,9 +267,9 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Equal("Initial commit", commits[0]);
         Assert.Equal(AiOrchestrator.Git.Gitignore.GitignoreCommitter.CommitMessage, commits[1]);
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // PLAN STATE ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         // 8. Plan status = Succeeded
         var plan = await store.LoadAsync(planId, CancellationToken.None);
@@ -296,12 +296,12 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Equal(ids.Key("sv"), finalNode.DependsOn[0]);
     }
 
-    // ══════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Test 2: Partial failure with blocked cascade
-    // ══════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
-    /// Exercises a partial failure scenario: <c>A → B → C → D</c>.
+    /// Exercises a partial failure scenario: <c>A â†’ B â†’ C â†’ D</c>.
     /// A succeeds. B fails (RemoteRejected). C and D are blocked by
     /// <see cref="PlanCompletionHandler"/>.
     ///
@@ -309,7 +309,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
     /// <list type="bullet">
     /// <item><see cref="JobReadyEvent"/>: 1 for A (initial), 1 for B (after A)</item>
     /// <item><see cref="PhaseAttemptCompletedEvent"/>: 1 for A (Succeeded), 1 for B (Failed)</item>
-    /// <item><see cref="JobBlockedEvent"/>: 1 for C (blocked by B), 1 for D (blocked by C — transitive)</item>
+    /// <item><see cref="JobBlockedEvent"/>: 1 for C (blocked by B), 1 for D (blocked by C â€” transitive)</item>
     /// <item>a.txt IS on main (A merged), no b.txt/c.txt/d.txt</item>
     /// <item>Plan status = Partial (mix of succeeded and failed/blocked)</item>
     /// </list>
@@ -324,7 +324,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             new PlanModel { Name = "full-pipeline-partial", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // A → B → C → D
+        // A â†’ B â†’ C â†’ D
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("a"), "Job A");
         await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
@@ -362,9 +362,9 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         var terminal = await handler.ProcessAsync(planId, CancellationToken.None);
         Assert.True(terminal);
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // EVENT ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         // 1. JobReadyEvent: 1 for A, 1 for B, NONE for C/D
         var readyEvents = this.bus.Of<JobReadyEvent>();
@@ -384,7 +384,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         var attemptB = attemptEvents.Single(e => e.JobId == ids["b"]);
         Assert.Equal(JobStatus.Failed, attemptB.Attempt.Status);
 
-        // 3. JobBlockedEvent: 1 for C (by B), 1 for D (by C — transitive)
+        // 3. JobBlockedEvent: 1 for C (by B), 1 for D (by C â€” transitive)
         var blockedEvents = this.bus.Of<JobBlockedEvent>();
         Assert.Equal(2, blockedEvents.Count);
 
@@ -398,7 +398,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         var jobStatusEvents = this.bus.Of<JobStatusChangedEvent>();
         Assert.Equal(10, jobStatusEvents.Count);
 
-        // A: Pending→Ready→Scheduled→Running→Succeeded
+        // A: Pendingâ†’Readyâ†’Scheduledâ†’Runningâ†’Succeeded
         var forA = jobStatusEvents.Where(e => e.JobId == ids["a"]).ToList();
         Assert.Equal(4, forA.Count);
         Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Pending && e.NewStatus == JobStatus.Ready);
@@ -406,7 +406,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Scheduled && e.NewStatus == JobStatus.Running);
         Assert.Contains(forA, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Succeeded);
 
-        // B: Pending→Ready→Scheduled→Running→Failed
+        // B: Pendingâ†’Readyâ†’Scheduledâ†’Runningâ†’Failed
         var forB = jobStatusEvents.Where(e => e.JobId == ids["b"]).ToList();
         Assert.Equal(4, forB.Count);
         Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Pending && e.NewStatus == JobStatus.Ready);
@@ -414,27 +414,27 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Scheduled && e.NewStatus == JobStatus.Running);
         Assert.Contains(forB, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Failed);
 
-        // C: Pending→Blocked
+        // C: Pendingâ†’Blocked
         var forC = jobStatusEvents.Where(e => e.JobId == ids["c"]).ToList();
         Assert.Single(forC);
         Assert.Equal(JobStatus.Pending, forC[0].PreviousStatus);
         Assert.Equal(JobStatus.Blocked, forC[0].NewStatus);
 
-        // D: Pending→Blocked
+        // D: Pendingâ†’Blocked
         var forD = jobStatusEvents.Where(e => e.JobId == ids["d"]).ToList();
         Assert.Single(forD);
         Assert.Equal(JobStatus.Pending, forD[0].PreviousStatus);
         Assert.Equal(JobStatus.Blocked, forD[0].NewStatus);
 
-        // 5. PlanStatusChangedEvent: Running → Partial
+        // 5. PlanStatusChangedEvent: Running â†’ Partial
         var planStatusEvents = this.bus.Of<PlanStatusChangedEvent>();
         Assert.Single(planStatusEvents);
         Assert.Equal(PlanStatus.Running, planStatusEvents[0].PreviousStatus);
         Assert.Equal(PlanStatus.Partial, planStatusEvents[0].NewStatus);
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // GIT ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         // 5. a.txt IS on main (A merged)
         Assert.True(fixture.VerifyFileOnBranch("main", "a.txt"));
@@ -444,9 +444,9 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.False(fixture.VerifyFileOnBranch("main", "c.txt"));
         Assert.False(fixture.VerifyFileOnBranch("main", "d.txt"));
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // PLAN STATE ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         // Plan status = Partial (A succeeded + B failed + C/D blocked)
         var plan = await store.LoadAsync(planId, CancellationToken.None);
@@ -459,16 +459,16 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Equal(JobStatus.Blocked, plan.Jobs[ids.Key("d")].Status);
     }
 
-    // ══════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Test 3: Auto-heal event sequence
-    // ══════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Single job. Work phase fails once (AgentNonZeroExit), succeeds on auto-heal.
     ///
     /// Validates:
     /// <list type="bullet">
-    /// <item><see cref="PhaseAttemptCompletedEvent"/>: 2 emitted — first Failed, second Succeeded</item>
+    /// <item><see cref="PhaseAttemptCompletedEvent"/>: 2 emitted â€” first Failed, second Succeeded</item>
     /// <item>First attempt's <see cref="JobAttempt.Status"/> = Failed with error message</item>
     /// <item>Second attempt's <see cref="JobAttempt.Status"/> = Succeeded, AttemptNumber=2</item>
     /// <item>Job ends Succeeded with 2 attempts in store</item>
@@ -504,11 +504,11 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
 
         fixture.MergeWorktreeToMain(ids.Key("healer"));
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // EVENT ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-        // 1. PhaseAttemptCompletedEvent: 2 emitted — first Failed, second Succeeded
+        // 1. PhaseAttemptCompletedEvent: 2 emitted â€” first Failed, second Succeeded
         var attemptEvents = this.bus.Of<PhaseAttemptCompletedEvent>();
         Assert.Equal(2, attemptEvents.Count);
 
@@ -533,9 +533,9 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Single(readyEvents);
         Assert.Equal(ids["healer"], readyEvents[0].JobId);
 
-        // 4. JobStatusChangedEvent: 6 transitions including Failed→Running heal
-        //    Pending→Ready, Ready→Scheduled, Scheduled→Running,
-        //    Running→Failed (heal), Failed→Running (heal retry), Running→Succeeded
+        // 4. JobStatusChangedEvent: 6 transitions including Failedâ†’Running heal
+        //    Pendingâ†’Ready, Readyâ†’Scheduled, Scheduledâ†’Running,
+        //    Runningâ†’Failed (heal), Failedâ†’Running (heal retry), Runningâ†’Succeeded
         var jobStatusEvents = this.bus.Of<JobStatusChangedEvent>();
         Assert.Equal(6, jobStatusEvents.Count);
 
@@ -548,16 +548,16 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Failed && e.NewStatus == JobStatus.Running);
         Assert.Contains(forHealer, e => e.PreviousStatus == JobStatus.Running && e.NewStatus == JobStatus.Succeeded);
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // GIT ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         Assert.True(fixture.VerifyFileOnBranch("main", "healed.txt"));
         Assert.Equal("Output from healed job", fixture.ReadFileOnBranch("main", "healed.txt"));
 
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // PLAN STATE ASSERTIONS
-        // ════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         var plan = await store.LoadAsync(planId, CancellationToken.None);
         Assert.NotNull(plan);
@@ -569,11 +569,11 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Assert.Equal(JobStatus.Succeeded, job.Attempts[1].Status);
     }
 
-    // ──────────────────────── Scheduler Loop Helpers ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Scheduler Loop Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// Drives the scheduler loop for a single job: publishes <see cref="JobReadyEvent"/>
-    /// and <see cref="JobScheduledEvent"/>, transitions through Ready → Scheduled → Running,
+    /// and <see cref="JobScheduledEvent"/>, transitions through Ready â†’ Scheduled â†’ Running,
     /// executes via <see cref="PhaseExecutor"/>, then transitions to the final status.
     /// This mirrors what the real <c>PlanScheduler</c> does.
     /// </summary>
@@ -591,7 +591,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             .Where(id => id != default)
             .ToImmutableArray();
 
-        // Pending → Ready
+        // Pending â†’ Ready
         await Mutate(store, planId, new JobStatusUpdated(0, default, default, key, JobStatus.Ready));
         await this.bus.PublishAsync(
             new JobReadyEvent
@@ -603,7 +603,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             },
             CancellationToken.None);
 
-        // Ready → Scheduled
+        // Ready â†’ Scheduled
         await Mutate(store, planId, new JobStatusUpdated(0, default, default, key, JobStatus.Scheduled));
         await this.bus.PublishAsync(
             new JobScheduledEvent
@@ -614,20 +614,20 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             },
             CancellationToken.None);
 
-        // Scheduled → Running
+        // Scheduled â†’ Running
         await Mutate(store, planId, new JobStatusUpdated(0, default, default, key, JobStatus.Running));
 
         // Execute the phase pipeline (PhaseExecutor publishes PhaseAttemptCompletedEvent)
         var result = await exec.ExecuteAsync(planId, jobId, RunId.New(), CancellationToken.None);
 
-        // Running → final status
+        // Running â†’ final status
         await Mutate(store, planId,
             new JobStatusUpdated(0, default, default, key, result.FinalStatus));
 
         return result;
     }
 
-    // ──────────────────────── Event Ordering Helpers ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Event Ordering Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>Extracts the <see cref="JobId"/> from any known event type.</summary>
     private static JobId? GetEventJobId(object evt) => evt switch
@@ -668,7 +668,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         return -1;
     }
 
-    // ──────────────────────── Infrastructure Helpers ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Infrastructure Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private PlanStore CreateStore(PlanStoreOptions? options = null) =>
         new(
@@ -803,7 +803,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         Directory.Delete(path, recursive: true);
     }
 
-    // ──────────────────────── FullRecordingEventBus ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ FullRecordingEventBus â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// Records all events published, in order, with support for both typed queries
@@ -851,7 +851,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         }
     }
 
-    // ──────────────────────── Git Test Fixture ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Git Test Fixture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// Manages a real git repository in a temp directory. Uses the <c>git</c> CLI for all
@@ -882,7 +882,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
             // Ensure orchestrator .gitignore entries are committed before any plan execution.
             // In production, this is done by DaemonStartupGuard.EnsureGitignoreAsync()
             // before any logging file sinks are opened.
-            new AiOrchestrator.Git.Gitignore.GitignoreCommitter(new TestProcessSpawner())
+            new AiOrchestrator.Git.Gitignore.GitignoreCommitter(new TestProcessSpawner(), new NullFileSystem())
                 .EnsureAndCommitAsync(this.repoPath)
                 .GetAwaiter().GetResult();
         }
@@ -1020,7 +1020,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         }
     }
 
-    // ──────────────────────── Real Phase Runners ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Real Phase Runners â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>Writes a file in the job's worktree and stages it.</summary>
     private sealed class RealWorkPhaseRunner : IPhaseRunner
@@ -1154,7 +1154,7 @@ public sealed class FullPipelineAcceptanceTests : IDisposable
         }
     }
 
-    // ──────────────────────── Shared Inner Types ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Shared Inner Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>Maps friendly test names to real <see cref="JobId"/> values.</summary>
     private sealed class JobIdMap

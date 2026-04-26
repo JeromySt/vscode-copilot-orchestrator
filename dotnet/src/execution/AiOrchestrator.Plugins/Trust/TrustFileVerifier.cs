@@ -37,13 +37,13 @@ internal sealed class TrustFileVerifier
     /// <param name="trustFile">Absolute path to the trust file.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><see langword="true"/> if permissions are acceptable; otherwise <see langword="false"/>.</returns>
-    public ValueTask<bool> IsTrustFileValidAsync(AbsolutePath trustFile, CancellationToken ct)
+    public async ValueTask<bool> IsTrustFileValidAsync(AbsolutePath trustFile, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        if (!File.Exists(trustFile.Value))
+        if (!await this.fs.FileExistsAsync(trustFile, ct).ConfigureAwait(false))
         {
-            return new ValueTask<bool>(false);
+            return false;
         }
 
         bool valid;
@@ -56,7 +56,7 @@ internal sealed class TrustFileVerifier
             valid = IsOwnerOnlyPosix(trustFile.Value);
         }
 
-        return new ValueTask<bool>(valid);
+        return valid;
     }
 
     /// <summary>
@@ -160,7 +160,9 @@ internal sealed class TrustFileVerifier
         {
             // Stat the file and check that mode & 0177 == 0 (i.e., only owner has any bits set).
             // We use File.GetUnixFileMode (available in .NET 7+).
+#pragma warning disable OE0004 // File.GetUnixFileMode has no IFileSystem equivalent — OS-specific metadata query
             var mode = (int)File.GetUnixFileMode(path);
+#pragma warning restore OE0004
 
             // 0600 = 0b110_000_000 → bits 6-7 set, everything else zero.
             // Reject if any group or other bits are set.

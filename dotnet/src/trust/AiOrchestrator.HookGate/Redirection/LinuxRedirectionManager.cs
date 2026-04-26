@@ -3,6 +3,7 @@
 // </copyright>
 
 using System.Diagnostics.CodeAnalysis;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.HookGate.Immutability;
 using AiOrchestrator.Models.Paths;
@@ -21,21 +22,23 @@ internal sealed class LinuxRedirectionManager : IRedirectionManager
 {
     private readonly IImmutabilityEventSink events;
     private readonly IProcessSpawner spawner;
+    private readonly IFileSystem fs;
     private readonly ILogger<LinuxRedirectionManager> logger;
     private readonly TimeSpan timeout = TimeSpan.FromSeconds(5);
 
-    public LinuxRedirectionManager(IImmutabilityEventSink events, IProcessSpawner spawner, ILogger<LinuxRedirectionManager> logger)
+    public LinuxRedirectionManager(IImmutabilityEventSink events, IProcessSpawner spawner, IFileSystem fs, ILogger<LinuxRedirectionManager> logger)
     {
         this.events = events ?? throw new ArgumentNullException(nameof(events));
         this.spawner = spawner ?? throw new ArgumentNullException(nameof(spawner));
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async ValueTask InstallRedirectionAsync(AbsolutePath gitHooksDir, AbsolutePath canonicalDispatcherPath, CancellationToken ct)
     {
-        if (!Directory.Exists(gitHooksDir.Value))
+        if (!await this.fs.DirectoryExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
         {
-            _ = Directory.CreateDirectory(gitHooksDir.Value);
+            await this.fs.CreateDirectoryAsync(gitHooksDir, ct).ConfigureAwait(false);
         }
 
         var (mountCode, _) = await ToolRunner.RunAsync(
@@ -64,7 +67,7 @@ internal sealed class LinuxRedirectionManager : IRedirectionManager
             return;
         }
 
-        this.InstallSymlink(gitHooksDir, canonicalDispatcherPath);
+        await this.InstallSymlinkAsync(gitHooksDir, canonicalDispatcherPath, ct).ConfigureAwait(false);
         await this.events.PublishAsync(
             new HookGateNonceImmutabilityUnsupported
             {
@@ -88,11 +91,11 @@ internal sealed class LinuxRedirectionManager : IRedirectionManager
         {
             if (IsSymlink(gitHooksDir.Value))
             {
-                File.Delete(gitHooksDir.Value);
+                await this.fs.DeleteAsync(gitHooksDir, ct).ConfigureAwait(false);
             }
-            else if (Directory.Exists(gitHooksDir.Value))
+            else if (await this.fs.DirectoryExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
             {
-                Directory.Delete(gitHooksDir.Value, recursive: true);
+                await this.fs.DeleteDirectoryAsync(gitHooksDir, recursive: true, ct).ConfigureAwait(false);
             }
         }
         catch (IOException)
@@ -104,7 +107,7 @@ internal sealed class LinuxRedirectionManager : IRedirectionManager
     public async ValueTask<RedirectionMode> GetActiveModeAsync(AbsolutePath gitHooksDir, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!Directory.Exists(gitHooksDir.Value) && !File.Exists(gitHooksDir.Value))
+        if (!await this.fs.DirectoryExistsAsync(gitHooksDir, ct).ConfigureAwait(false) && !await this.fs.FileExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
         {
             return RedirectionMode.NotInstalled;
         }
@@ -116,9 +119,9 @@ internal sealed class LinuxRedirectionManager : IRedirectionManager
 
         try
         {
-            if (File.Exists("/proc/self/mountinfo"))
+            if (await this.fs.FileExistsAsync(new AbsolutePath("/proc/self/mountinfo"), ct).ConfigureAwait(false))
             {
-                var content = await System.IO.File.ReadAllTextAsync("/proc/self/mountinfo", ct).ConfigureAwait(false);
+                var content = await this.fs.ReadAllTextAsync(new AbsolutePath("/proc/self/mountinfo"), ct).ConfigureAwait(false);
                 if (content.Contains(" " + gitHooksDir.Value + " ", StringComparison.Ordinal))
                 {
                     return RedirectionMode.BindMount;
@@ -133,20 +136,22 @@ internal sealed class LinuxRedirectionManager : IRedirectionManager
         return RedirectionMode.NotInstalled;
     }
 
-    private void InstallSymlink(AbsolutePath dst, AbsolutePath src)
+    private async ValueTask InstallSymlinkAsync(AbsolutePath dst, AbsolutePath src, CancellationToken ct)
     {
         try
         {
-            if (Directory.Exists(dst.Value))
+            if (await this.fs.DirectoryExistsAsync(dst, ct).ConfigureAwait(false))
             {
-                Directory.Delete(dst.Value, recursive: true);
+                await this.fs.DeleteDirectoryAsync(dst, recursive: true, ct).ConfigureAwait(false);
             }
-            else if (File.Exists(dst.Value))
+            else if (await this.fs.FileExistsAsync(dst, ct).ConfigureAwait(false))
             {
-                File.Delete(dst.Value);
+                await this.fs.DeleteAsync(dst, ct).ConfigureAwait(false);
             }
 
+#pragma warning disable OE0004 // Directory.CreateSymbolicLink has no IFileSystem equivalent
             _ = Directory.CreateSymbolicLink(dst.Value, src.Value);
+#pragma warning restore OE0004
         }
         catch (IOException ex)
         {

@@ -42,7 +42,9 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
     {
         // Look for the assembly in the plugin directory.
         var candidate = Path.Combine(this.pluginDirectory, assemblyName.Name + ".dll");
+#pragma warning disable OE0004 // AssemblyLoadContext.Load is synchronous; no async IFileSystem path available
         if (File.Exists(candidate))
+#pragma warning restore OE0004
         {
             return this.LoadFromAssemblyPath(candidate);
         }

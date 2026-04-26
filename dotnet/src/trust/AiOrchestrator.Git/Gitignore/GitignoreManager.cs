@@ -9,6 +9,8 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Io;
+using AiOrchestrator.Models.Paths;
 
 namespace AiOrchestrator.Git.Gitignore;
 
@@ -36,20 +38,22 @@ public static class GitignoreManager
     /// Returns <c>true</c> if the file was modified, <c>false</c> if already up-to-date.
     /// </summary>
     public static async Task<bool> EnsureEntriesAsync(
+        IFileSystem fs,
         string repoRoot,
         IReadOnlyList<string>? entries = null,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(fs);
         ArgumentNullException.ThrowIfNull(repoRoot);
         entries ??= OrchestratorEntries;
-        var gitignorePath = Path.Combine(repoRoot, ".gitignore");
+        var gitignorePath = new AbsolutePath(Path.Combine(repoRoot, ".gitignore"));
 
         // Read existing content
         var existingLines = new HashSet<string>(StringComparer.Ordinal);
         string existingContent = string.Empty;
-        if (File.Exists(gitignorePath))
+        if (await fs.FileExistsAsync(gitignorePath, ct).ConfigureAwait(false))
         {
-            existingContent = await File.ReadAllTextAsync(gitignorePath, ct).ConfigureAwait(false);
+            existingContent = await fs.ReadAllTextAsync(gitignorePath, ct).ConfigureAwait(false);
             foreach (var line in existingContent.Split('\n'))
             {
                 existingLines.Add(line.TrimEnd('\r'));
@@ -90,7 +94,7 @@ public static class GitignoreManager
             sb.AppendLine(entry);
         }
 
-        await File.WriteAllTextAsync(gitignorePath, sb.ToString(), ct).ConfigureAwait(false);
+        await fs.WriteAllTextAsync(gitignorePath, sb.ToString(), ct).ConfigureAwait(false);
         return true;
     }
 
@@ -99,23 +103,24 @@ public static class GitignoreManager
     /// Convenience wrapper for <see cref="EnsureEntriesAsync"/>.
     /// </summary>
     public static Task<bool> EnsureOrchestratorGitIgnoreAsync(
-        string repoRoot, CancellationToken ct = default)
-        => EnsureEntriesAsync(repoRoot, OrchestratorEntries, ct);
+        IFileSystem fs, string repoRoot, CancellationToken ct = default)
+        => EnsureEntriesAsync(fs, repoRoot, OrchestratorEntries, ct);
 
     /// <summary>
     /// Returns <c>true</c> if all orchestrator entries are already present in the .gitignore.
     /// </summary>
     public static async Task<bool> IsConfiguredAsync(
-        string repoRoot, CancellationToken ct = default)
+        IFileSystem fs, string repoRoot, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(fs);
         ArgumentNullException.ThrowIfNull(repoRoot);
-        var gitignorePath = Path.Combine(repoRoot, ".gitignore");
-        if (!File.Exists(gitignorePath))
+        var gitignorePath = new AbsolutePath(Path.Combine(repoRoot, ".gitignore"));
+        if (!await fs.FileExistsAsync(gitignorePath, ct).ConfigureAwait(false))
         {
             return false;
         }
 
-        var content = await File.ReadAllTextAsync(gitignorePath, ct).ConfigureAwait(false);
+        var content = await fs.ReadAllTextAsync(gitignorePath, ct).ConfigureAwait(false);
         var lines = new HashSet<string>(
             content.Split('\n').Select(l => l.TrimEnd('\r')),
             StringComparer.Ordinal);

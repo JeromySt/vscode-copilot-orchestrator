@@ -5,6 +5,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Models.Paths;
 using Microsoft.Extensions.Logging;
 
@@ -19,6 +20,7 @@ namespace AiOrchestrator.HookGate.Rpc;
 internal sealed class UnixSocketRpcServer : IRpcServer
 {
     private readonly AbsolutePath socketPath;
+    private readonly IFileSystem fs;
     private readonly ILogger<UnixSocketRpcServer> logger;
     private Socket? listener;
     private long peerChecks;
@@ -26,15 +28,16 @@ internal sealed class UnixSocketRpcServer : IRpcServer
     private Task? acceptLoop;
     private int disposed;
 
-    public UnixSocketRpcServer(AbsolutePath socketPath, ILogger<UnixSocketRpcServer> logger)
+    public UnixSocketRpcServer(AbsolutePath socketPath, IFileSystem fs, ILogger<UnixSocketRpcServer> logger)
     {
         this.socketPath = socketPath;
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public long PeerCredChecksPerformed => System.Threading.Interlocked.Read(ref this.peerChecks);
 
-    public ValueTask StartAsync(Func<HookCheckInRequest, CancellationToken, ValueTask<HookApproval>> handler, CancellationToken ct)
+    public async ValueTask StartAsync(Func<HookCheckInRequest, CancellationToken, ValueTask<HookApproval>> handler, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -48,14 +51,14 @@ internal sealed class UnixSocketRpcServer : IRpcServer
         }
 
         var dir = Path.GetDirectoryName(this.socketPath.Value)!;
-        if (!Directory.Exists(dir))
+        if (!await this.fs.DirectoryExistsAsync(new AbsolutePath(dir), ct).ConfigureAwait(false))
         {
-            _ = Directory.CreateDirectory(dir);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(dir), ct).ConfigureAwait(false);
         }
 
-        if (File.Exists(this.socketPath.Value))
+        if (await this.fs.FileExistsAsync(this.socketPath, ct).ConfigureAwait(false))
         {
-            File.Delete(this.socketPath.Value);
+            await this.fs.DeleteAsync(this.socketPath, ct).ConfigureAwait(false);
         }
 
         var ls = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -66,7 +69,6 @@ internal sealed class UnixSocketRpcServer : IRpcServer
 
         var cts = this.stopCts;
         this.acceptLoop = Task.Run(() => this.AcceptLoopAsync(handler, cts.Token));
-        return ValueTask.CompletedTask;
     }
 
     public async ValueTask StopAsync(CancellationToken ct)
@@ -111,19 +113,22 @@ internal sealed class UnixSocketRpcServer : IRpcServer
         }
 
         try { this.listener?.Dispose(); } catch (SocketException) { }
+        return this.CleanupSocketFileAsync();
+    }
+
+    private async ValueTask CleanupSocketFileAsync()
+    {
         try
         {
-            if (File.Exists(this.socketPath.Value))
+            if (await this.fs.FileExistsAsync(this.socketPath, CancellationToken.None).ConfigureAwait(false))
             {
-                File.Delete(this.socketPath.Value);
+                await this.fs.DeleteAsync(this.socketPath, CancellationToken.None).ConfigureAwait(false);
             }
         }
         catch (IOException)
         {
             // best effort
         }
-
-        return ValueTask.CompletedTask;
     }
 
     private async Task AcceptLoopAsync(Func<HookCheckInRequest, CancellationToken, ValueTask<HookApproval>> handler, CancellationToken ct)

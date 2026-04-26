@@ -6,6 +6,7 @@ using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using AiOrchestrator.Abstractions.Eventing;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Time;
 using AiOrchestrator.Audit;
 using AiOrchestrator.HookGate.Exceptions;
@@ -50,7 +51,8 @@ public sealed class HookGateDaemon : IHostedService, IAsyncDisposable
         IEventBus bus,
         IOptionsMonitor<HookGateOptions> opts,
         ILogger<HookGateDaemon> logger,
-        IAuditLog audit)
+        IAuditLog audit,
+        IFileSystem fs)
     {
         this.nonces = nonces ?? throw new ArgumentNullException(nameof(nonces));
         this.rpc = rpc ?? throw new ArgumentNullException(nameof(rpc));
@@ -60,7 +62,7 @@ public sealed class HookGateDaemon : IHostedService, IAsyncDisposable
         this.opts = opts ?? throw new ArgumentNullException(nameof(opts));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
         this.audit = audit ?? throw new ArgumentNullException(nameof(audit));
-        this.validator = new LinkValidator();
+        this.validator = new LinkValidator(fs ?? throw new ArgumentNullException(nameof(fs)));
     }
 
     /// <summary>Gets the number of per-message peer-credential checks performed (INV-1).</summary>

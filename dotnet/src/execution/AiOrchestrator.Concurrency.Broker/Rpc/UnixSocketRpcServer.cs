@@ -4,6 +4,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Concurrency.Broker.Fairness;
 using AiOrchestrator.Models.Paths;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public sealed class UnixSocketRpcServer : IRpcServer
 {
     private readonly IOptionsMonitor<BrokerOptions> opts;
     private readonly FairnessScheduler scheduler;
+    private readonly IFileSystem fs;
     private readonly ILogger<UnixSocketRpcServer> logger;
     private Socket? listener;
     private CancellationTokenSource? cts;
@@ -31,27 +33,30 @@ public sealed class UnixSocketRpcServer : IRpcServer
     /// </summary>
     /// <param name="opts">Broker options (socket path, etc.).</param>
     /// <param name="scheduler">The fairness scheduler to use for slot arbitration.</param>
+    /// <param name="fs">File system abstraction.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
     public UnixSocketRpcServer(
         IOptionsMonitor<BrokerOptions> opts,
         FairnessScheduler scheduler,
+        IFileSystem fs,
         ILogger<UnixSocketRpcServer> logger)
     {
         this.opts = opts;
         this.scheduler = scheduler;
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
         this.logger = logger;
     }
 
     /// <inheritdoc/>
-    public Task StartAsync(CancellationToken ct)
+    public async Task StartAsync(CancellationToken ct)
     {
         var socketPath = this.opts.CurrentValue.SocketPath;
-        this.EnsureDirectoryExists(socketPath);
+        await this.EnsureDirectoryExistsAsync(socketPath, ct).ConfigureAwait(false);
 
         // Remove stale socket file if present.
-        if (File.Exists(socketPath.Value))
+        if (await this.fs.FileExistsAsync(socketPath, ct).ConfigureAwait(false))
         {
-            File.Delete(socketPath.Value);
+            await this.fs.DeleteAsync(socketPath, ct).ConfigureAwait(false);
         }
 
         this.listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -62,8 +67,6 @@ public sealed class UnixSocketRpcServer : IRpcServer
 
         this.cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         this.acceptLoop = Task.Run(() => this.AcceptLoopAsync(this.cts.Token), this.cts.Token);
-
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
@@ -121,12 +124,12 @@ public sealed class UnixSocketRpcServer : IRpcServer
         }
     }
 
-    private void EnsureDirectoryExists(AbsolutePath socketPath)
+    private async ValueTask EnsureDirectoryExistsAsync(AbsolutePath socketPath, CancellationToken ct)
     {
         var dir = Path.GetDirectoryName(socketPath.Value);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        if (!string.IsNullOrEmpty(dir) && !await this.fs.DirectoryExistsAsync(new AbsolutePath(dir), ct).ConfigureAwait(false))
         {
-            _ = Directory.CreateDirectory(dir);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(dir), ct).ConfigureAwait(false);
         }
     }
 

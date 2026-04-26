@@ -1,4 +1,4 @@
-// <copyright file="ManualScenarioTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="ManualScenarioTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -60,7 +60,7 @@ public sealed class ManualScenarioTests : IDisposable
         }
     }
 
-    // ────────────────────────────── Test 1 ──────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Test 1 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     [ContractTest("MANUAL-SCENARIO-LINEAR")]
@@ -72,7 +72,7 @@ public sealed class ManualScenarioTests : IDisposable
             new PlanModel { Name = "linear-e2e", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // A → B → C
+        // A â†’ B â†’ C
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("a"), "Job A");
         await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
@@ -87,7 +87,7 @@ public sealed class ManualScenarioTests : IDisposable
 
         var exec = this.MakeGitExecutor(store, fixture, fileMap);
 
-        // Execute A → B → C in sequence
+        // Execute A â†’ B â†’ C in sequence
         foreach (var name in new[] { "a", "b", "c" })
         {
             fixture.CreateWorktree(ids.Key(name));
@@ -107,7 +107,7 @@ public sealed class ManualScenarioTests : IDisposable
         Assert.True(fixture.VerifyFileOnBranch("main", "c.txt"));
     }
 
-    // ────────────────────────────── Test 2 ──────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Test 2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     [ContractTest("MANUAL-SCENARIO-FANOUT-FANIN")]
@@ -119,7 +119,7 @@ public sealed class ManualScenarioTests : IDisposable
             new PlanModel { Name = "fanout-e2e", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // Root → {W1, W2, W3} → Verify
+        // Root â†’ {W1, W2, W3} â†’ Verify
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("root"), "Root");
         await AddJob(store, planId, ids.Register("w1"), "Worker 1", ids["root"]);
@@ -175,7 +175,7 @@ public sealed class ManualScenarioTests : IDisposable
         Assert.True(fixture.VerifyFileOnBranch("main", "verified.txt"));
     }
 
-    // ────────────────────────────── Test 3 ──────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Test 3 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     [ContractTest("MANUAL-SCENARIO-DIAMOND")]
@@ -187,7 +187,7 @@ public sealed class ManualScenarioTests : IDisposable
             new PlanModel { Name = "diamond-e2e", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // A → C, B → C, C → D (A and B are independent roots)
+        // A â†’ C, B â†’ C, C â†’ D (A and B are independent roots)
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("a"), "Root A");
         await AddJob(store, planId, ids.Register("b"), "Root B");
@@ -239,7 +239,7 @@ public sealed class ManualScenarioTests : IDisposable
         Assert.True(fixture.VerifyFileOnBranch("main", "d/file.txt"));
     }
 
-    // ────────────────────────────── Test 4 ──────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Test 4 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     [ContractTest("MANUAL-SCENARIO-SPLIT-FANIN")]
@@ -251,7 +251,7 @@ public sealed class ManualScenarioTests : IDisposable
             new PlanModel { Name = "split-fanin-e2e", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // Initial: Root → Work → Final
+        // Initial: Root â†’ Work â†’ Final
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("root"), "Root");
         await AddJob(store, planId, ids.Register("work"), "Work", ids["root"]);
@@ -277,7 +277,7 @@ public sealed class ManualScenarioTests : IDisposable
         await ExecuteJob(store, exec, planId, ids["work"]);
         fixture.MergeWorktreeToMain(ids.Key("work"));
 
-        // Reshape: add W1, W2 depending on Work; WV depending on W1+W2; rewire Final→WV
+        // Reshape: add W1, W2 depending on Work; WV depending on W1+W2; rewire Finalâ†’WV
         var w1Id = ids.Register("w1");
         var w2Id = ids.Register("w2");
         var wvId = ids.Register("wv");
@@ -353,7 +353,7 @@ public sealed class ManualScenarioTests : IDisposable
         Assert.True(fixture.VerifyFileOnBranch("main", "final.txt"));
     }
 
-    // ────────────────────────────── Test 5 ──────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Test 5 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     [ContractTest("MANUAL-SCENARIO-FAILED-PARTIAL")]
@@ -365,7 +365,7 @@ public sealed class ManualScenarioTests : IDisposable
             new PlanModel { Name = "fail-partial-e2e", Status = PlanStatus.Running },
             Idem(), CancellationToken.None);
 
-        // A → B → C
+        // A â†’ B â†’ C
         var ids = new JobIdMap();
         await AddJob(store, planId, ids.Register("a"), "Job A");
         await AddJob(store, planId, ids.Register("b"), "Job B", ids["a"]);
@@ -394,7 +394,7 @@ public sealed class ManualScenarioTests : IDisposable
         Assert.Equal(JobStatus.Failed, resultB.FinalStatus);
         // B's worktree is NOT merged to main
 
-        // C → Blocked
+        // C â†’ Blocked
         await Mutate(store, planId, new JobStatusUpdated(0, default, default, ids.Key("c"), JobStatus.Blocked));
 
         // Verify: a.txt IS on main (A merged), but b.txt is NOT (B never merged)
@@ -410,7 +410,7 @@ public sealed class ManualScenarioTests : IDisposable
         Assert.Equal(JobStatus.Blocked, plan.Jobs[ids.Key("c")].Status);
     }
 
-    // ──────────────────────── Infrastructure helpers ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Infrastructure helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private PlanStore CreateStore(PlanStoreOptions? options = null) =>
         new(
@@ -529,7 +529,7 @@ public sealed class ManualScenarioTests : IDisposable
 
     private static IdempotencyKey Idem() => IdempotencyKey.FromGuid(Guid.NewGuid());
 
-    // ──────────────────────── Git Test Fixture ────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Git Test Fixture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// Manages a real git repository in a temp directory. Uses the <c>git</c> CLI for all
@@ -558,7 +558,7 @@ public sealed class ManualScenarioTests : IDisposable
             RunGit(this.repoPath, "commit", "-m", "Initial commit");
 
             // Ensure orchestrator .gitignore entries are committed before any plan execution
-            new AiOrchestrator.Git.Gitignore.GitignoreCommitter(new TestProcessSpawner())
+            new AiOrchestrator.Git.Gitignore.GitignoreCommitter(new TestProcessSpawner(), new NullFileSystem())
                 .EnsureAndCommitAsync(this.repoPath)
                 .GetAwaiter().GetResult();
         }
@@ -718,7 +718,7 @@ public sealed class ManualScenarioTests : IDisposable
         }
     }
 
-    // ──────────────────── Real Phase Runners ────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Real Phase Runners â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>
     /// Work-phase runner that writes a file in the job's worktree and stages it.
@@ -816,7 +816,7 @@ public sealed class ManualScenarioTests : IDisposable
         }
     }
 
-    // ──────────────────── Reused from DagLifecycleIntegrationTests ────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Reused from DagLifecycleIntegrationTests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// <summary>Maps friendly test names to real <see cref="JobId"/> values.</summary>
     private sealed class JobIdMap

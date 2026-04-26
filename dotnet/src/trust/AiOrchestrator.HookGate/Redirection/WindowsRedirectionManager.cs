@@ -2,6 +2,7 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.HookGate.Immutability;
 using AiOrchestrator.Models.Paths;
@@ -19,13 +20,15 @@ internal sealed class WindowsRedirectionManager : IRedirectionManager
 {
     private readonly IImmutabilityEventSink events;
     private readonly IProcessSpawner spawner;
+    private readonly IFileSystem fs;
     private readonly ILogger<WindowsRedirectionManager> logger;
     private readonly TimeSpan timeout = TimeSpan.FromSeconds(5);
 
-    public WindowsRedirectionManager(IImmutabilityEventSink events, IProcessSpawner spawner, ILogger<WindowsRedirectionManager> logger)
+    public WindowsRedirectionManager(IImmutabilityEventSink events, IProcessSpawner spawner, IFileSystem fs, ILogger<WindowsRedirectionManager> logger)
     {
         this.events = events ?? throw new ArgumentNullException(nameof(events));
         this.spawner = spawner ?? throw new ArgumentNullException(nameof(spawner));
+        this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -33,11 +36,11 @@ internal sealed class WindowsRedirectionManager : IRedirectionManager
     {
         ct.ThrowIfCancellationRequested();
 
-        if (Directory.Exists(gitHooksDir.Value))
+        if (await this.fs.DirectoryExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
         {
             try
             {
-                Directory.Delete(gitHooksDir.Value, recursive: true);
+                await this.fs.DeleteDirectoryAsync(gitHooksDir, recursive: true, ct).ConfigureAwait(false);
             }
             catch (IOException)
             {
@@ -60,7 +63,9 @@ internal sealed class WindowsRedirectionManager : IRedirectionManager
 
         try
         {
+#pragma warning disable OE0004 // Directory.CreateSymbolicLink has no IFileSystem equivalent
             _ = Directory.CreateSymbolicLink(gitHooksDir.Value, canonicalDispatcherPath.Value);
+#pragma warning restore OE0004
             await this.events.PublishAsync(
                 new HookGateNonceImmutabilityUnsupported
                 {
@@ -78,32 +83,30 @@ internal sealed class WindowsRedirectionManager : IRedirectionManager
         }
     }
 
-    public ValueTask UninstallRedirectionAsync(AbsolutePath gitHooksDir, CancellationToken ct)
+    public async ValueTask UninstallRedirectionAsync(AbsolutePath gitHooksDir, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         try
         {
-            if (Directory.Exists(gitHooksDir.Value))
+            if (await this.fs.DirectoryExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
             {
-                Directory.Delete(gitHooksDir.Value, recursive: false);
+                await this.fs.DeleteDirectoryAsync(gitHooksDir, recursive: false, ct).ConfigureAwait(false);
             }
-            else if (File.Exists(gitHooksDir.Value))
+            else if (await this.fs.FileExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
             {
-                File.Delete(gitHooksDir.Value);
+                await this.fs.DeleteAsync(gitHooksDir, ct).ConfigureAwait(false);
             }
         }
         catch (IOException)
         {
             // best effort
         }
-
-        return ValueTask.CompletedTask;
     }
 
     public async ValueTask<RedirectionMode> GetActiveModeAsync(AbsolutePath gitHooksDir, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!Directory.Exists(gitHooksDir.Value) && !File.Exists(gitHooksDir.Value))
+        if (!await this.fs.DirectoryExistsAsync(gitHooksDir, ct).ConfigureAwait(false) && !await this.fs.FileExistsAsync(gitHooksDir, ct).ConfigureAwait(false))
         {
             return RedirectionMode.NotInstalled;
         }

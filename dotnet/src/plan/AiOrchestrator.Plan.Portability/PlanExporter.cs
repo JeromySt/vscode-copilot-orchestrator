@@ -111,9 +111,9 @@ public sealed class PlanExporter
         entries["manifest.json"] = Encoding.UTF8.GetBytes(manifestJson);
 
         var outDir = Path.GetDirectoryName(outputFile.Value);
-        if (!string.IsNullOrEmpty(outDir) && !Directory.Exists(outDir))
+        if (!string.IsNullOrEmpty(outDir) && !await this.fs.DirectoryExistsAsync(new AbsolutePath(outDir), ct).ConfigureAwait(false))
         {
-            _ = Directory.CreateDirectory(outDir);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(outDir), ct).ConfigureAwait(false);
         }
 
         WriteZip(outputFile.Value, entries);

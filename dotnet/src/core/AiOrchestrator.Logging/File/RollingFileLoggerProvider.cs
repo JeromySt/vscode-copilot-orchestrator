@@ -33,7 +33,9 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
         var dir = Path.GetDirectoryName(this.filePath);
         if (!string.IsNullOrEmpty(dir))
         {
+#pragma warning disable OE0004 // ILoggerProvider constructor must be synchronous; no async IFileSystem path available
             Directory.CreateDirectory(dir);
+#pragma warning restore OE0004
         }
 
         this.writer = new StreamWriter(
@@ -83,6 +85,7 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
         this.writer = null;
 
         // Shift rolled files: .{n-1} → .{n}, ... , .1 → .2
+#pragma warning disable OE0004 // Roll() is called under lock from synchronous Write(); no async IFileSystem path available
         for (int i = this.maxRetainedFiles - 1; i >= 1; i--)
         {
             var src = $"{this.filePath}.{i}";
@@ -103,6 +106,7 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
         {
             System.IO.File.Move(this.filePath, $"{this.filePath}.1");
         }
+#pragma warning restore OE0004
 
         this.writer = new StreamWriter(
             new FileStream(this.filePath, FileMode.Create, FileAccess.Write, FileShare.Read),

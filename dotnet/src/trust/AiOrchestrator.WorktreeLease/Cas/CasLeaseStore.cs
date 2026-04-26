@@ -70,7 +70,7 @@ internal sealed class CasLeaseStore
         ArgumentNullException.ThrowIfNull(content);
         ct.ThrowIfCancellationRequested();
 
-        EnsureParentDirectory(leaseFile);
+        await this.EnsureParentDirectoryAsync(leaseFile, ct).ConfigureAwait(false);
 
         // Exclusive lock: FileShare.None. FileMode.OpenOrCreate so first-acquire path works.
         await using var stream = new FileStream(
@@ -109,7 +109,7 @@ internal sealed class CasLeaseStore
     public async ValueTask<LeaseFileContent?> ReadAsync(AbsolutePath leaseFile, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!File.Exists(leaseFile.Value))
+        if (!await this.fs.FileExistsAsync(leaseFile, ct).ConfigureAwait(false))
         {
             return null;
         }
@@ -173,7 +173,7 @@ internal sealed class CasLeaseStore
         var parent = Path.GetDirectoryName(target.Value);
         if (!string.IsNullOrEmpty(parent))
         {
-            _ = Directory.CreateDirectory(parent);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(parent), ct).ConfigureAwait(false);
         }
 
         await using var writeStream = new FileStream(
@@ -195,7 +195,7 @@ internal sealed class CasLeaseStore
     public async ValueTask DeleteAsync(AbsolutePath leaseFile, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (!File.Exists(leaseFile.Value))
+        if (!await this.fs.FileExistsAsync(leaseFile, ct).ConfigureAwait(false))
         {
             return;
         }
@@ -209,7 +209,7 @@ internal sealed class CasLeaseStore
         {
             try
             {
-                File.Delete(leaseFile.Value);
+                await this.fs.DeleteAsync(leaseFile, ct).ConfigureAwait(false);
                 return;
             }
             catch (IOException) when (i < MaxAttempts - 1)
@@ -226,12 +226,12 @@ internal sealed class CasLeaseStore
     internal static AbsolutePath LeaseFileFor(AbsolutePath worktree) =>
         new(Path.Combine(worktree.Value, ".aio", "lease.json"));
 
-    private static void EnsureParentDirectory(AbsolutePath leaseFile)
+    private async ValueTask EnsureParentDirectoryAsync(AbsolutePath leaseFile, CancellationToken ct)
     {
         var parent = Path.GetDirectoryName(leaseFile.Value);
         if (!string.IsNullOrEmpty(parent))
         {
-            _ = Directory.CreateDirectory(parent);
+            await this.fs.CreateDirectoryAsync(new AbsolutePath(parent), ct).ConfigureAwait(false);
         }
     }
 

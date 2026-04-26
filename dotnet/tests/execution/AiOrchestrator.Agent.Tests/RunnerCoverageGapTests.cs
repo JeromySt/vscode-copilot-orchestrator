@@ -1,4 +1,4 @@
-// <copyright file="RunnerCoverageGapTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="RunnerCoverageGapTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -18,21 +18,21 @@ public sealed class RunnerCoverageGapTests
     [Fact]
     public void DefaultExecutableLocator_NullName_Throws()
     {
-        var locator = new DefaultExecutableLocator();
+        var locator = new DefaultExecutableLocator(new PassthroughFileSystem());
         Assert.Throws<ArgumentNullException>(() => locator.Locate(null!));
     }
 
     [Fact]
     public void DefaultExecutableLocator_EmptyName_Throws()
     {
-        var locator = new DefaultExecutableLocator();
+        var locator = new DefaultExecutableLocator(new PassthroughFileSystem());
         Assert.Throws<ArgumentException>(() => locator.Locate(string.Empty));
     }
 
     [Fact]
     public void DefaultExecutableLocator_MissingExecutable_ReturnsNull()
     {
-        var locator = new DefaultExecutableLocator();
+        var locator = new DefaultExecutableLocator(new PassthroughFileSystem());
         // Use a name that is very unlikely to exist on any real PATH.
         var result = locator.Locate("orca-nonexistent-exe-" + Guid.NewGuid().ToString("N"));
         Assert.Null(result);
@@ -41,7 +41,7 @@ public sealed class RunnerCoverageGapTests
     [Fact]
     public void DefaultExecutableLocator_FindsExecutableInTempDir()
     {
-        var locator = new DefaultExecutableLocator();
+        var locator = new DefaultExecutableLocator(new PassthroughFileSystem());
         var tempDir = Path.Combine(Path.GetTempPath(), "locator-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         try

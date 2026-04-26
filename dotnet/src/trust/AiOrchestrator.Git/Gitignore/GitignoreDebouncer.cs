@@ -8,6 +8,7 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Process;
 using AiOrchestrator.Models;
 using Microsoft.Extensions.Logging;
@@ -43,12 +44,12 @@ public sealed class GitignoreDebouncer : IAsyncDisposable
     /// flushing entries.  Defaults to <see cref="DefaultDelay"/> (30 s).
     /// </param>
     /// <param name="logger">Optional logger.</param>
-    public GitignoreDebouncer(IProcessSpawner spawner, TimeSpan? delay = null, ILogger<GitignoreDebouncer>? logger = null)
+    public GitignoreDebouncer(IProcessSpawner spawner, IFileSystem fs, TimeSpan? delay = null, ILogger<GitignoreDebouncer>? logger = null)
     {
         this.spawner = spawner ?? throw new ArgumentNullException(nameof(spawner));
         this.delay = delay ?? DefaultDelay;
         this.logger = logger ?? NullLogger<GitignoreDebouncer>.Instance;
-        this.committer = new GitignoreCommitter(spawner);
+        this.committer = new GitignoreCommitter(spawner, fs ?? throw new ArgumentNullException(nameof(fs)));
     }
 
     /// <summary>

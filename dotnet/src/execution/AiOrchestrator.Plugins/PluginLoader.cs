@@ -110,13 +110,18 @@ public sealed class PluginLoader : IPluginLoader, IAsyncDisposable
         }
 
         // --- Plugin discovery ---
-        if (!Directory.Exists(options.PluginRoot.Value))
+        if (!await this.fs.DirectoryExistsAsync(options.PluginRoot, ct).ConfigureAwait(false))
         {
             this.logger.LogWarning("Plugin root directory does not exist: {Root}", options.PluginRoot.Value);
             return result.ToImmutable();
         }
 
-        var pluginDirs = Directory.GetDirectories(options.PluginRoot.Value);
+        var pluginDirs = new List<string>();
+        await foreach (var dir in this.fs.EnumerateDirectoriesAsync(options.PluginRoot, ct).ConfigureAwait(false))
+        {
+            pluginDirs.Add(dir.Value);
+        }
+
         foreach (var dir in pluginDirs)
         {
             ct.ThrowIfCancellationRequested();
@@ -145,7 +150,7 @@ public sealed class PluginLoader : IPluginLoader, IAsyncDisposable
             new PluginUnloaded
             {
                 PluginId = plugin.PluginId,
-                AssemblySha256 = this.ComputeAssemblyHash(plugin.AssemblyPath),
+                AssemblySha256 = await this.ComputeAssemblyHashAsync(plugin.AssemblyPath, ct).ConfigureAwait(false),
                 UnloadedAt = this.clock.UtcNow,
             },
             ct).ConfigureAwait(false);
@@ -181,7 +186,7 @@ public sealed class PluginLoader : IPluginLoader, IAsyncDisposable
     {
         // INV-4: manifest.json must exist.
         var manifestPath = Path.Combine(dir, "manifest.json");
-        if (!File.Exists(manifestPath))
+        if (!await this.fs.FileExistsAsync(new AbsolutePath(manifestPath), ct).ConfigureAwait(false))
         {
             this.logger.LogWarning("Plugin directory missing manifest.json: {Dir}", dir);
             await this.EmitRejectedAsync(Path.GetFileName(dir), string.Empty, "Missing manifest.json (INV-4)", ct).ConfigureAwait(false);
@@ -191,7 +196,7 @@ public sealed class PluginLoader : IPluginLoader, IAsyncDisposable
         PluginManifest? manifest;
         try
         {
-            var json = File.ReadAllText(manifestPath);
+            var json = await this.fs.ReadAllTextAsync(new AbsolutePath(manifestPath), ct).ConfigureAwait(false);
             manifest = JsonSerializer.Deserialize(json, PluginsJsonContext.Default.PluginManifest);
         }
         catch (Exception ex)
@@ -244,14 +249,14 @@ public sealed class PluginLoader : IPluginLoader, IAsyncDisposable
 
         // Locate the assembly.
         var assemblyPath = new AbsolutePath(Path.Combine(dir, manifest.AssemblyFileName));
-        if (!File.Exists(assemblyPath.Value))
+        if (!await this.fs.FileExistsAsync(assemblyPath, ct).ConfigureAwait(false))
         {
             await this.EmitRejectedAsync(manifest.PluginId, string.Empty, $"Assembly not found: {manifest.AssemblyFileName}", ct).ConfigureAwait(false);
             return;
         }
 
         // Compute assembly hash.
-        var assemblySha256 = this.ComputeAssemblyHash(assemblyPath);
+        var assemblySha256 = await this.ComputeAssemblyHashAsync(assemblyPath, ct).ConfigureAwait(false);
 
         // Publish discovery event.
         await this.bus.PublishAsync(
@@ -393,11 +398,11 @@ public sealed class PluginLoader : IPluginLoader, IAsyncDisposable
         }
     }
 
-    private string ComputeAssemblyHash(AbsolutePath assemblyPath)
+    private async ValueTask<string> ComputeAssemblyHashAsync(AbsolutePath assemblyPath, CancellationToken ct)
     {
         try
         {
-            var bytes = File.ReadAllBytes(assemblyPath.Value);
+            var bytes = await this.fs.ReadAllBytesAsync(assemblyPath, ct).ConfigureAwait(false);
             var hash = SHA256.HashData(bytes);
             return Convert.ToHexString(hash).ToLowerInvariant();
         }

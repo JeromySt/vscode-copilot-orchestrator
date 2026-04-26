@@ -1,4 +1,4 @@
-// <copyright file="DaemonStartupGuardTests.cs" company="AiOrchestrator contributors">
+﻿// <copyright file="DaemonStartupGuardTests.cs" company="AiOrchestrator contributors">
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
@@ -48,7 +48,7 @@ public sealed class DaemonStartupGuardTests : IDisposable
     [ContractTest("DAEMON-GUARD-GITIGNORE-COMMIT")]
     public async Task EnsureGitignoreAsync_CommitsEntries_WhenNotPresent()
     {
-        // Arrange — create a real git repo with an initial commit
+        // Arrange â€” create a real git repo with an initial commit
         RunGit(this.tempDir, "init", "-b", "main");
         RunGit(this.tempDir, "config", "user.email", "test@test.com");
         RunGit(this.tempDir, "config", "user.name", "Test");
@@ -58,11 +58,11 @@ public sealed class DaemonStartupGuardTests : IDisposable
         RunGit(this.tempDir, "add", ".");
         RunGit(this.tempDir, "commit", "-m", "Initial commit");
 
-        // Act — first call should commit .gitignore entries
+        // Act â€” first call should commit .gitignore entries
         await DaemonStartupGuard.EnsureGitignoreAsync(
-            this.tempDir, this.spawner, NullLogger.Instance);
+            this.tempDir, this.spawner, new InMemoryFileSystem(), NullLogger.Instance);
 
-        // Assert — .gitignore is committed with all OrchestratorEntries
+        // Assert â€” .gitignore is committed with all OrchestratorEntries
         var gitignoreContent = RunGit(this.tempDir, "show", "HEAD:.gitignore");
         foreach (var entry in GitignoreManager.OrchestratorEntries)
         {
@@ -73,10 +73,10 @@ public sealed class DaemonStartupGuardTests : IDisposable
         var status = RunGit(this.tempDir, "status", "--porcelain");
         Assert.Empty(status.Trim());
 
-        // Act — second call is a no-op (no new commit)
+        // Act â€” second call is a no-op (no new commit)
         var commitsBefore = RunGit(this.tempDir, "rev-list", "--count", "HEAD").Trim();
         await DaemonStartupGuard.EnsureGitignoreAsync(
-            this.tempDir, this.spawner, NullLogger.Instance);
+            this.tempDir, this.spawner, new InMemoryFileSystem(), NullLogger.Instance);
         var commitsAfter = RunGit(this.tempDir, "rev-list", "--count", "HEAD").Trim();
 
         Assert.Equal(commitsBefore, commitsAfter);
@@ -86,14 +86,14 @@ public sealed class DaemonStartupGuardTests : IDisposable
     [ContractTest("DAEMON-GUARD-GITIGNORE-NONGIT")]
     public async Task EnsureGitignoreAsync_DoesNotThrow_OnNonGitDirectory()
     {
-        // Arrange — plain temp directory, no git repo
+        // Arrange â€” plain temp directory, no git repo
         var plainDir = Path.Combine(this.tempDir, "not-a-repo");
         Directory.CreateDirectory(plainDir);
 
-        // Act & Assert — should not throw; the exception is caught internally
+        // Act & Assert â€” should not throw; the exception is caught internally
         var ex = await Record.ExceptionAsync(() =>
             DaemonStartupGuard.EnsureGitignoreAsync(
-                plainDir, this.spawner, NullLogger.Instance));
+                plainDir, this.spawner, new InMemoryFileSystem(), NullLogger.Instance));
 
         Assert.Null(ex);
     }

@@ -3,6 +3,7 @@
 // </copyright>
 
 using AiOrchestrator.Abstractions.Eventing;
+using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Time;
 using AiOrchestrator.Concurrency.Broker;
 using AiOrchestrator.Concurrency.Broker.Fairness;
@@ -50,6 +51,7 @@ public static partial class CompositionRoot
                 return new UnixSocketRpcServer(
                     sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<BrokerOptions>>(),
                     sp.GetRequiredService<FairnessScheduler>(),
+                    sp.GetRequiredService<IFileSystem>(),
                     sp.GetRequiredService<ILogger<UnixSocketRpcServer>>());
             })
             .AddSingleton<HostConcurrencyBrokerDaemon>(sp => new HostConcurrencyBrokerDaemon(
