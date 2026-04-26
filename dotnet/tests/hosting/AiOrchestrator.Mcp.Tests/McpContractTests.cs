@@ -224,6 +224,8 @@ public sealed class McpContractTests
 
         var services = new ServiceCollection();
         _ = services.AddLogging();
+        _ = services.AddSingleton<AiOrchestrator.Plan.Store.IPlanStore>(
+            new PlanToolInvokeCoverageTests.FakePlanStore());
         _ = services.AddMcpServer(config);
 
         return services.BuildServiceProvider();

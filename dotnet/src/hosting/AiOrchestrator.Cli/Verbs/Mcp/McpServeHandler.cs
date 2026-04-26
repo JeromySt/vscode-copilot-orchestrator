@@ -5,10 +5,19 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Abstractions.Telemetry;
+using AiOrchestrator.Abstractions.Time;
+using AiOrchestrator.Composition;
+using AiOrchestrator.Logging.Telemetry;
 using AiOrchestrator.Mcp;
 using AiOrchestrator.Mcp.Transports;
+using AiOrchestrator.Models.Paths;
+using AiOrchestrator.Plan.Store;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -65,7 +74,7 @@ internal sealed class McpServeHandler : VerbBase
             Environment.SetEnvironmentVariable("AIO_REPO_ROOT", repoRoot);
         }
 
-        var tools = BuildToolSet();
+        var tools = BuildToolSet(repoRoot);
         var registry = new McpToolRegistry(tools);
         var transport = new StdioTransport();
         IOptionsMonitor<McpOptions> options = new StaticOptionsMonitor<McpOptions>(new McpOptions());
@@ -88,20 +97,61 @@ internal sealed class McpServeHandler : VerbBase
     }
 
     /// <summary>
-    /// Builds the set of MCP tools to register. Currently returns an empty set;
-    /// the full tool set will be wired via DI in a follow-up when the composition
-    /// root is used to launch the CLI.
+    /// Builds the set of MCP tools to register by constructing a minimal DI
+    /// container with the composition root extensions. This gives standalone
+    /// CLI invocations the same tool set that the hosted daemon exposes.
     /// </summary>
-    private static IEnumerable<IMcpTool> BuildToolSet()
+    private static IEnumerable<IMcpTool> BuildToolSet(string? repoRoot)
     {
-        // The MCP tools (PlanToolBase derivatives, GetOrchestratorLogsTool, etc.)
-        // require service dependencies injected via DI. When the CLI is launched
-        // standalone without a full host, we return an empty set — the tools/list
-        // response will be empty but the server handshake will work.
-        //
-        // When launched via the VS Code extension (which manages the daemon),
-        // the full DI container supplies tools through IEnumerable<IMcpTool>.
-        return Array.Empty<IMcpTool>();
+        IConfiguration config = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+
+        // Logging: standard AddLogging with no providers keeps stdout clean for JSON-RPC.
+        _ = services.AddLogging();
+
+        // ITelemetrySink is required by MonotonicGuard (via AddTime). Register
+        // OtlpTelemetrySink with OTLP disabled so all methods are zero-allocation no-ops.
+        _ = services.AddSingleton<ITelemetrySink>(
+            new OtlpTelemetrySink(Options.Create(new OtlpOptions())));
+
+        // Core infrastructure via composition root extensions.
+        _ = services.AddTime();
+        _ = services.AddEventing(config);
+
+        // File system + path validator.
+        AbsolutePath storeRoot = ComputeStoreRoot(repoRoot);
+        _ = services.AddPathValidator(new[] { storeRoot.Value });
+        _ = services.AddFileSystem();
+
+        // Plan subsystem: AbsolutePath is a value type so we use a factory
+        // lambda to inject the store root into PlanStore's constructor.
+        _ = services.AddPlanModels();
+        _ = services.AddOptions<PlanStoreOptions>();
+        _ = services.AddSingleton<IPlanStore>(sp => new PlanStore(
+            storeRoot,
+            sp.GetRequiredService<Abstractions.Io.IFileSystem>(),
+            sp.GetRequiredService<IClock>(),
+            sp.GetRequiredService<Abstractions.Eventing.IEventBus>(),
+            sp.GetRequiredService<IOptionsMonitor<PlanStoreOptions>>(),
+            sp.GetRequiredService<ILogger<PlanStore>>()));
+
+        // MCP tools (19 plan + log tools, registry, and server skeleton).
+        _ = services.AddMcpServer(config);
+
+        ServiceProvider provider = services.BuildServiceProvider();
+        return provider.GetServices<IMcpTool>();
+    }
+
+    private static AbsolutePath ComputeStoreRoot(string? repoRoot)
+    {
+        if (!string.IsNullOrEmpty(repoRoot))
+        {
+            return new AbsolutePath(Path.Combine(repoRoot, ".orchestrator", "plans"));
+        }
+
+        return new AbsolutePath(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ai-orchestrator"));
     }
 
     /// <summary>

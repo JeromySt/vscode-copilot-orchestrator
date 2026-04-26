@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\core\AiOrchestrator.Abstractions\AiOrchestrator.Abstractions.csproj" />
     <ProjectReference Include="..\..\core\AiOrchestrator.Logging\AiOrchestrator.Logging.csproj" />
+    <ProjectReference Include="..\..\plan\AiOrchestrator.Plan.Store\AiOrchestrator.Plan.Store.csproj" />
   </ItemGroup>
 
 </Project>

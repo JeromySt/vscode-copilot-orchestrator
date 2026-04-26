@@ -2,64 +2,136 @@
 // Copyright (c) AiOrchestrator contributors. All rights reserved.
 // </copyright>
 
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Mcp.Tools.Plan;
+using AiOrchestrator.Models.Ids;
+using AiOrchestrator.Plan.Models;
+using AiOrchestrator.Plan.Store;
 using Xunit;
 
 namespace AiOrchestrator.Mcp.Tests;
 
 /// <summary>
-/// Covers the <c>InvokeCoreAsync</c> line on 5 concrete plan tools
-/// (each at 85.7% / 1 uncovered line before these tests).
+/// Covers the <c>InvokeCoreAsync</c> line on 5 concrete plan tools wired to a fake <see cref="IPlanStore"/>.
 /// </summary>
 public sealed class PlanToolInvokeCoverageTests
 {
-    private static readonly JsonElement EmptyParams = JsonDocument.Parse("""{ "planId": "test-id" }""").RootElement;
+    private static readonly PlanId TestPlanId = PlanId.New();
+
+    private static JsonElement MakeParams() =>
+        JsonDocument.Parse($$"""{ "planId": "{{TestPlanId}}" }""").RootElement;
+
+    private static FakePlanStore StoreWithPlan() => new(new AiOrchestrator.Plan.Models.Plan
+    {
+        Id = TestPlanId.ToString(),
+        Name = "Test Plan",
+        Status = PlanStatus.Running,
+        CreatedAt = DateTimeOffset.UtcNow,
+        Jobs = new Dictionary<string, JobNode>
+        {
+            ["job-1"] = new JobNode { Id = "job-1", Title = "Job 1", Status = JobStatus.Pending },
+        },
+    });
 
     [Fact]
-    public async Task FinalizeCopilotPlanTool_InvokeAsync_ReturnsStubResponse()
+    public async Task FinalizeCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new FinalizeCopilotPlanTool();
-        var result = await tool.InvokeAsync(EmptyParams, CancellationToken.None);
-        Assert.Equal("finalize_copilot_plan", result["tool"]?.GetValue<string>());
+        var tool = new FinalizeCopilotPlanTool(StoreWithPlan());
+        var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
 
     [Fact]
-    public async Task CancelCopilotPlanTool_InvokeAsync_ReturnsStubResponse()
+    public async Task CancelCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new CancelCopilotPlanTool();
-        var result = await tool.InvokeAsync(EmptyParams, CancellationToken.None);
-        Assert.Equal("cancel_copilot_plan", result["tool"]?.GetValue<string>());
+        var tool = new CancelCopilotPlanTool(StoreWithPlan());
+        var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
 
     [Fact]
-    public async Task DeleteCopilotPlanTool_InvokeAsync_ReturnsStubResponse()
+    public async Task DeleteCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new DeleteCopilotPlanTool();
-        var result = await tool.InvokeAsync(EmptyParams, CancellationToken.None);
-        Assert.Equal("delete_copilot_plan", result["tool"]?.GetValue<string>());
+        var tool = new DeleteCopilotPlanTool(StoreWithPlan());
+        var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
 
     [Fact]
-    public async Task CloneCopilotPlanTool_InvokeAsync_ReturnsStubResponse()
+    public async Task CloneCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new CloneCopilotPlanTool();
-        var result = await tool.InvokeAsync(EmptyParams, CancellationToken.None);
-        Assert.Equal("clone_copilot_plan", result["tool"]?.GetValue<string>());
+        var tool = new CloneCopilotPlanTool(StoreWithPlan());
+        var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
 
     [Fact]
-    public async Task ArchiveCopilotPlanTool_InvokeAsync_ReturnsStubResponse()
+    public async Task ArchiveCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new ArchiveCopilotPlanTool();
-        var result = await tool.InvokeAsync(EmptyParams, CancellationToken.None);
-        Assert.Equal("archive_copilot_plan", result["tool"]?.GetValue<string>());
+        var tool = new ArchiveCopilotPlanTool(StoreWithPlan());
+        var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
+    }
+
+    /// <summary>Minimal in-memory <see cref="IPlanStore"/> for unit tests.</summary>
+    internal sealed class FakePlanStore : IPlanStore
+    {
+        private readonly Dictionary<PlanId, AiOrchestrator.Plan.Models.Plan> plans = new();
+        private int seq;
+
+        public FakePlanStore() { }
+
+        public FakePlanStore(AiOrchestrator.Plan.Models.Plan seed)
+        {
+            var id = PlanId.TryParse(seed.Id, out var pid) ? pid : PlanId.New();
+            this.plans[id] = seed;
+        }
+
+        public ValueTask<PlanId> CreateAsync(AiOrchestrator.Plan.Models.Plan initialPlan, IdempotencyKey idemKey, CancellationToken ct)
+        {
+            var id = PlanId.New();
+            this.plans[id] = initialPlan with { Id = id.ToString() };
+            return ValueTask.FromResult(id);
+        }
+
+        public ValueTask<AiOrchestrator.Plan.Models.Plan?> LoadAsync(PlanId id, CancellationToken ct) =>
+            ValueTask.FromResult(this.plans.TryGetValue(id, out var p) ? p : null);
+
+        public ValueTask MutateAsync(PlanId id, PlanMutation mutation, IdempotencyKey idemKey, CancellationToken ct) =>
+            ValueTask.CompletedTask;
+
+        public ValueTask CheckpointAsync(PlanId id, CancellationToken ct) =>
+            ValueTask.CompletedTask;
+
+        public async IAsyncEnumerable<AiOrchestrator.Plan.Models.Plan> ListAsync([EnumeratorCancellation] CancellationToken ct)
+        {
+            foreach (var p in this.plans.Values)
+            {
+                yield return p;
+            }
+
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
+
+        public async IAsyncEnumerable<PlanMutation> ReadJournalAsync(PlanId id, long fromSeq, [EnumeratorCancellation] CancellationToken ct)
+        {
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield break;
+        }
+
+        public async IAsyncEnumerable<AiOrchestrator.Plan.Models.Plan> WatchAsync(PlanId id, [EnumeratorCancellation] CancellationToken ct)
+        {
+            if (this.plans.TryGetValue(id, out var p))
+            {
+                yield return p;
+            }
+
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
     }
 }

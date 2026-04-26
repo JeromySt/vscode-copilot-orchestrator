@@ -6,20 +6,31 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using AiOrchestrator.Plan.Store;
 
 namespace AiOrchestrator.Mcp.Tools.Plan;
 
 /// <summary>MCP tool: <c>get_copilot_plan_graph</c> — Get the dependency graph of a plan as Mermaid and adjacency list.</summary>
 internal sealed class GetCopilotPlanGraphTool : PlanToolBase
 {
-    public GetCopilotPlanGraphTool()
+    public GetCopilotPlanGraphTool(IPlanStore store)
         : base(
               name: "get_copilot_plan_graph",
               description: "Get the dependency graph of a plan as Mermaid and adjacency list.",
-              inputSchema: ObjectSchema("planId"))
+              inputSchema: ObjectSchema("planId"),
+              store: store)
     {
     }
 
-    protected override ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct) =>
-        this.StubResponseAsync();
+    protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
+    {
+        var planId = ParsePlanId(parameters);
+        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        if (plan is null)
+        {
+            return ErrorResponse($"Plan '{planId}' not found.");
+        }
+
+        return PlanGraphToJson(plan);
+    }
 }
