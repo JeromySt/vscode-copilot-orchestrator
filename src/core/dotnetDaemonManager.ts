@@ -11,6 +11,7 @@
  */
 
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { ChildProcess, spawn } from 'child_process';
 import type { IDotNetDaemonManager, DaemonStatus } from '../interfaces/IDotNetDaemonManager';
 import { Logger } from './logger';
@@ -33,6 +34,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
   private _authNonce: string | undefined;
   private restartCount = 0;
   private disposed = false;
+  private outputChannel: vscode.OutputChannel;
 
   constructor(
     private readonly extensionPath: string,
@@ -40,6 +42,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
     private readonly platform: NodeJS.Platform = process.platform,
   ) {
     this._pipeName = this.buildPipeName();
+    this.outputChannel = vscode.window.createOutputChannel('AiOrchestrator Daemon', { log: true });
   }
 
   get isRunning(): boolean { return this._isRunning; }
@@ -92,6 +95,15 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
       this.restartCount = 0;
       this._lastError = undefined;
       log.info('Daemon is ready', { pid: this.process.pid });
+
+      // After READY, route all stderr to the VS Code Output channel
+      this.outputChannel.appendLine(`[daemon pid=${this.process.pid}] READY`);
+      this.process.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString().trimEnd();
+        if (text) {
+          this.outputChannel.appendLine(text);
+        }
+      });
     } catch (err) {
       this._lastError = err instanceof Error ? err.message : String(err);
       log.error('Failed to start daemon', { error: this._lastError });
@@ -147,6 +159,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
   dispose(): void {
     this.disposed = true;
     this.killProcess();
+    this.outputChannel.dispose();
   }
 
   private killProcess(): void {

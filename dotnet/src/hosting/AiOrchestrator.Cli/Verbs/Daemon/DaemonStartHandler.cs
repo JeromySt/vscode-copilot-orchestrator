@@ -69,8 +69,12 @@ internal sealed class DaemonStartHandler : VerbBase
             return CliExitCodes.UsageError;
         }
 
-        IEnumerable<IMcpTool> tools = BuildToolSet();
-        ILogger<McpServer> logger = NullLogger<McpServer>.Instance;
+        var (tools, serviceProvider) = BuildToolSet();
+
+        // Use the DI-resolved logger so messages go to the rolling file log
+        // AND to stderr (which the extension captures in the VS Code Output channel).
+        ILogger<McpServer> logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<McpServer>();
+        logger.LogInformation("Daemon starting on pipe {PipeName}", pipeName);
 
         // Read the per-instance auth nonce from the environment. The spawning process
         // (VS Code) sets AIO_AUTH_NONCE to a random hex string. The McpServer validates
@@ -165,7 +169,7 @@ internal sealed class DaemonStartHandler : VerbBase
     /// container with the composition root extensions. Same approach as
     /// <see cref="Mcp.McpServeHandler"/>.
     /// </summary>
-    private static IEnumerable<IMcpTool> BuildToolSet()
+    private static (IMcpTool[] Tools, ServiceProvider Provider) BuildToolSet()
     {
         IConfiguration config = new ConfigurationBuilder().Build();
         var services = new ServiceCollection();
@@ -181,8 +185,11 @@ internal sealed class DaemonStartHandler : VerbBase
         _ = services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Information);
+            // File logger for persistent diagnostics
             builder.AddProvider(new AiOrchestrator.Logging.File.RollingFileLoggerProvider(
                 new AiOrchestrator.Logging.File.RollingFileLoggerOptions { FilePath = logPath, MaxFileSizeBytes = 10 * 1024 * 1024 }));
+            // Console logger writes to stderr → captured by VS Code Output channel
+            builder.AddConsole();
         });
 
         _ = services.AddSingleton<ITelemetrySink>(
@@ -207,7 +214,7 @@ internal sealed class DaemonStartHandler : VerbBase
         _ = services.AddMcpServer(config);
 
         ServiceProvider provider = services.BuildServiceProvider();
-        return provider.GetServices<IMcpTool>();
+        return (provider.GetServices<IMcpTool>().ToArray(), provider);
     }
 
     /// <summary>
