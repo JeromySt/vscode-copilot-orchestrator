@@ -38,7 +38,7 @@ import type { IDotNetDaemonManager } from './interfaces/IDotNetDaemonManager';
 import { TsOrchestrationEngine } from './core/tsEngine';
 import { DotNetOrchestrationEngine } from './core/dotnetEngine';
 import { DotNetDaemonManager } from './core/dotnetDaemonManager';
-import { setMcpEngineKind } from './mcp/mcpDefinitionProvider';
+import { setMcpEngineKind, registerMcpDefinitionProvider } from './mcp/mcpDefinitionProvider';
 
 // ============================================================================
 // MODULE STATE
@@ -171,11 +171,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     dispose: () => { void globalCapacityManager.shutdown().catch(e => extLog.error('Failed to shutdown global capacity manager', { error: e })); }
   });
 
-  // ── MCP Server (stdio transport via IPC) ───────────────────────────────
-  // Only start the TS MCP server when using the TS engine.
-  // When dotnet engine is active, VS Code spawns the .NET MCP server directly.
+  // ── MCP Server ─────────────────────────────────────────────────────────
   if (planRunner) {
+    // TS engine: start the IPC server + register MCP definition provider
     mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
+  } else {
+    // .NET engine: register the MCP definition provider directly.
+    // VS Code will spawn AiOrchestrator.Cli.exe mcp serve as the MCP server.
+    // No IPC server needed — the .NET binary handles MCP protocol natively.
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const providerDisposable = registerMcpDefinitionProvider(context, workspacePath, '', '');
+    context.subscriptions.push(providerDisposable);
   }
 
   // ── Release Manager (experimental) ──────────────────────────────────────
