@@ -86,23 +86,23 @@ internal abstract class PlanToolBase : IMcpTool
         var required = new JsonArray();
         foreach (string p in requiredStringProps)
         {
-            props[p] = new JsonObject { ["type"] = "string" };
-            required.Add(p);
+            props[p] = new JsonObject { ["type"] = JsonValue.Create("string") };
+            required.Add(JsonValue.Create(p));
         }
 
         // Every tool accepts repo_root so the daemon can be repo-agnostic.
         props["repo_root"] = new JsonObject
         {
-            ["type"] = "string",
-            ["description"] = "Absolute path to the repository root for repo-scoped operations.",
+            ["type"] = JsonValue.Create("string"),
+            ["description"] = JsonValue.Create("Absolute path to the repository root for repo-scoped operations."),
         };
 
         return new JsonObject
         {
-            ["type"] = "object",
+            ["type"] = JsonValue.Create("object"),
             ["properties"] = props,
             ["required"] = required,
-            ["additionalProperties"] = true,
+            ["additionalProperties"] = JsonValue.Create(true),
         };
     }
 
@@ -114,11 +114,11 @@ internal abstract class PlanToolBase : IMcpTool
 
     /// <summary>Creates an error response JSON object.</summary>
     protected static JsonNode ErrorResponse(string message) =>
-        new JsonObject { ["success"] = false, ["error"] = message };
+        new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create(message) };
 
     /// <summary>Creates a success response JSON object.</summary>
     protected static JsonNode SuccessResponse(string message = "ok") =>
-        new JsonObject { ["success"] = true, ["message"] = message };
+        new JsonObject { ["success"] = JsonValue.Create(true), ["message"] = JsonValue.Create(message) };
 
     /// <summary>Creates a fresh idempotency key from a new <see cref="Guid"/>.</summary>
     protected static IdempotencyKey NewIdemKey() => IdempotencyKey.FromGuid(Guid.NewGuid());
@@ -132,36 +132,36 @@ internal abstract class PlanToolBase : IMcpTool
             var deps = new JsonArray();
             foreach (string d in job.DependsOn)
             {
-                deps.Add(d);
+                deps.Add(JsonValue.Create(d));
             }
 
             jobs[id] = new JsonObject
             {
-                ["id"] = job.Id,
-                ["title"] = job.Title,
-                ["status"] = job.Status.ToString(),
+                ["id"] = JsonValue.Create(job.Id),
+                ["title"] = JsonValue.Create(job.Title),
+                ["status"] = JsonValue.Create(job.Status.ToString()),
                 ["dependsOn"] = deps,
-                ["startedAt"] = job.StartedAt?.ToString("o"),
-                ["completedAt"] = job.CompletedAt?.ToString("o"),
+                ["startedAt"] = JsonValue.Create(job.StartedAt?.ToString("o")),
+                ["completedAt"] = JsonValue.Create(job.CompletedAt?.ToString("o")),
             };
         }
 
         var statusCounts = new JsonObject();
         foreach (var group in plan.Jobs.Values.GroupBy(j => j.Status))
         {
-            statusCounts[group.Key.ToString()] = group.Count();
+            statusCounts[group.Key.ToString()] = JsonValue.Create(group.Count());
         }
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["plan_id"] = plan.Id,
-            ["name"] = plan.Name,
-            ["description"] = plan.Description,
-            ["status"] = plan.Status.ToString(),
-            ["createdAt"] = plan.CreatedAt.ToString("o"),
-            ["startedAt"] = plan.StartedAt?.ToString("o"),
-            ["jobCount"] = plan.Jobs.Count,
+            ["success"] = JsonValue.Create(true),
+            ["plan_id"] = JsonValue.Create(plan.Id),
+            ["name"] = JsonValue.Create(plan.Name),
+            ["description"] = JsonValue.Create(plan.Description),
+            ["status"] = JsonValue.Create(plan.Status.ToString()),
+            ["createdAt"] = JsonValue.Create(plan.CreatedAt.ToString("o")),
+            ["startedAt"] = JsonValue.Create(plan.StartedAt?.ToString("o")),
+            ["jobCount"] = JsonValue.Create(plan.Jobs.Count),
             ["statusCounts"] = statusCounts,
             ["jobs"] = jobs,
         };
@@ -195,7 +195,7 @@ internal abstract class PlanToolBase : IMcpTool
             var dependsOnArr = new JsonArray();
             foreach (string d in job.DependsOn)
             {
-                dependsOnArr.Add(d);
+                dependsOnArr.Add(JsonValue.Create(d));
             }
 
             var dependedOnBy = new JsonArray();
@@ -203,7 +203,7 @@ internal abstract class PlanToolBase : IMcpTool
             {
                 if (other.DependsOn.Contains(id))
                 {
-                    dependedOnBy.Add(otherId);
+                    dependedOnBy.Add(JsonValue.Create(otherId));
                 }
             }
 
@@ -216,9 +216,9 @@ internal abstract class PlanToolBase : IMcpTool
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["plan_id"] = plan.Id,
-            ["mermaid"] = sb.ToString(),
+            ["success"] = JsonValue.Create(true),
+            ["plan_id"] = JsonValue.Create(plan.Id),
+            ["mermaid"] = JsonValue.Create(sb.ToString()),
             ["nodes"] = nodes,
         };
     }
@@ -256,8 +256,8 @@ internal abstract class PlanToolBase : IMcpTool
     /// <summary>Helper: placeholder response shared by tools until the daemon RPC client is wired in.</summary>
     protected ValueTask<JsonNode> StubResponseAsync() => ValueTask.FromResult<JsonNode>(new JsonObject
     {
-        ["success"] = true,
-        ["tool"] = this.Name,
-        ["status"] = "pending-daemon",
+        ["success"] = JsonValue.Create(true),
+        ["tool"] = JsonValue.Create(this.Name),
+        ["status"] = JsonValue.Create("pending-daemon"),
     });
 }

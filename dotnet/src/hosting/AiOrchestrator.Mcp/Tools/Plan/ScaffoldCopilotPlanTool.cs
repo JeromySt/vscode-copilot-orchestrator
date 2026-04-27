@@ -39,10 +39,10 @@ internal sealed class ScaffoldCopilotPlanTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["plan_id"] = planId.ToString(),
-            ["name"] = name,
-            ["status"] = "Scaffolding",
+            ["success"] = JsonValue.Create(true),
+            ["plan_id"] = JsonValue.Create(planId.ToString()),
+            ["name"] = JsonValue.Create(name),
+            ["status"] = JsonValue.Create("Scaffolding"),
         };
     }
 }

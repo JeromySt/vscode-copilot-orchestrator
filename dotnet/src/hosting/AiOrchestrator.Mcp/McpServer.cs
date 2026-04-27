@@ -160,12 +160,12 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
 
     private static JsonNode BuildInitializeResult() => new JsonObject
     {
-        ["protocolVersion"] = "2024-11-05",
-        ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = true } },
+        ["protocolVersion"] = JsonValue.Create("2024-11-05"),
+        ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = JsonValue.Create(true) } },
         ["serverInfo"] = new JsonObject
         {
-            ["name"] = "AiOrchestrator.Mcp",
-            ["version"] = "1.0.0",
+            ["name"] = JsonValue.Create("AiOrchestrator.Mcp"),
+            ["version"] = JsonValue.Create("1.0.0"),
         },
     };
 
@@ -237,8 +237,8 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
             IMcpTool t = kv.Value;
             list.Add(new JsonObject
             {
-                ["name"] = t.Name,
-                ["description"] = t.Description,
+                ["name"] = JsonValue.Create(t.Name),
+                ["description"] = JsonValue.Create(t.Description),
                 ["inputSchema"] = t.InputSchema.DeepClone(),
             });
         }

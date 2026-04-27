@@ -70,11 +70,11 @@ internal sealed class RunCopilotIntegrationTestTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["plan_id"] = planId.ToString(),
-            ["name"] = name,
-            ["status"] = "Scaffolding",
-            ["jobCount"] = jobs.Length,
+            ["success"] = JsonValue.Create(true),
+            ["plan_id"] = JsonValue.Create(planId.ToString()),
+            ["name"] = JsonValue.Create(name),
+            ["status"] = JsonValue.Create("Scaffolding"),
+            ["jobCount"] = JsonValue.Create(jobs.Length),
         };
     }
 }

@@ -102,9 +102,9 @@ internal sealed class ReshapeCopilotPlanTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["applied"] = applied,
-            ["message"] = $"{applied} operation(s) applied to plan '{planId}'.",
+            ["success"] = JsonValue.Create(true),
+            ["applied"] = JsonValue.Create(applied),
+            ["message"] = JsonValue.Create($"{applied} operation(s) applied to plan '{planId}'."),
         };
     }
 }

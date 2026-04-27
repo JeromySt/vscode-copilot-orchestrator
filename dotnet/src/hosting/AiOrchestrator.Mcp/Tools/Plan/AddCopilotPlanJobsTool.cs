@@ -50,9 +50,9 @@ internal sealed class AddCopilotPlanJobsTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["added"] = added,
-            ["message"] = $"{added} job(s) added to plan '{planId}'.",
+            ["success"] = JsonValue.Create(true),
+            ["added"] = JsonValue.Create(added),
+            ["message"] = JsonValue.Create($"{added} job(s) added to plan '{planId}'."),
         };
     }
 }

@@ -71,11 +71,11 @@ internal sealed class CloneCopilotPlanTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["plan_id"] = newPlanId.ToString(),
-            ["source_plan_id"] = sourcePlanId.ToString(),
-            ["name"] = cloneName,
-            ["jobsCloned"] = source.Jobs.Count,
+            ["success"] = JsonValue.Create(true),
+            ["plan_id"] = JsonValue.Create(newPlanId.ToString()),
+            ["source_plan_id"] = JsonValue.Create(sourcePlanId.ToString()),
+            ["name"] = JsonValue.Create(cloneName),
+            ["jobsCloned"] = JsonValue.Create(source.Jobs.Count),
         };
     }
 }

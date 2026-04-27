@@ -79,9 +79,9 @@ internal sealed class BulkUpdateCopilotPlanJobsTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["updated"] = updated,
-            ["message"] = $"{updated} job(s) updated in plan '{planId}'.",
+            ["success"] = JsonValue.Create(true),
+            ["updated"] = JsonValue.Create(updated),
+            ["message"] = JsonValue.Create($"{updated} job(s) updated in plan '{planId}'."),
         };
     }
 }

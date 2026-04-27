@@ -23,29 +23,29 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
 
     private static readonly JsonNode Schema = new JsonObject
     {
-        ["type"] = "object",
+        ["type"] = JsonValue.Create("object"),
         ["properties"] = new JsonObject
         {
             ["kind"] = new JsonObject
             {
-                ["type"] = "string",
-                ["enum"] = new JsonArray("daemon", "repo"),
-                ["description"] = "Which log to read: 'daemon' for the global daemon log, 'repo' for the per-repository log.",
+                ["type"] = JsonValue.Create("string"),
+                ["enum"] = new JsonArray(JsonValue.Create("daemon"), JsonValue.Create("repo")),
+                ["description"] = JsonValue.Create("Which log to read: 'daemon' for the global daemon log, 'repo' for the per-repository log."),
             },
             ["repo_root"] = new JsonObject
             {
-                ["type"] = "string",
-                ["description"] = "Absolute path to the repository root. Required when kind is 'repo'.",
+                ["type"] = JsonValue.Create("string"),
+                ["description"] = JsonValue.Create("Absolute path to the repository root. Required when kind is 'repo'."),
             },
             ["tail_lines"] = new JsonObject
             {
-                ["type"] = "integer",
-                ["description"] = "Number of lines to return from the end of the log file.",
-                ["default"] = DefaultTailLines,
+                ["type"] = JsonValue.Create("integer"),
+                ["description"] = JsonValue.Create("Number of lines to return from the end of the log file."),
+                ["default"] = JsonValue.Create(DefaultTailLines),
             },
         },
-        ["required"] = new JsonArray("kind"),
-        ["additionalProperties"] = false,
+        ["required"] = new JsonArray(JsonValue.Create("kind")),
+        ["additionalProperties"] = JsonValue.Create(false),
     };
 
     private readonly IFileSystem fs;
@@ -81,7 +81,7 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
         {
             "daemon" => await this.ReadDaemonLogAsync(tailLines, ct).ConfigureAwait(false),
             "repo" => await this.ReadRepoLogAsync(parameters, tailLines, ct).ConfigureAwait(false),
-            _ => new JsonObject { ["success"] = false, ["error"] = $"Unknown kind: '{kind}'. Expected 'daemon' or 'repo'." },
+            _ => new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create($"Unknown kind: '{kind}'. Expected 'daemon' or 'repo'.") },
         };
     }
 
@@ -90,7 +90,7 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
         var logDir = new AbsolutePath(AioLogPaths.GlobalDaemonLogDir);
         if (!await this.fs.DirectoryExistsAsync(logDir, ct).ConfigureAwait(false))
         {
-            return new JsonObject { ["success"] = false, ["error"] = $"Log directory does not exist: {logDir}" };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create($"Log directory does not exist: {logDir}") };
         }
 
         // Each daemon instance writes to aio-daemon-{pid}.log.
@@ -106,7 +106,7 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
 
         if (latestLog is null)
         {
-            return new JsonObject { ["success"] = false, ["error"] = $"No daemon log files found in {logDir}" };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create($"No daemon log files found in {logDir}") };
         }
 
         return await this.ReadTailAsync(latestLog.Value, tailLines, ct).ConfigureAwait(false);
@@ -118,19 +118,19 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
             repoElem.ValueKind != JsonValueKind.String ||
             string.IsNullOrWhiteSpace(repoElem.GetString()))
         {
-            return new JsonObject { ["success"] = false, ["error"] = "repo_root is required when kind is 'repo'." };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create("repo_root is required when kind is 'repo'.") };
         }
 
         string repoRoot = repoElem.GetString()!;
         if (!Path.IsPathRooted(repoRoot))
         {
-            return new JsonObject { ["success"] = false, ["error"] = "repo_root must be an absolute path." };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create("repo_root must be an absolute path.") };
         }
 
         var logsDir = new AbsolutePath(Path.Combine(repoRoot, ".aio", "aio_logs"));
         if (!await this.fs.DirectoryExistsAsync(logsDir, ct).ConfigureAwait(false))
         {
-            return new JsonObject { ["success"] = false, ["error"] = $"Log directory does not exist: {logsDir}" };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create($"Log directory does not exist: {logsDir}") };
         }
 
         // Find the most recent aio-daemon-*.log file (highest PID ≈ most recent process).
@@ -145,7 +145,7 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
 
         if (latestLog is null)
         {
-            return new JsonObject { ["success"] = false, ["error"] = $"No log files found in {logsDir}" };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create($"No log files found in {logsDir}") };
         }
 
         return await this.ReadTailAsync(latestLog.Value, tailLines, ct).ConfigureAwait(false);
@@ -155,7 +155,7 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
     {
         if (!await this.fs.FileExistsAsync(path, ct).ConfigureAwait(false))
         {
-            return new JsonObject { ["success"] = false, ["error"] = $"Log file not found: {path}" };
+            return new JsonObject { ["success"] = JsonValue.Create(false), ["error"] = JsonValue.Create($"Log file not found: {path}") };
         }
 
         string content = await this.fs.ReadAllTextAsync(path, ct).ConfigureAwait(false);
@@ -167,11 +167,11 @@ internal sealed class GetOrchestratorLogsTool : IMcpTool
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["path"] = path.Value,
-            ["total_lines"] = allLines.Length,
-            ["returned_lines"] = tail.Length,
-            ["content"] = string.Join("\n", tail),
+            ["success"] = JsonValue.Create(true),
+            ["path"] = JsonValue.Create(path.Value),
+            ["total_lines"] = JsonValue.Create(allLines.Length),
+            ["returned_lines"] = JsonValue.Create(tail.Length),
+            ["content"] = JsonValue.Create(string.Join("\n", tail)),
         };
     }
 }

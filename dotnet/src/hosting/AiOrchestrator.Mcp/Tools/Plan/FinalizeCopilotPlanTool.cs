@@ -45,13 +45,13 @@ internal sealed class FinalizeCopilotPlanTool : PlanToolBase
 
         return new JsonObject
         {
-            ["success"] = true,
-            ["plan_id"] = planId.ToString(),
-            ["name"] = plan.Name,
-            ["status"] = newStatus.ToString(),
-            ["paused"] = startPaused,
-            ["message"] = $"Plan finalized with {plan.Jobs.Count} jobs.",
-            ["jobCount"] = plan.Jobs.Count,
+            ["success"] = JsonValue.Create(true),
+            ["plan_id"] = JsonValue.Create(planId.ToString()),
+            ["name"] = JsonValue.Create(plan.Name),
+            ["status"] = JsonValue.Create(newStatus.ToString()),
+            ["paused"] = JsonValue.Create(startPaused),
+            ["message"] = JsonValue.Create($"Plan finalized with {plan.Jobs.Count} jobs."),
+            ["jobCount"] = JsonValue.Create(plan.Jobs.Count),
         };
     }
 }

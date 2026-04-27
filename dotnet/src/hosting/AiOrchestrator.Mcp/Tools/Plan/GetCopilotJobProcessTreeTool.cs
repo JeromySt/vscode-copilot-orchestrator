@@ -51,8 +51,8 @@ internal sealed class GetCopilotJobProcessTreeTool : PlanToolBase
         {
             return new JsonObject
             {
-                ["error"] = "process_tree_not_available",
-                ["reason"] = "Process handle registry not configured.",
+                ["error"] = JsonValue.Create("process_tree_not_available"),
+                ["reason"] = JsonValue.Create("Process handle registry not configured."),
             };
         }
 
@@ -61,8 +61,8 @@ internal sealed class GetCopilotJobProcessTreeTool : PlanToolBase
         {
             return new JsonObject
             {
-                ["error"] = "process_tree_not_available",
-                ["reason"] = "Job not running or handle not tracked.",
+                ["error"] = JsonValue.Create("process_tree_not_available"),
+                ["reason"] = JsonValue.Create("Job not running or handle not tracked."),
             };
         }
 
@@ -75,8 +75,8 @@ internal sealed class GetCopilotJobProcessTreeTool : PlanToolBase
         {
             return new JsonObject
             {
-                ["error"] = "process_tree_not_available",
-                ["reason"] = ex.Message,
+                ["error"] = JsonValue.Create("process_tree_not_available"),
+                ["reason"] = JsonValue.Create(ex.Message),
             };
         }
 
@@ -84,8 +84,8 @@ internal sealed class GetCopilotJobProcessTreeTool : PlanToolBase
         {
             return new JsonObject
             {
-                ["error"] = "process_tree_not_available",
-                ["reason"] = "Process has exited.",
+                ["error"] = JsonValue.Create("process_tree_not_available"),
+                ["reason"] = JsonValue.Create("Process has exited."),
             };
         }
 
@@ -106,11 +106,11 @@ internal sealed class GetCopilotJobProcessTreeTool : PlanToolBase
 
         return new JsonObject
         {
-            ["pid"] = node.Stats.Pid,
-            ["name"] = node.Stats.Name,
-            ["cpu"] = node.Stats.CpuPercent,
-            ["memory"] = node.Stats.MemoryBytes,
-            ["commandLine"] = node.Stats.CommandLine,
+            ["pid"] = JsonValue.Create(node.Stats.Pid),
+            ["name"] = JsonValue.Create(node.Stats.Name),
+            ["cpu"] = JsonValue.Create(node.Stats.CpuPercent),
+            ["memory"] = JsonValue.Create(node.Stats.MemoryBytes),
+            ["commandLine"] = JsonValue.Create(node.Stats.CommandLine),
             ["children"] = children,
         };
     }
