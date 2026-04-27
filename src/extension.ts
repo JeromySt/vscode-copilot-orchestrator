@@ -187,29 +187,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const prLifecycleManager = releaseFeatureEnabled
     ? container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager)
     : undefined;
-  if (planRunner) {
-    initializePlansView(context, planRunner, pulse, prLifecycleManager, releaseManager);
-  }
+
+  // The plans view / tree / producers use duck-typed access to plan data.
+  // When using the .NET engine, we pass the engine directly — it implements
+  // getAll(), get(), getByStatus(), getStatus(), getGlobalStats() which are
+  // the methods the UI producers actually call. We shim the missing PlanRunner
+  // methods (getStateMachine, getEffectiveEndedAt, getGlobalCapacityStats)
+  // so the UI doesn't crash.
+  const planDataSource = planRunner ?? Object.assign(engine!, {
+    getStateMachine: () => undefined,
+    getEffectiveEndedAt: () => undefined,
+    getEffectiveStartedAt: () => undefined,
+    getGlobalCapacityStats: () => Promise.resolve(null),
+    getNodeLogs: () => '',
+    getNodeLogFilePath: () => undefined,
+    getNodeAttempt: () => null,
+    getNodeAttempts: () => [],
+    getProcessStats: () => Promise.resolve({ pid: null, running: false, tree: [], duration: null }),
+    getAllProcessStats: () => Promise.resolve({}),
+    getRecursiveStatusCounts: () => ({ totalNodes: 0, counts: {} }),
+    setExecutor: () => {},
+    setGlobalCapacityManager: () => {},
+  });
+
+  initializePlansView(context, planDataSource as any, pulse, prLifecycleManager, releaseManager);
 
   // ── Commands ───────────────────────────────────────────────────────────
-  if (planRunner) {
-    registerPlanCommands(context, planRunner, pulse, container);
-  }
+  registerPlanCommands(context, planDataSource as any, pulse, container);
   registerUtilityCommands(context);
   // Register release commands (experimental — gated)
-  if (releaseFeatureEnabled && releaseManager && planRunner) {
+  if (releaseFeatureEnabled && releaseManager) {
     const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
-    registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner, providerDetector, pulse);
+    registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planDataSource as any, providerDetector, pulse);
     if (prLifecycleManager) {
       registerPRLifecycleCommands(context, (id: string) => prLifecycleManager.getManagedPR(id));
     }
   }
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
-  if (planRunner) {
+  {
     let planRepo: import('./interfaces').IPlanRepository | undefined;
     try { planRepo = container.resolve<import('./interfaces').IPlanRepository>(Tokens.IPlanRepository); } catch { /* not registered yet */ }
-    const bulkActions = createBulkPlanActions(container, planRunner, planRepo);
+    const bulkActions = createBulkPlanActions(container, planDataSource as any, planRepo);
     const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
     registerBulkCommands(context, bulkActions, dialogService);
   }
