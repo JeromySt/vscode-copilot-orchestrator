@@ -30,6 +30,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
   private _isRunning = false;
   private _lastError: string | undefined;
   private _startedAt: number | undefined;
+  private _authNonce: string | undefined;
   private restartCount = 0;
   private disposed = false;
 
@@ -50,12 +51,24 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
     const binaryPath = this.resolveBinaryPath();
     log.info('Starting .NET daemon', { binaryPath, pipeName: this._pipeName });
 
+    // Generate a per-instance nonce. Passed to the daemon via AIO_AUTH_NONCE env var.
+    // The daemon validates it on the MCP initialize handshake — rejects clients that
+    // don't present the matching nonce. This ensures only this specific VS Code
+    // instance can connect, even when multiple instances run as the same OS user.
+    // OS-level peer-credential checking (ImpersonateNamedPipeClient / SO_PEERCRED)
+    // provides the first layer; the nonce provides instance-level isolation.
+    this._authNonce = require('crypto').randomBytes(16).toString('hex');
+
     try {
       this.process = spawn(binaryPath, [
         'daemon', 'start',
         '--pipe-name', this._pipeName!,
       ], {
         stdio: ['ignore', 'ignore', 'pipe'],
+        env: {
+          ...process.env,
+          AIO_AUTH_NONCE: this._authNonce,
+        },
         windowsHide: true,
       });
 
@@ -124,6 +137,11 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
 
   getPipeName(): string | undefined {
     return this._pipeName;
+  }
+
+  /** Get the auth nonce for the MCP initialize handshake. */
+  getAuthNonce(): string | undefined {
+    return this._authNonce;
   }
 
   dispose(): void {

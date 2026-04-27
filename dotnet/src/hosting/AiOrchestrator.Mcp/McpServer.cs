@@ -102,7 +102,7 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
         {
             return request.Method switch
             {
-                "initialize" => ResultEnvelope(request.Id, BuildInitializeResult()),
+                "initialize" => this.HandleInitialize(request),
                 "tools/list" => ResultEnvelope(request.Id, this.BuildToolList()),
                 "tools/call" => await this.InvokeToolAsync(request, ct).ConfigureAwait(false),
                 _ => ErrorEnvelope(request.Id, -32601, $"Method not found: '{request.Method}'."),
@@ -123,6 +123,39 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
             return ErrorEnvelope(request.Id, -32603, $"InternalError: {ex.Message}");
         }
 #pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// Handles the <c>initialize</c> handshake. When <see cref="McpOptions.AuthNonce"/>
+    /// is set, the client must present a matching <c>clientInfo.nonce</c> field.
+    /// This binds the daemon to the specific process that spawned it.
+    /// </summary>
+    private JsonRpcEnvelope HandleInitialize(JsonRpcEnvelope request)
+    {
+        string? expectedNonce = this.opts.CurrentValue.AuthNonce;
+        if (!string.IsNullOrEmpty(expectedNonce))
+        {
+            // Extract clientInfo.nonce from the request params.
+            string? clientNonce = null;
+            if (request.Params.HasValue)
+            {
+                var p = request.Params.Value;
+                if (p.TryGetProperty("clientInfo", out var ci) &&
+                    ci.TryGetProperty("nonce", out var n) &&
+                    n.ValueKind == JsonValueKind.String)
+                {
+                    clientNonce = n.GetString();
+                }
+            }
+
+            if (!string.Equals(clientNonce, expectedNonce, StringComparison.Ordinal))
+            {
+                this.logger.LogWarning("Rejected initialize: nonce mismatch (expected {Expected}, got {Got})", expectedNonce[..4] + "…", clientNonce?[..Math.Min(4, clientNonce.Length)] + "…");
+                return ErrorEnvelope(request.Id, -32001, "Auth failed: invalid or missing nonce in clientInfo.nonce");
+            }
+        }
+
+        return ResultEnvelope(request.Id, BuildInitializeResult());
     }
 
     private static JsonNode BuildInitializeResult() => new JsonObject

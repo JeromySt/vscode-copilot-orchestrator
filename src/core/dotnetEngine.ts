@@ -67,11 +67,15 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
     await this.daemonManager.start();
     await this.connect();
 
-    // Send initialize handshake
+    // Send initialize handshake with auth nonce
     await this.callMcp('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'vscode-copilot-orchestrator', version: '1.0.0' },
+      clientInfo: {
+        name: 'vscode-copilot-orchestrator',
+        version: '1.0.0',
+        nonce: this.daemonManager.getAuthNonce(),
+      },
     });
     log.info('.NET engine initialized');
   }

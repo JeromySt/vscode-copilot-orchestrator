@@ -45,6 +45,9 @@ export interface IDotNetDaemonManager extends Disposable {
   /** Get the named pipe path for MCP communication. */
   getPipeName(): string | undefined;
 
+  /** Get the per-instance auth nonce for the MCP initialize handshake. */
+  getAuthNonce(): string | undefined;
+
   /** Whether the daemon is currently running and healthy. */
   readonly isRunning: boolean;
 }

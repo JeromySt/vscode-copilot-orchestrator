@@ -71,7 +71,17 @@ internal sealed class DaemonStartHandler : VerbBase
 
         IEnumerable<IMcpTool> tools = BuildToolSet();
         ILogger<McpServer> logger = NullLogger<McpServer>.Instance;
-        IOptionsMonitor<McpOptions> options = new StaticOptionsMonitor<McpOptions>(new McpOptions());
+
+        // Read the per-instance auth nonce from the environment. The spawning process
+        // (VS Code) sets AIO_AUTH_NONCE to a random hex string. The McpServer validates
+        // it on the initialize handshake — rejecting clients that don't present it.
+        // When null (system-wide service mode), nonce validation is skipped.
+        string? authNonce = Environment.GetEnvironmentVariable("AIO_AUTH_NONCE");
+        IOptionsMonitor<McpOptions> options = new StaticOptionsMonitor<McpOptions>(
+            new McpOptions { AuthNonce = authNonce });
+
+        // Capture the current user identity for OS-level peer-credential validation.
+        string expectedUser = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
 
         // Signal readiness to the parent process.
         Console.Error.WriteLine("READY");
@@ -94,6 +104,32 @@ internal sealed class DaemonStartHandler : VerbBase
             catch (OperationCanceledException)
             {
                 break;
+            }
+
+            // PEER-CRED: Verify the connecting client runs as the same user.
+            // Same pattern as Concurrency.Broker (CONC-BROKER-3) and HookGate (INV-1).
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    string? peerUser = null;
+                    pipeServer.RunAsClient(() =>
+                    {
+                        peerUser = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+                    });
+
+                    if (!string.Equals(peerUser, expectedUser, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.Error.WriteLine($"Rejected client: expected {expectedUser}, got {peerUser}");
+                        pipeServer.Disconnect();
+                        continue;
+                    }
+                }
+                catch
+                {
+                    pipeServer.Disconnect();
+                    continue;
+                }
             }
 
             using var transport = new NamedPipeTransport(pipeServer);
