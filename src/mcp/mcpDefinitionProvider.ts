@@ -2,7 +2,7 @@
  * @fileoverview MCP Server Definition Provider for automatic registration.
  * 
  * This module implements VS Code's McpServerDefinitionProvider interface
- * to automatically register the Copilot Orchestrator MCP server with
+ * to automatically register the AI Orchestrator MCP server with
  * GitHub Copilot Chat using stdio transport.
  * 
  * @module mcp/mcpDefinitionProvider
@@ -119,7 +119,7 @@ export function registerMcpDefinitionProvider(
         const binaryPath = path.join(extensionPath, 'dotnet-bin', platformDir, exe);
 
         server = new (vscode as any).McpStdioServerDefinition(
-          'Copilot Orchestrator (.NET)',  // label
+          'AI Orchestrator (.NET)',  // label
           binaryPath,                     // command — native .NET binary
           ['mcp', 'bridge', '--pipe-name', currentDaemonPipeName],
           {},                             // no special env vars needed
@@ -137,7 +137,7 @@ export function registerMcpDefinitionProvider(
 
         const serverScript = path.join(extensionPath, 'dist', 'mcp-stdio-server.js');
         server = new (vscode as any).McpStdioServerDefinition(
-          'Copilot Orchestrator',  // label
+          'AI Orchestrator',  // label
           process.execPath,        // command — VS Code's bundled Electron/Node binary
           [serverScript],          // args - no variable args, keeps shape stable
           {
@@ -183,7 +183,7 @@ export function registerMcpDefinitionProvider(
       }
     });
     
-    console.log('[MCP Provider] Registered Copilot Orchestrator MCP server with VS Code');
+    console.log('[MCP Provider] Registered AI Orchestrator MCP server with VS Code');
     
     return vscode.Disposable.from(registration, configWatcher, serverChangedEmitter);
   } catch (error) {

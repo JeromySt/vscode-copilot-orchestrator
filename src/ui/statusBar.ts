@@ -31,7 +31,7 @@ import type { IPulseEmitter } from '../interfaces/IPulseEmitter';
 export function attachStatusBar(context: vscode.ExtensionContext, planRunner: PlanRunner, pulse: IPulseEmitter) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   item.text = 'Orchestrator: idle';
-  item.tooltip = 'Copilot Orchestrator';
+  item.tooltip = 'AI Orchestrator';
   item.command = 'orchestrator.refreshPlans';
   item.show();
   
@@ -61,12 +61,12 @@ export function attachStatusBar(context: vscode.ExtensionContext, planRunner: Pl
         item.text += ' (global limit)';
         item.tooltip = `Global job limit reached (${globalStats.activeInstances} instance${globalStats.activeInstances > 1 ? 's' : ''})`;
       } else {
-        item.tooltip = 'Copilot Orchestrator';
+        item.tooltip = 'AI Orchestrator';
       }
     } else {
       const total = plans.length;
       item.text = total > 0 ? `Orchestrator: ${total} Plan${total > 1 ? 's' : ''}` : 'Orchestrator: idle';
-      item.tooltip = 'Copilot Orchestrator';
+      item.tooltip = 'AI Orchestrator';
     }
   });
   
@@ -90,7 +90,7 @@ export function attachReleaseStatusBar(context: vscode.ExtensionContext) {
   // Priority ~9999 to appear right next to the git branch indicator (~10000)
   const releaseItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9999);
   releaseItem.text = '$(rocket)';
-  releaseItem.tooltip = 'Copilot Orchestrator: Create Release from Current Branch';
+  releaseItem.tooltip = 'AI Orchestrator: Create Release from Current Branch';
   releaseItem.command = 'orchestrator.createReleaseFromBranch';
   releaseItem.show();
   

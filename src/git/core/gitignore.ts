@@ -98,8 +98,8 @@ export async function ensureGitignoreEntries(
   }
   
   // Add header comment if adding orchestrator entries
-  if (!existingContent.includes('# Copilot Orchestrator')) {
-    newContent += '\n# Copilot Orchestrator temporary files\n';
+  if (!existingContent.includes('# AI Orchestrator')) {
+    newContent += '\n# AI Orchestrator temporary files\n';
   }
   
   // Add missing entries

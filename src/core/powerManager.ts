@@ -297,7 +297,7 @@ while ($true) {
    * Attempts to use systemd-inhibit to request a power management lock that
    * prevents idle sleep and system sleep:
    * - --what=idle:sleep: Inhibit both idle and sleep actions
-   * - --who=Copilot Orchestrator: Identifies the lock holder
+   * - --who=AI Orchestrator: Identifies the lock holder
    * - --why: Provides the reason (visible in systemd logs)
    * 
    * If systemd-inhibit is not available or fails, falls back to
@@ -315,7 +315,7 @@ while ($true) {
       // Try systemd-inhibit first
       const proc = this.spawner.spawn('systemd-inhibit', [
         '--what=idle:sleep',
-        '--who=Copilot Orchestrator',
+        '--who=AI Orchestrator',
         `--why=${reason}`,
         'sleep', 'infinity'
       ], {

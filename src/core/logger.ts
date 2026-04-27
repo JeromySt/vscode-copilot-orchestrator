@@ -131,7 +131,7 @@ export class Logger {
     this.configProvider = configProvider;
     
     if (vscode) {
-      this.outputChannel = vscode.window.createOutputChannel('Copilot Orchestrator');
+      this.outputChannel = vscode.window.createOutputChannel('AI Orchestrator');
       this.loadConfig();
       
       // Listen for configuration changes

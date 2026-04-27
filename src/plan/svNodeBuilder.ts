@@ -58,7 +58,7 @@ export function buildDefaultVerificationSpec(
     instructions: [
       `# Snapshot Verification — Final Review Before Merge`,
       ``,
-      `You are reviewing the accumulated work from a Copilot Orchestrator plan before it merges to \`${targetBranch}\`.`,
+      `You are reviewing the accumulated work from a AI Orchestrator plan before it merges to \`${targetBranch}\`.`,
       `Your goal is to ensure all planned work is present, correct, and complete in this snapshot.`,
       ``,
       `## Plan Jobs`,

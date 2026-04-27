@@ -1,5 +1,5 @@
 /**
- * @fileoverview Job-related type definitions for the Copilot Orchestrator.
+ * @fileoverview Job-related type definitions for the AI Orchestrator.
  * 
  * This module contains all type definitions related to jobs, including:
  * - Job specifications (what a job should do)

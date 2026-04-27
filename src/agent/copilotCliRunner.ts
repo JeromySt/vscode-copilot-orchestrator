@@ -210,7 +210,7 @@ export class CopilotCliRunner {
         this.logger.warn(`[${label}] Copilot CLI not available`);
         return {
           success: false,
-          error: 'Copilot CLI not available. Install via "npm install -g @github/copilot" or "gh extension install github/gh-copilot", then run "Copilot Orchestrator: Refresh Copilot CLI" from the Command Palette.',
+          error: 'Copilot CLI not available. Install via "npm install -g @github/copilot" or "gh extension install github/gh-copilot", then run "AI Orchestrator: Refresh Copilot CLI" from the Command Palette.',
           exitCode: 127,
         };
       }

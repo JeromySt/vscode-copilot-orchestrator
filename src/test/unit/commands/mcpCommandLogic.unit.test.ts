@@ -50,7 +50,7 @@ suite('MCP Command Logic Unit Tests', () => {
     test('should generate connection info with correct content', () => {
       const result = generateMcpConnectionInfo();
       
-      assert.ok(result.includes('Copilot Orchestrator MCP Server'));
+      assert.ok(result.includes('AI Orchestrator MCP Server'));
       assert.ok(result.includes('stdio transport'));
       assert.ok(result.includes('create_copilot_plan'));
       assert.ok(result.includes('get_copilot_plan_status'));
@@ -63,13 +63,13 @@ suite('MCP Command Logic Unit Tests', () => {
       const result = generateMcpConnectionInfo('test-endpoint');
       
       // Should still return standard template regardless of endpoint
-      assert.ok(result.includes('Copilot Orchestrator MCP Server'));
+      assert.ok(result.includes('AI Orchestrator MCP Server'));
     });
 
     test('should return consistent multiline format', () => {
       const result = generateMcpConnectionInfo();
       
-      assert.ok(/^Copilot Orchestrator MCP Server\n\n/.test(result));
+      assert.ok(/^AI Orchestrator MCP Server\n\n/.test(result));
       assert.ok(result.includes('\n- create_copilot_plan'));
       assert.ok(result.includes('\n- cancel_copilot_plan'));
     });
@@ -191,7 +191,7 @@ suite('MCP Command Logic Unit Tests', () => {
       const clipboardCalls = mockClipboard.getCalls();
       assert.strictEqual(clipboardCalls.length, 1);
       assert.strictEqual(clipboardCalls[0].method, 'writeText');
-      assert.ok(clipboardCalls[0].args[0].includes('Copilot Orchestrator MCP Server'));
+      assert.ok(clipboardCalls[0].args[0].includes('AI Orchestrator MCP Server'));
 
       const dialogCalls = mockDialog.getCalls();
       assert.strictEqual(dialogCalls.length, 1);
@@ -234,7 +234,7 @@ suite('MCP Command Logic Unit Tests', () => {
       const dialogCalls = mockDialog.getCalls();
       assert.strictEqual(dialogCalls.length, 2); // First for prompt, second for success
       assert.strictEqual(dialogCalls[0].method, 'showWarning');
-      assert.ok(dialogCalls[0].args[0].includes('Start the Copilot Orchestrator MCP server'));
+      assert.ok(dialogCalls[0].args[0].includes('Start the AI Orchestrator MCP server'));
       assert.strictEqual(dialogCalls[1].method, 'showInfo');
       assert.ok(dialogCalls[1].args[0].includes('MCP server started'));
     });

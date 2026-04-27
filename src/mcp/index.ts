@@ -1,7 +1,7 @@
 /**
  * @fileoverview MCP (Model Context Protocol) module exports.
  * 
- * This module provides MCP server functionality for the Copilot Orchestrator.
+ * This module provides MCP server functionality for the AI Orchestrator.
  * 
  * Structure:
  * - types.ts - Shared type definitions

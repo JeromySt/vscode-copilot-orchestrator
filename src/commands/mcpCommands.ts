@@ -35,7 +35,7 @@ export function registerMcpCommands(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('orchestrator.mcp.howToConnect', async () => {
       const choice = await vscode.window.showInformationMessage(
-        'The Copilot Orchestrator MCP server auto-registers with VS Code. Use "MCP: List Servers" to manage it.',
+        'The AI Orchestrator MCP server auto-registers with VS Code. Use "MCP: List Servers" to manage it.',
         'Start Server',
         'List Servers',
         'Copy Info'

@@ -898,7 +898,7 @@ suite('JobExecutionEngine - helper methods', () => {
       sandbox.stub(git.repository, 'hasUncommittedChanges').resolves(true);
       sandbox.stub(git.repository, 'getDirtyFiles').resolves(['.gitignore']);
       // Return only orchestrator patterns in diff
-      sandbox.stub(git.repository, 'getFileDiff').resolves('+.orchestrator/\n+# Copilot Orchestrator\n');
+      sandbox.stub(git.repository, 'getFileDiff').resolves('+.orchestrator/\n+# AI Orchestrator\n');
       sandbox.stub(git.repository, 'hasChangesBetween').resolves(true);
       sandbox.stub(git.repository, 'checkoutFile').resolves();
       sandbox.stub(git.repository, 'resetHard').resolves();

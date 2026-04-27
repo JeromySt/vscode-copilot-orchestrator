@@ -37,7 +37,7 @@ export class StdioMcpServerManager implements IMcpManager {
       99,
     );
     this.statusBarItem.text = '$(circle-slash) MCP: stopped';
-    this.statusBarItem.tooltip = 'Copilot Orchestrator MCP Server (stdio)';
+    this.statusBarItem.tooltip = 'AI Orchestrator MCP Server (stdio)';
     this.statusBarItem.show();
 
     context.subscriptions.push(this.statusBarItem);
@@ -79,15 +79,15 @@ export class StdioMcpServerManager implements IMcpManager {
     if (!this.statusBarItem) { return; }
     if (this.status === 'connected') {
       this.statusBarItem.text = '$(check) MCP: stdio';
-      this.statusBarItem.tooltip = 'Copilot Orchestrator MCP connected (stdio transport)';
+      this.statusBarItem.tooltip = 'AI Orchestrator MCP connected (stdio transport)';
       this.statusBarItem.backgroundColor = undefined;
     } else if (this.status === 'error') {
       this.statusBarItem.text = '$(error) MCP: error';
-      this.statusBarItem.tooltip = 'Copilot Orchestrator MCP server error (stdio)';
+      this.statusBarItem.tooltip = 'AI Orchestrator MCP server error (stdio)';
       this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     } else {
       this.statusBarItem.text = '$(circle-slash) MCP: stopped';
-      this.statusBarItem.tooltip = 'Copilot Orchestrator MCP server stopped';
+      this.statusBarItem.tooltip = 'AI Orchestrator MCP server stopped';
       this.statusBarItem.backgroundColor = undefined;
     }
   }

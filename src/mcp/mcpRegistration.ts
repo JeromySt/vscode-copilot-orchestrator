@@ -35,7 +35,7 @@ export async function promptMcpServerStart(
   if (!mcpConfig.get<boolean>('enabled', true)) {return;}
   
   const choice = await vscode.window.showInformationMessage(
-    'Copilot Orchestrator MCP server is available! Start it from "MCP: List Servers" to use orchestrator tools in Copilot Chat.',
+    'AI Orchestrator MCP server is available! Start it from "MCP: List Servers" to use orchestrator tools in Copilot Chat.',
     'Start Server',
     'List Servers',
     "Don't Show Again"
@@ -48,7 +48,7 @@ export async function promptMcpServerStart(
         'copilot-orchestrator.mcp-server'
       );
       vscode.window.showInformationMessage(
-        'Copilot Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
+        'AI Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
       );
     } catch (error: any) {
       // If direct start fails, fall back to opening the MCP list

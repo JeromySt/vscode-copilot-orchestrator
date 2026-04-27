@@ -295,7 +295,7 @@ export async function initializeMcpServer(
   const MCP_ENABLED_KEY = 'mcpServerEnabledAcknowledged';
   if (!context.globalState.get<boolean>(MCP_ENABLED_KEY)) {
     vscode.window.showInformationMessage(
-      'Copilot Orchestrator MCP server is registered. Enable it in the MCP Servers panel to use plan/job tools with GitHub Copilot.',
+      'AI Orchestrator MCP server is registered. Enable it in the MCP Servers panel to use plan/job tools with GitHub Copilot.',
       'Got it',
       'Start MCP Server'
     ).then(async choice => {

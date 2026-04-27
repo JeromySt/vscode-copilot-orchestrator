@@ -120,7 +120,7 @@ function buildLogFileHeader(executionKey: string): string {
 
   const lines = [
     `================================================================================`,
-    `  Copilot Orchestrator - Node Execution Log`,
+    `  AI Orchestrator - Node Execution Log`,
     `================================================================================`,
     `  Version:    ${version}`,
     `  Commit:     ${commit}`,

@@ -535,7 +535,7 @@ suite('Git Repository Operations', () => {
       await repository.ensureGitignore(tempDir, ['.orchestrator/', 'coverage/']);
 
       const content = fs.readFileSync(path.join(tempDir, '.gitignore'), 'utf-8');
-      assert.ok(content.includes('# Copilot Orchestrator'));
+      assert.ok(content.includes('# AI Orchestrator'));
       assert.ok(content.includes('.orchestrator/'));
       assert.ok(content.includes('coverage/'));
     });
@@ -583,7 +583,7 @@ suite('Git Repository Operations', () => {
       await repository.ensureGitignore(tempDir, ['.orchestrator/', 'coverage/']);
 
       const content = fs.readFileSync(path.join(tempDir, '.gitignore'), 'utf-8');
-      assert.ok(!content.includes('# Copilot Orchestrator'));
+      assert.ok(!content.includes('# AI Orchestrator'));
     });
 
     test('handles patterns with leading slash', async () => {

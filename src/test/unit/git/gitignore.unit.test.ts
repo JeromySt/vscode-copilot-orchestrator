@@ -75,7 +75,7 @@ suite('.gitignore Handling', () => {
       await git.gitignore.ensureOrchestratorGitIgnore(mockWorkspaceRoot);
       
       const writtenContent = writeFileStub.getCall(0).args[1] as string;
-      assert.ok(writtenContent.includes('# Copilot Orchestrator'));
+      assert.ok(writtenContent.includes('# AI Orchestrator'));
     });
   });
   

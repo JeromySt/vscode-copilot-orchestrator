@@ -582,7 +582,7 @@ suite('Git Core Repository Unit Tests', () => {
 
       assert.ok(writeFile.calledOnce);
       const content = writeFile.getCall(0).args[1] as string;
-      assert.ok(content.includes('# Copilot Orchestrator'));
+      assert.ok(content.includes('# AI Orchestrator'));
       assert.ok(content.includes('.orchestrator/'));
       assert.ok(content.includes('.worktrees/'));
     });

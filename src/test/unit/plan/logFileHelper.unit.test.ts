@@ -75,7 +75,7 @@ suite('logFileHelper', () => {
       assert.ok(content.includes('test message'));
       assert.ok(content.includes('[WORK]'));
       // Header should also be present
-      assert.ok(content.includes('Copilot Orchestrator'));
+      assert.ok(content.includes('AI Orchestrator'));
     });
 
     test('does nothing when storagePath is undefined', () => {

@@ -97,7 +97,7 @@ suite('ensureGitignoreEntries', () => {
     
     assert.strictEqual(result, true, 'Should return true when creating new file');
     const content = await fs.promises.readFile(path.join(tempDir, '.gitignore'), 'utf8');
-    assert.ok(content.includes('# Copilot Orchestrator'), 'Should include header comment');
+    assert.ok(content.includes('# AI Orchestrator'), 'Should include header comment');
   });
   
   test('does not duplicate header comment', async () => {
@@ -113,7 +113,7 @@ suite('ensureGitignoreEntries', () => {
     await ensureGitignoreEntries(tempDir);
     
     content = await fs.promises.readFile(path.join(tempDir, '.gitignore'), 'utf8');
-    const headerMatches = content.match(/# Copilot Orchestrator/g) || [];
+    const headerMatches = content.match(/# AI Orchestrator/g) || [];
     assert.strictEqual(headerMatches.length, 1, 'Should not duplicate header comment');
   });
   

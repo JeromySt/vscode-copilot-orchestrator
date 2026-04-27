@@ -260,7 +260,7 @@ export async function ensureGitignore(
       if (!content.endsWith('\n') && content.length > 0) {
         content += '\n';
       }
-      content += '# Copilot Orchestrator\n';
+      content += '# AI Orchestrator\n';
       content += toAdd.join('\n') + '\n';
       
       await _writeFile(gitignorePath, content, 'utf-8');

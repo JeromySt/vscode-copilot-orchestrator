@@ -1,5 +1,5 @@
 /**
- * @fileoverview VS Code Copilot Orchestrator Extension - Main Entry Point
+ * @fileoverview VS Code AI Orchestrator Extension - Main Entry Point
  * 
  * This file is the composition root for the extension. It orchestrates
  * the initialization of all components using the Plan-based system.
@@ -305,7 +305,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Complete ───────────────────────────────────────────────────────────
   extLog.info('Extension activated successfully');
-  vscode.window.showInformationMessage('Copilot Orchestrator is ready!');
+  vscode.window.showInformationMessage('AI Orchestrator is ready!');
 }
 
 // ============================================================================
@@ -384,7 +384,7 @@ async function triggerOrphanedWorktreeCleanup(
     // Show info message if significant cleanup was done
     if (result.orphanedCleaned >= 3) {
       vscode.window.showInformationMessage(
-        `Copilot Orchestrator: Cleaned up ${result.orphanedCleaned} orphaned worktree directories.`
+        `AI Orchestrator: Cleaned up ${result.orphanedCleaned} orphaned worktree directories.`
       );
     }
   } else {
@@ -421,7 +421,7 @@ async function triggerOrphanedIsolatedRepoCleanup(
       // Show info message if significant cleanup was done
       if (cleanedCount >= 3) {
         vscode.window.showInformationMessage(
-          `Copilot Orchestrator: Cleaned up ${cleanedCount} orphaned isolated repositories.`
+          `AI Orchestrator: Cleaned up ${cleanedCount} orphaned isolated repositories.`
         );
       }
     } else {

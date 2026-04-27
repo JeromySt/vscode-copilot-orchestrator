@@ -1,6 +1,6 @@
 {
   "name": "vscode-copilot-orchestrator",
-  "displayName": "Copilot Orchestrator",
+  "displayName": "AI Orchestrator",
   "description": "Orchestrate parallel GitHub Copilot agents in isolated git worktrees with DAG-based execution, secure MCP integration via nonce-authenticated IPC, real-time process monitoring, and automated 7-phase pipelines (merge → prechecks → work → commit → postchecks → merge-back → cleanup).",
   "version": "0.16.7",
   "publisher": "JeromyStatia",
@@ -48,7 +48,7 @@
     "mcpServerDefinitionProviders": [
       {
         "id": "copilot-orchestrator.mcp-server",
-        "label": "Copilot Orchestrator",
+        "label": "AI Orchestrator",
         "enabledByDefault": true
       }
     ],
@@ -56,7 +56,7 @@
       "activitybar": [
         {
           "id": "copilot-orchestrator",
-          "title": "Copilot Orchestrator",
+          "title": "AI Orchestrator",
           "icon": "media/copilot-icon.svg"
         }
       ]
@@ -64,134 +64,134 @@
     "commands": [
       {
         "command": "orchestrator.mcp.howToConnect",
-        "title": "Copilot Orchestrator: MCP – How to Connect"
+        "title": "AI Orchestrator: MCP – How to Connect"
       },
       {
         "command": "orchestrator.mcp.configure",
-        "title": "Copilot Orchestrator: Add MCP to GitHub Copilot"
+        "title": "AI Orchestrator: Add MCP to GitHub Copilot"
       },
       {
         "command": "orchestrator.copilotCli.check",
-        "title": "Copilot Orchestrator: Check Copilot CLI"
+        "title": "AI Orchestrator: Check Copilot CLI"
       },
       {
         "command": "orchestrator.showPlanDetails",
-        "title": "Copilot Orchestrator: Show Plan Details"
+        "title": "AI Orchestrator: Show Plan Details"
       },
       {
         "command": "orchestrator.showNodeDetails",
-        "title": "Copilot Orchestrator: Show Node Details"
+        "title": "AI Orchestrator: Show Node Details"
       },
       {
         "command": "orchestrator.cancelPlan",
-        "title": "Copilot Orchestrator: Cancel Plan",
+        "title": "AI Orchestrator: Cancel Plan",
         "icon": "$(debug-stop)"
       },
       {
         "command": "orchestrator.pausePlan",
-        "title": "Copilot Orchestrator: Pause Plan",
+        "title": "AI Orchestrator: Pause Plan",
         "icon": "$(debug-pause)"
       },
       {
         "command": "orchestrator.resumePlan",
-        "title": "Copilot Orchestrator: Resume Plan",
+        "title": "AI Orchestrator: Resume Plan",
         "icon": "$(debug-continue)"
       },
       {
         "command": "orchestrator.recoverPlan",
-        "title": "Copilot Orchestrator: Recover Plan",
+        "title": "AI Orchestrator: Recover Plan",
         "icon": "$(history)"
       },
       {
         "command": "orchestrator.deletePlan",
-        "title": "Copilot Orchestrator: Delete Plan",
+        "title": "AI Orchestrator: Delete Plan",
         "icon": "$(trash)"
       },
       {
         "command": "orchestrator.archivePlan",
-        "title": "Copilot Orchestrator: Archive Plan",
+        "title": "AI Orchestrator: Archive Plan",
         "icon": "$(archive)"
       },
       {
         "command": "orchestrator.refreshPlans",
-        "title": "Copilot Orchestrator: Refresh Plans",
+        "title": "AI Orchestrator: Refresh Plans",
         "icon": "$(refresh)"
       },
       {
         "command": "orchestrator.bulkDelete",
-        "title": "Copilot Orchestrator: Delete Selected Plans"
+        "title": "AI Orchestrator: Delete Selected Plans"
       },
       {
         "command": "orchestrator.bulkCancel",
-        "title": "Copilot Orchestrator: Cancel Selected Plans"
+        "title": "AI Orchestrator: Cancel Selected Plans"
       },
       {
         "command": "orchestrator.bulkPause",
-        "title": "Copilot Orchestrator: Pause Selected Plans"
+        "title": "AI Orchestrator: Pause Selected Plans"
       },
       {
         "command": "orchestrator.bulkResume",
-        "title": "Copilot Orchestrator: Resume Selected Plans"
+        "title": "AI Orchestrator: Resume Selected Plans"
       },
       {
         "command": "orchestrator.bulkRetry",
-        "title": "Copilot Orchestrator: Retry Selected Plans"
+        "title": "AI Orchestrator: Retry Selected Plans"
       },
       {
         "command": "orchestrator.bulkFinalize",
-        "title": "Copilot Orchestrator: Finalize Selected Plans"
+        "title": "AI Orchestrator: Finalize Selected Plans"
       },
       {
         "command": "copilotOrchestrator.refreshModels",
-        "title": "Copilot Orchestrator: Refresh Available Models"
+        "title": "AI Orchestrator: Refresh Available Models"
       },
       {
         "command": "copilotOrchestrator.refreshCopilotCli",
-        "title": "Copilot Orchestrator: Refresh Copilot CLI"
+        "title": "AI Orchestrator: Refresh Copilot CLI"
       },
       {
         "command": "copilotOrchestrator.setupCopilotCli",
-        "title": "Copilot Orchestrator: Setup Copilot CLI"
+        "title": "AI Orchestrator: Setup Copilot CLI"
       },
       {
         "command": "orchestrator.showReleasePanel",
-        "title": "Copilot Orchestrator: Show Release Panel"
+        "title": "AI Orchestrator: Show Release Panel"
       },
       {
         "command": "orchestrator.createRelease",
-        "title": "Copilot Orchestrator: Create Release"
+        "title": "AI Orchestrator: Create Release"
       },
       {
         "command": "orchestrator.cancelRelease",
-        "title": "Copilot Orchestrator: Cancel Release"
+        "title": "AI Orchestrator: Cancel Release"
       },
       {
         "command": "orchestrator.startRelease",
-        "title": "Copilot Orchestrator: Start Release"
+        "title": "AI Orchestrator: Start Release"
       },
       {
         "command": "orchestrator.addPlanToRelease",
-        "title": "Copilot Orchestrator: Add Plan to Release"
+        "title": "AI Orchestrator: Add Plan to Release"
       },
       {
         "command": "orchestrator.removePlanFromRelease",
-        "title": "Copilot Orchestrator: Remove Plan from Release"
+        "title": "AI Orchestrator: Remove Plan from Release"
       },
       {
         "command": "orchestrator.updateReleaseConfig",
-        "title": "Copilot Orchestrator: Update Release Config"
+        "title": "AI Orchestrator: Update Release Config"
       },
       {
         "command": "orchestrator.retryReleaseMerge",
-        "title": "Copilot Orchestrator: Retry Release Merge"
+        "title": "AI Orchestrator: Retry Release Merge"
       },
       {
         "command": "orchestrator.addressPRFeedback",
-        "title": "Copilot Orchestrator: Address PR Feedback"
+        "title": "AI Orchestrator: Address PR Feedback"
       },
       {
         "command": "orchestrator.adoptPR",
-        "title": "Copilot Orchestrator: Adopt PR",
+        "title": "AI Orchestrator: Adopt PR",
         "icon": "$(add)"
       }
     ],
@@ -213,7 +213,7 @@
     "notebooks": [
       {
         "type": "orchestrator-notebook",
-        "displayName": "Copilot Orchestrator Job Plan",
+        "displayName": "AI Orchestrator Job Plan",
         "selector": [
           {
             "filenamePattern": "**/*.orchestrator.json"
@@ -225,7 +225,7 @@
       }
     ],
     "configuration": {
-      "title": "Copilot Orchestrator",
+      "title": "AI Orchestrator",
       "properties": {
         "copilotOrchestrator.mcp.enabled": {
           "type": "boolean",
@@ -349,7 +349,7 @@
             "error"
           ],
           "default": "info",
-          "description": "Global log level for all Copilot Orchestrator components. Controls which messages are displayed in the Output panel. Debug messages also require per-component debug flags to be enabled."
+          "description": "Global log level for all AI Orchestrator components. Controls which messages are displayed in the Output panel. Debug messages also require per-component debug flags to be enabled."
         },
         "copilotOrchestrator.logging.components": {
           "type": "array",

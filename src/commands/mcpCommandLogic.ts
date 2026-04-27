@@ -51,7 +51,7 @@ export interface CommandExecutor {
  * @returns Formatted connection information text
  */
 export function generateMcpConnectionInfo(endpoint?: string): string {
-  return `Copilot Orchestrator MCP Server
+  return `AI Orchestrator MCP Server
 
 The MCP server automatically registers with VS Code using stdio transport.
 No manual configuration needed - just use "MCP: List Servers" and start it.
@@ -63,7 +63,7 @@ Available tools:
 - cancel_copilot_plan - Cancel a running plan
 - And more...
 
-To enable: Run "MCP: List Servers" and start "Copilot Orchestrator"`;
+To enable: Run "MCP: List Servers" and start "AI Orchestrator"`;
 }
 
 // ============================================================================
@@ -96,10 +96,10 @@ export async function handleHowToConnect(
             'workbench.action.chat.startMcpServer', 
             'copilot-orchestrator.mcp-server'
           );
-          await services.dialog.showInfo('Copilot Orchestrator MCP server started!');
+          await services.dialog.showInfo('AI Orchestrator MCP server started!');
         } else {
           // For testing or when command executor is not available
-          await services.dialog.showInfo('Copilot Orchestrator MCP server started!');
+          await services.dialog.showInfo('AI Orchestrator MCP server started!');
         }
       } catch (error) {
         // If direct start fails, fall back to listing servers
@@ -158,7 +158,7 @@ export async function handlePromptMcpStart(
 
   // Show prompt with options
   const choice = await services.dialog.showWarning(
-    'Start the Copilot Orchestrator MCP server for GitHub Copilot Chat?',
+    'Start the AI Orchestrator MCP server for GitHub Copilot Chat?',
     undefined,
     'Start Server',
     'Open MCP List'
@@ -177,12 +177,12 @@ export async function handlePromptMcpStart(
             'copilot-orchestrator.mcp-server'
           );
           await services.dialog.showInfo(
-            'Copilot Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
+            'AI Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
           );
         } else {
           // For testing
           await services.dialog.showInfo(
-            'Copilot Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
+            'AI Orchestrator MCP server started! You can now use orchestrator tools in Copilot Chat.'
           );
         }
       } catch (error) {
