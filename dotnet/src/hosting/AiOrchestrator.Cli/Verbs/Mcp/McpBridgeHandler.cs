@@ -78,44 +78,39 @@ internal sealed class McpBridgeHandler : VerbBase
         string? authNonce = Environment.GetEnvironmentVariable("AIO_AUTH_NONCE");
         Console.Error.WriteLine($"[bridge] Connected to pipe '{pipeName}', nonce={(!string.IsNullOrEmpty(authNonce) ? "set" : "none")}");
 
-        // stdin → pipe: intercept the first Content-Length frame, inject nonce, then raw relay
-        var stdinToPipe = Task.Run(async () =>
-        {
-            using var stdin = Console.OpenStandardInput();
+        // Open stdin/stdout ONCE before spawning tasks — Console.OpenStandardInput()
+        // inside Task.Run can race with VS Code's writes on Windows.
+        var stdin = Console.OpenStandardInput();
+        var stdout = Console.OpenStandardOutput();
 
-            if (!string.IsNullOrEmpty(authNonce))
+        // If nonce is set, intercept the first frame synchronously before starting relay
+        if (!string.IsNullOrEmpty(authNonce))
+        {
+            Console.Error.WriteLine("[bridge] Reading first frame from stdin for nonce injection...");
+            var firstFrame = await ReadOneFrameAsync(stdin, ct).ConfigureAwait(false);
+            if (firstFrame is not null)
             {
-                Console.Error.WriteLine("[bridge] Reading first frame from stdin for nonce injection...");
-                // Read the first Content-Length framed message, inject nonce, forward
-                var firstFrame = await ReadOneFrameAsync(stdin, ct).ConfigureAwait(false);
-                if (firstFrame is not null)
-                {
-                    Console.Error.WriteLine($"[bridge] Got first frame ({firstFrame.Length} chars), injecting nonce");
-                    string patched = InjectNonce(firstFrame, authNonce!);
-                    byte[] patchedBytes = Encoding.UTF8.GetBytes(patched);
-                    string header = $"Content-Length: {patchedBytes.Length}\r\n\r\n";
-                    byte[] headerBytes = Encoding.UTF8.GetBytes(header);
-                    await client.WriteAsync(headerBytes, ct).ConfigureAwait(false);
-                    await client.WriteAsync(patchedBytes, ct).ConfigureAwait(false);
-                    await client.FlushAsync(ct).ConfigureAwait(false);
-                    Console.Error.WriteLine($"[bridge] Nonce injected and forwarded ({patchedBytes.Length}b)");
-                }
-                else
-                {
-                    Console.Error.WriteLine("[bridge] WARNING: Failed to read first frame from stdin");
-                }
+                Console.Error.WriteLine($"[bridge] Got first frame ({firstFrame.Length} chars), injecting nonce");
+                string patched = InjectNonce(firstFrame, authNonce!);
+                byte[] patchedBytes = Encoding.UTF8.GetBytes(patched);
+                string header = $"Content-Length: {patchedBytes.Length}\r\n\r\n";
+                byte[] headerBytes = Encoding.UTF8.GetBytes(header);
+                await client.WriteAsync(headerBytes, ct).ConfigureAwait(false);
+                await client.WriteAsync(patchedBytes, ct).ConfigureAwait(false);
+                await client.FlushAsync(ct).ConfigureAwait(false);
+                Console.Error.WriteLine($"[bridge] Nonce injected and forwarded ({patchedBytes.Length}b)");
             }
+            else
+            {
+                Console.Error.WriteLine("[bridge] WARNING: Failed to read first frame from stdin");
+            }
+        }
 
-            // Raw relay for all subsequent messages
-            await RelayAsync(stdin, client, ct).ConfigureAwait(false);
-        }, ct);
+        Console.Error.WriteLine("[bridge] Starting bidirectional relay");
 
-        // pipe → stdout: pure relay (no interception needed)
-        var pipeToStdout = Task.Run(async () =>
-        {
-            using var stdout = Console.OpenStandardOutput();
-            await RelayAsync(client, stdout, ct).ConfigureAwait(false);
-        }, ct);
+        // Now relay remaining stdin → pipe and pipe → stdout
+        var stdinToPipe = RelayAsync(stdin, client, ct);
+        var pipeToStdout = RelayAsync(client, stdout, ct);
 
         await Task.WhenAny(stdinToPipe, pipeToStdout).ConfigureAwait(false);
         return CliExitCodes.Ok;
