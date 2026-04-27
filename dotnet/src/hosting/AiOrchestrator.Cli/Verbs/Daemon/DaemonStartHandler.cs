@@ -144,7 +144,20 @@ internal sealed class DaemonStartHandler : VerbBase
         IConfiguration config = new ConfigurationBuilder().Build();
         var services = new ServiceCollection();
 
-        _ = services.AddLogging();
+        // Add file logging to the per-PID daemon log file.
+        var logPath = AiOrchestrator.Logging.AioLogPaths.GlobalDaemonLog;
+        var logDir = System.IO.Path.GetDirectoryName(logPath)!;
+        if (!System.IO.Directory.Exists(logDir))
+        {
+            System.IO.Directory.CreateDirectory(logDir);
+        }
+
+        _ = services.AddLogging(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddProvider(new AiOrchestrator.Logging.File.RollingFileLoggerProvider(
+                new AiOrchestrator.Logging.File.RollingFileLoggerOptions { FilePath = logPath, MaxFileSizeBytes = 10 * 1024 * 1024 }));
+        });
 
         _ = services.AddSingleton<ITelemetrySink>(
             new OtlpTelemetrySink(Options.Create(new OtlpOptions())));
