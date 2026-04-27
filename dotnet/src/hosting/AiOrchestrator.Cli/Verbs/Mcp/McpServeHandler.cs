@@ -123,6 +123,7 @@ internal sealed class McpServeHandler : VerbBase
         // Plan subsystem: register the factory instead of a single IPlanStore.
         _ = services.AddPlanModels();
         _ = services.AddOptions<PlanStoreOptions>();
+        _ = services.AddSingleton<AiOrchestrator.Plan.Store.Migration.IPlanMigrator, AiOrchestrator.Plan.Store.Migration.TsPlanMigrator>();
         _ = services.AddSingleton<IPlanStoreFactory, PlanStoreFactory>();
 
         // Process handle registry (empty — standalone CLI doesn't run jobs, but

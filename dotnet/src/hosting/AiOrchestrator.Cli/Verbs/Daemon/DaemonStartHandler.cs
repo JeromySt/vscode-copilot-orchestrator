@@ -173,6 +173,7 @@ internal sealed class DaemonStartHandler : VerbBase
 
         _ = services.AddPlanModels();
         _ = services.AddOptions<PlanStoreOptions>();
+        _ = services.AddSingleton<AiOrchestrator.Plan.Store.Migration.IPlanMigrator, AiOrchestrator.Plan.Store.Migration.TsPlanMigrator>();
         _ = services.AddSingleton<IPlanStoreFactory, PlanStoreFactory>();
 
         _ = services.AddSingleton<Abstractions.Process.IProcessHandleRegistry, AiOrchestrator.Process.ProcessHandleRegistry>();

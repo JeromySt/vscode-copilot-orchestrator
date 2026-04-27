@@ -5,10 +5,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Threading;
 using AiOrchestrator.Abstractions.Eventing;
 using AiOrchestrator.Abstractions.Io;
 using AiOrchestrator.Abstractions.Time;
 using AiOrchestrator.Models.Paths;
+using AiOrchestrator.Plan.Store.Migration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -26,19 +28,22 @@ public sealed class PlanStoreFactory : IPlanStoreFactory
     private readonly IEventBus eventBus;
     private readonly IOptionsMonitor<PlanStoreOptions> options;
     private readonly ILoggerFactory loggerFactory;
+    private readonly IPlanMigrator migrator;
 
     public PlanStoreFactory(
         IFileSystem fs,
         IClock clock,
         IEventBus eventBus,
         IOptionsMonitor<PlanStoreOptions> options,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IPlanMigrator migrator)
     {
         this.fs = fs ?? throw new ArgumentNullException(nameof(fs));
         this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
         this.eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        this.migrator = migrator ?? throw new ArgumentNullException(nameof(migrator));
     }
 
     /// <inheritdoc/>
@@ -47,12 +52,19 @@ public sealed class PlanStoreFactory : IPlanStoreFactory
         ArgumentException.ThrowIfNullOrEmpty(repoRoot);
 
         return this.stores.GetOrAdd(repoRoot, root =>
-            new PlanStore(
-                new AbsolutePath(Path.Combine(root, ".orchestrator", "plans")),
+        {
+            var storeRoot = new AbsolutePath(Path.Combine(root, ".orchestrator", "plans"));
+
+            // Fire-and-forget migration of legacy TS plans (best-effort).
+            _ = this.migrator.MigrateIfNeededAsync(storeRoot, CancellationToken.None);
+
+            return new PlanStore(
+                storeRoot,
                 this.fs,
                 this.clock,
                 this.eventBus,
                 this.options,
-                this.loggerFactory.CreateLogger<PlanStore>()));
+                this.loggerFactory.CreateLogger<PlanStore>());
+        });
     }
 }

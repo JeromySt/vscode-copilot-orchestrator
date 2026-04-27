@@ -15,4 +15,8 @@
   <ProjectReference Include="..\..\..\src\hosting\AiOrchestrator.Composition\AiOrchestrator.Composition.csproj" />
 </ItemGroup>
 
+<ItemGroup>
+  <Content Include="TestData\**\*" CopyToOutputDirectory="PreserveNewest" />
+</ItemGroup>
+
 </Project>

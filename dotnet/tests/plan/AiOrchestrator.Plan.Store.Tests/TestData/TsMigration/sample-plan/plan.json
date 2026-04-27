@@ -1,0 +1,103 @@
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "spec": {
+    "name": "Test Migration Plan",
+    "status": "pending",
+    "baseBranch": "main",
+    "targetBranch": "feat/migration",
+    "maxParallel": 4,
+    "jobs": []
+  },
+  "jobs": [
+    {
+      "id": "job-001",
+      "producerId": "step-1",
+      "name": "Foundation setup",
+      "task": "Set up the project foundation",
+      "dependencies": [],
+      "hasWork": true,
+      "hasPrechecks": false,
+      "hasPostchecks": false
+    },
+    {
+      "id": "job-002",
+      "producerId": "step-2",
+      "name": "Core implementation",
+      "task": "Implement core logic",
+      "dependencies": ["job-001"],
+      "hasWork": true,
+      "hasPrechecks": true,
+      "hasPostchecks": true
+    },
+    {
+      "id": "job-003",
+      "producerId": "step-3",
+      "name": "Integration tests",
+      "task": "Write integration tests",
+      "dependencies": ["job-001", "job-002"],
+      "hasWork": true,
+      "hasPrechecks": false,
+      "hasPostchecks": true
+    }
+  ],
+  "producerIdToNodeId": {
+    "step-1": "job-001",
+    "step-2": "job-002",
+    "step-3": "job-003"
+  },
+  "roots": ["job-001"],
+  "leaves": ["job-003"],
+  "nodeStates": {
+    "job-001": {
+      "status": "succeeded",
+      "version": 3,
+      "attempts": 1,
+      "scheduledAt": 1776400000000,
+      "stateHistory": [
+        { "from": "", "to": "scheduled", "timestamp": 1776400000000, "reason": "initial" },
+        { "from": "scheduled", "to": "running", "timestamp": 1776400001000 },
+        { "from": "running", "to": "succeeded", "timestamp": 1776400060000 }
+      ],
+      "lastAttempt": {
+        "startedAt": 1776400001000,
+        "endedAt": 1776400060000,
+        "status": "succeeded"
+      }
+    },
+    "job-002": {
+      "status": "failed",
+      "version": 4,
+      "attempts": 2,
+      "scheduledAt": 1776400061000,
+      "stateHistory": [
+        { "from": "", "to": "scheduled", "timestamp": 1776400061000, "reason": "dependency met" },
+        { "from": "scheduled", "to": "running", "timestamp": 1776400062000 },
+        { "from": "running", "to": "failed", "timestamp": 1776400120000 }
+      ],
+      "lastAttempt": {
+        "startedAt": 1776400062000,
+        "endedAt": 1776400120000,
+        "status": "failed",
+        "error": "Build compilation error in module X"
+      }
+    },
+    "job-003": {
+      "status": "pending",
+      "version": 1,
+      "attempts": 0,
+      "scheduledAt": null,
+      "stateHistory": [],
+      "lastAttempt": null
+    }
+  },
+  "repoPath": "c:\\src\\repos\\test-repo",
+  "baseBranch": "main",
+  "targetBranch": "feat/migration",
+  "createdAt": 1776399900000,
+  "startedAt": 1776400000000,
+  "endedAt": null,
+  "status": "failed",
+  "maxParallel": 4,
+  "isPaused": false,
+  "stateVersion": 8
+}
