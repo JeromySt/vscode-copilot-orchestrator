@@ -110,30 +110,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const config = loadConfiguration(configProvider);
   extLog.debug('Configuration loaded', config);
 
-  // ── Plan Runner ─────────────────────────────────────────────────────────
-  const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
-  const debouncer = container.resolve<import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer>(Tokens.IGitignoreDebouncer);
-  gitignoreDebouncer = debouncer; // Retain for cleanup
-  const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git, debouncer);
-  processMonitor = pm;
-  planRunner = runner;
-
   // ── Engine Selection ─────────────────────────────────────────────────
   const useDotNet = configProvider.getConfig<boolean>('copilotOrchestrator', 'experimental.useDotNetEngine', false);
 
-  // The TS PlanRunner always handles UI, commands, and the sidebar.
-  // When useDotNetEngine is true, we swap the MCP server definition so
-  // When useDotNetEngine is true, we spawn the .NET daemon process and use
-  // the DotNetOrchestrationEngine over named pipes. The TS PlanRunner is still
-  // initialized for sidebar/UI compatibility.
   if (useDotNet) {
+    // .NET engine: skip TS PlanRunner entirely — all plan operations go through
+    // the .NET daemon via named pipes.
+    extLog.info('Using .NET engine (experimental)');
     const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     const workspaceId = Buffer.from(repoRoot).toString('base64url').slice(0, 16);
     daemonManager = new DotNetDaemonManager(context.extensionPath, workspaceId);
     engine = new DotNetOrchestrationEngine(daemonManager, repoRoot);
     context.subscriptions.push(daemonManager);
-    extLog.info('Using .NET engine (experimental) — daemon will be started on initialize');
   } else {
+    // TS engine: initialize the full PlanRunner pipeline.
+    const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+    const debouncer = container.resolve<import('./interfaces/IGitignoreDebouncer').IGitignoreDebouncer>(Tokens.IGitignoreDebouncer);
+    gitignoreDebouncer = debouncer;
+    const { planRunner: runner, processMonitor: pm } = await initializePlanRunner(context, container, git, debouncer);
+    processMonitor = pm;
+    planRunner = runner;
     engine = new TsOrchestrationEngine(runner);
   }
 
@@ -147,7 +143,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const spawner = container.resolve<import('./interfaces').IProcessSpawner>(Tokens.IProcessSpawner);
   const { PowerManagerImpl } = require('./core/powerManager');
   powerMgr = new PowerManagerImpl(spawner);
-  planRunner.setPowerManager(powerMgr!);
+  if (planRunner) {
+    planRunner.setPowerManager(powerMgr!);
+  }
   // Register process exit handlers for wake lock cleanup
   // Store references so we can remove them in deactivate()
   const pmRef = powerMgr;
@@ -163,7 +161,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const globalCapacityManager = new GlobalCapacityManager(context.globalStorageUri.fsPath); // eslint-disable-line no-restricted-syntax -- composition root
   await globalCapacityManager.initialize();
   await globalCapacityManager.setGlobalMaxParallel(globalMaxParallel);
-  planRunner.setGlobalCapacityManager(globalCapacityManager);
+  if (planRunner) {
+    planRunner.setGlobalCapacityManager(globalCapacityManager);
+  }
   globalCapacity = globalCapacityManager;
   
   // Cleanup on deactivation
@@ -172,24 +172,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   // ── MCP Server (stdio transport via IPC) ───────────────────────────────
-  mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
+  // Only start the TS MCP server when using the TS engine.
+  // When dotnet engine is active, VS Code spawns the .NET MCP server directly.
+  if (planRunner) {
+    mcpManager = await initializeMcpServer(context, planRunner, config.mcp, container);
+  }
 
   // ── Release Manager (experimental) ──────────────────────────────────────
   const releaseFeatureEnabled = vscode.workspace.getConfiguration('copilotOrchestrator').get<boolean>('experimental.enableReleaseManagement', false);
-  const releaseManager = releaseFeatureEnabled ? createReleaseManager(container, planRunner) : undefined;
+  const releaseManager = (releaseFeatureEnabled && planRunner) ? createReleaseManager(container, planRunner) : undefined;
 
   // ── Plans view ──────────────────────────────────────────────────────────
   const pulse = container.resolve<IPulseEmitter>(Tokens.IPulseEmitter);
   const prLifecycleManager = releaseFeatureEnabled
     ? container.resolve<import('./interfaces/IPRLifecycleManager').IPRLifecycleManager>(Tokens.IPRLifecycleManager)
     : undefined;
-  initializePlansView(context, planRunner, pulse, prLifecycleManager, releaseManager);
+  if (planRunner) {
+    initializePlansView(context, planRunner, pulse, prLifecycleManager, releaseManager);
+  }
 
   // ── Commands ───────────────────────────────────────────────────────────
-  registerPlanCommands(context, planRunner, pulse, container);
+  if (planRunner) {
+    registerPlanCommands(context, planRunner, pulse, container);
+  }
   registerUtilityCommands(context);
   // Register release commands (experimental — gated)
-  if (releaseFeatureEnabled && releaseManager) {
+  if (releaseFeatureEnabled && releaseManager && planRunner) {
     const providerDetector = container.resolve<import('./interfaces/IRemoteProviderDetector').IRemoteProviderDetector>(Tokens.IRemoteProviderDetector);
     registerReleaseCommands(context, (id: string) => releaseManager.getRelease(id), releaseManager, planRunner, providerDetector, pulse);
     if (prLifecycleManager) {
@@ -198,52 +206,55 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // ── Bulk Action Commands ───────────────────────────────────────────────
-  // Create BulkPlanActions via composition helper (keeps DI wiring in composition.ts)
-  let planRepo: import('./interfaces').IPlanRepository | undefined;
-  try { planRepo = container.resolve<import('./interfaces').IPlanRepository>(Tokens.IPlanRepository); } catch { /* not registered yet */ }
-  const bulkActions = createBulkPlanActions(container, planRunner, planRepo);
-  const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
-  registerBulkCommands(context, bulkActions, dialogService);
+  if (planRunner) {
+    let planRepo: import('./interfaces').IPlanRepository | undefined;
+    try { planRepo = container.resolve<import('./interfaces').IPlanRepository>(Tokens.IPlanRepository); } catch { /* not registered yet */ }
+    const bulkActions = createBulkPlanActions(container, planRunner, planRepo);
+    const dialogService = container.resolve<import('./interfaces').IDialogService>(Tokens.IDialogService);
+    registerBulkCommands(context, bulkActions, dialogService);
+  }
 
   // ── Branch Change Watcher ──────────────────────────────────────────────
-  // Watch for branch changes and notify debouncer
-  const branchWatcher = new BranchChangeWatcher(Logger.for('git'), debouncer);
-  await branchWatcher.initialize();
-  context.subscriptions.push(branchWatcher);
+  // Watch for branch changes and notify debouncer (TS engine only — .NET handles its own gitignore)
+  if (gitignoreDebouncer) {
+    const branchWatcher = new BranchChangeWatcher(Logger.for('git'), gitignoreDebouncer);
+    await branchWatcher.initialize();
+    context.subscriptions.push(branchWatcher);
 
-  // ── .gitignore File System Watcher ─────────────────────────────────────
-  // Watch for external .gitignore modifications and re-apply orchestrator entries
-  const gitignoreWatcher = vscode.workspace.createFileSystemWatcher('**/.gitignore');
-  
-  gitignoreWatcher.onDidChange(async (uri) => {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
-    if (workspaceFolder) {
-      const gitLogger = Logger.for('git');
-      try {
-        // Route through debouncer to avoid writes right after branch changes
-        await debouncer.ensureEntries(workspaceFolder.uri.fsPath, [
-          '.orchestrator/',
-          '.worktrees/'
-        ]);
-        gitLogger.info('.gitignore re-checked after external modification', { 
-          path: uri.fsPath 
-        });
-      } catch (error) {
-        gitLogger.error('Failed to update .gitignore after external change', {
-          path: uri.fsPath,
-          error: error instanceof Error ? error.message : String(error)
-        });
+    // ── .gitignore File System Watcher ─────────────────────────────────────
+    const gitignoreWatcher = vscode.workspace.createFileSystemWatcher('**/.gitignore');
+    
+    gitignoreWatcher.onDidChange(async (uri) => {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+      if (workspaceFolder) {
+        const gitLogger = Logger.for('git');
+        try {
+          await gitignoreDebouncer!.ensureEntries(workspaceFolder.uri.fsPath, [
+            '.orchestrator/',
+            '.worktrees/'
+          ]);
+          gitLogger.info('.gitignore re-checked after external modification', { 
+            path: uri.fsPath 
+          });
+        } catch (error) {
+          gitLogger.error('Failed to update .gitignore after external change', {
+            path: uri.fsPath,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
-    }
-  });
-  
-  context.subscriptions.push(gitignoreWatcher);
+    });
+    
+    context.subscriptions.push(gitignoreWatcher);
+  }
 
   // ── Orphaned Worktree Cleanup ──────────────────────────────────────────
-  // Trigger cleanup asynchronously after extension is fully activated
-  triggerOrphanedWorktreeCleanup(planRunner, context, git).catch(err => {
-    extLog.warn('Orphaned worktree cleanup failed', { error: err.message });
-  });
+  if (planRunner) {
+    const git = container.resolve<import('./interfaces/IGitOperations').IGitOperations>(Tokens.IGitOperations);
+    triggerOrphanedWorktreeCleanup(planRunner, context, git).catch(err => {
+      extLog.warn('Orphaned worktree cleanup failed', { error: err.message });
+    });
+  }
 
   // ── Isolated Repo Cleanup ──────────────────────────────────────────────
   // Initialize isolated repo manager and trigger orphan cleanup
