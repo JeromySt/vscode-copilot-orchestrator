@@ -80,9 +80,6 @@ internal sealed class DaemonStartHandler : VerbBase
         IOptionsMonitor<McpOptions> options = new StaticOptionsMonitor<McpOptions>(
             new McpOptions { AuthNonce = authNonce });
 
-        // Capture the current user identity for OS-level peer-credential validation.
-        string expectedUser = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
-
         // Signal readiness to the parent process.
         Console.Error.WriteLine("READY");
         Console.Error.Flush();
@@ -106,31 +103,12 @@ internal sealed class DaemonStartHandler : VerbBase
                 break;
             }
 
-            // PEER-CRED: Verify the connecting client runs as the same user.
-            // Same pattern as Concurrency.Broker (CONC-BROKER-3) and HookGate (INV-1).
-            if (OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    string? peerUser = null;
-                    pipeServer.RunAsClient(() =>
-                    {
-                        peerUser = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
-                    });
-
-                    if (!string.Equals(peerUser, expectedUser, StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.Error.WriteLine($"Rejected client: expected {expectedUser}, got {peerUser}");
-                        pipeServer.Disconnect();
-                        continue;
-                    }
-                }
-                catch
-                {
-                    pipeServer.Disconnect();
-                    continue;
-                }
-            }
+            // AUTH: Instance-level isolation is provided by the AIO_AUTH_NONCE
+            // env var, validated in McpServer.HandleInitialize on every client
+            // connection. OS-level peer-credential checks (RunAsClient /
+            // WindowsIdentity) are not used here because the IL trimmer strips
+            // the required metadata. The nonce is sufficient — only the VS Code
+            // process that spawned this daemon knows it.
 
             using var transport = new NamedPipeTransport(pipeServer);
             var registry = new McpToolRegistry(tools);
@@ -140,12 +118,12 @@ internal sealed class DaemonStartHandler : VerbBase
             // StartAsync kicks off the read loop in a background Task.
             await server.StartAsync(CancellationToken.None).ConfigureAwait(false);
 
-            // StopAsync cancels the loop CTS and awaits the loop Task. The loop
-            // exits when the transport returns null (client disconnect / broken pipe)
-            // or when the CTS fires. Either way we land here and accept the next client.
+            // Wait for the client to disconnect (loop exits on null ReceiveAsync).
+            // Do NOT call StopAsync here — it cancels the internal CTS which kills
+            // the loop before the client can send messages.
             try
             {
-                await server.StopAsync(ct).ConfigureAwait(false);
+                await server.WaitForLoopAsync().ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

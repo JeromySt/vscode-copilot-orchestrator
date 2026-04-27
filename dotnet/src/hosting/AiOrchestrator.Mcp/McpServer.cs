@@ -60,6 +60,16 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Waits for the read loop to finish naturally (client disconnect / EOF)
+    /// without cancelling the shutdown CTS. Use this when the caller wants the
+    /// server to run until the transport closes, not until StopAsync is called.
+    /// </summary>
+    internal Task WaitForLoopAsync()
+    {
+        return this.loop ?? Task.CompletedTask;
+    }
+
     /// <inheritdoc/>
     public async Task StopAsync(CancellationToken ct)
     {
