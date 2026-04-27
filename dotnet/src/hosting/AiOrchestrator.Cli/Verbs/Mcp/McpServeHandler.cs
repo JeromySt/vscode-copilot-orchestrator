@@ -114,10 +114,12 @@ internal sealed class McpServeHandler : VerbBase
 
         // Core infrastructure via composition root extensions.
         _ = services.AddTime();
+        _ = services.AddRedaction();
         _ = services.AddEventing(config);
 
         // File system — no fixed store root. The factory creates per-repo stores
         // dynamically when each tool call provides repo_root.
+        _ = services.AddPathValidator(Array.Empty<string>());
         _ = services.AddFileSystem();
 
         // Plan subsystem: register the factory instead of a single IPlanStore.
