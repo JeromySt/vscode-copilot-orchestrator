@@ -67,7 +67,7 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
         'daemon', 'start',
         '--pipe-name', this._pipeName!,
       ], {
-        stdio: ['ignore', 'ignore', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe'],  // stdout + stderr both piped for logging
         env: {
           ...process.env,
           AIO_AUTH_NONCE: this._authNonce,
@@ -96,14 +96,16 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
       this._lastError = undefined;
       log.info('Daemon is ready', { pid: this.process.pid });
 
-      // After READY, route all stderr to the VS Code Output channel
+      // After READY, route stdout + stderr to the VS Code Output channel
       this.outputChannel.appendLine(`[daemon pid=${this.process.pid}] READY`);
-      this.process.stderr?.on('data', (chunk: Buffer) => {
-        const text = chunk.toString().trimEnd();
-        if (text) {
-          this.outputChannel.appendLine(text);
-        }
-      });
+      for (const stream of [this.process.stdout, this.process.stderr]) {
+        stream?.on('data', (chunk: Buffer) => {
+          const text = chunk.toString().trimEnd();
+          if (text) {
+            this.outputChannel.appendLine(text);
+          }
+        });
+      }
     } catch (err) {
       this._lastError = err instanceof Error ? err.message : String(err);
       log.error('Failed to start daemon', { error: this._lastError });

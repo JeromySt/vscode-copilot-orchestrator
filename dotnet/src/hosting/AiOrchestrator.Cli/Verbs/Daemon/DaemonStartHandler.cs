@@ -177,10 +177,10 @@ internal sealed class DaemonStartHandler : VerbBase
         _ = services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Information);
-            // Console logger writes to stderr → captured by VS Code Output channel.
-            // RollingFileLogger is disabled in trimmed builds because it uses
-            // reflection-based JsonSerializer which the trimmer strips.
-            builder.AddConsole();
+            // Console logger — route all log levels to stderr so the extension
+            // captures them in the VS Code Output channel. Stdout is reserved
+            // for future protocol use.
+            builder.AddConsole(opts => opts.LogToStandardErrorThreshold = LogLevel.Trace);
         });
 
         _ = services.AddSingleton<ITelemetrySink>(
