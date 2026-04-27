@@ -15,25 +15,26 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>cancel_copilot_plan</c> — Cancel a running plan and all of its jobs.</summary>
 internal sealed class CancelCopilotPlanTool : PlanToolBase
 {
-    public CancelCopilotPlanTool(IPlanStore store)
+    public CancelCopilotPlanTool(IPlanStoreFactory storeFactory)
         : base(
               name: "cancel_copilot_plan",
               description: "Cancel a running plan and all of its jobs.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
         }
 
-        await this.Store.MutateAsync(
+        await store.MutateAsync(
             planId,
             new PlanStatusUpdated(0, default, DateTimeOffset.UtcNow, PlanStatus.Canceled),
             NewIdemKey(),

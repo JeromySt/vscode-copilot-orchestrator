@@ -5,7 +5,6 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using AiOrchestrator.Abstractions.Telemetry;
@@ -14,7 +13,6 @@ using AiOrchestrator.Composition;
 using AiOrchestrator.Logging.Telemetry;
 using AiOrchestrator.Mcp;
 using AiOrchestrator.Mcp.Transports;
-using AiOrchestrator.Models.Paths;
 using AiOrchestrator.Plan.Store;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -74,7 +72,7 @@ internal sealed class McpServeHandler : VerbBase
             Environment.SetEnvironmentVariable("AIO_REPO_ROOT", repoRoot);
         }
 
-        var tools = BuildToolSet(repoRoot);
+        var tools = BuildToolSet();
         var registry = new McpToolRegistry(tools);
         var transport = new StdioTransport();
         IOptionsMonitor<McpOptions> options = new StaticOptionsMonitor<McpOptions>(new McpOptions());
@@ -101,7 +99,7 @@ internal sealed class McpServeHandler : VerbBase
     /// container with the composition root extensions. This gives standalone
     /// CLI invocations the same tool set that the hosted daemon exposes.
     /// </summary>
-    private static IEnumerable<IMcpTool> BuildToolSet(string? repoRoot)
+    private static IEnumerable<IMcpTool> BuildToolSet()
     {
         IConfiguration config = new ConfigurationBuilder().Build();
         var services = new ServiceCollection();
@@ -118,22 +116,14 @@ internal sealed class McpServeHandler : VerbBase
         _ = services.AddTime();
         _ = services.AddEventing(config);
 
-        // File system + path validator.
-        AbsolutePath storeRoot = ComputeStoreRoot(repoRoot);
-        _ = services.AddPathValidator(new[] { storeRoot.Value });
+        // File system — no fixed store root. The factory creates per-repo stores
+        // dynamically when each tool call provides repo_root.
         _ = services.AddFileSystem();
 
-        // Plan subsystem: AbsolutePath is a value type so we use a factory
-        // lambda to inject the store root into PlanStore's constructor.
+        // Plan subsystem: register the factory instead of a single IPlanStore.
         _ = services.AddPlanModels();
         _ = services.AddOptions<PlanStoreOptions>();
-        _ = services.AddSingleton<IPlanStore>(sp => new PlanStore(
-            storeRoot,
-            sp.GetRequiredService<Abstractions.Io.IFileSystem>(),
-            sp.GetRequiredService<IClock>(),
-            sp.GetRequiredService<Abstractions.Eventing.IEventBus>(),
-            sp.GetRequiredService<IOptionsMonitor<PlanStoreOptions>>(),
-            sp.GetRequiredService<ILogger<PlanStore>>()));
+        _ = services.AddSingleton<IPlanStoreFactory, PlanStoreFactory>();
 
         // Process handle registry (empty — standalone CLI doesn't run jobs, but
         // GetCopilotJobProcessTreeTool needs the interface registered).
@@ -144,18 +134,6 @@ internal sealed class McpServeHandler : VerbBase
 
         ServiceProvider provider = services.BuildServiceProvider();
         return provider.GetServices<IMcpTool>();
-    }
-
-    private static AbsolutePath ComputeStoreRoot(string? repoRoot)
-    {
-        if (!string.IsNullOrEmpty(repoRoot))
-        {
-            return new AbsolutePath(Path.Combine(repoRoot, ".orchestrator", "plans"));
-        }
-
-        return new AbsolutePath(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ai-orchestrator"));
     }
 
     /// <summary>

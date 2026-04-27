@@ -17,20 +17,21 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>update_copilot_plan_job</c> — Update a single job's specification.</summary>
 internal sealed class UpdateCopilotPlanJobTool : PlanToolBase
 {
-    public UpdateCopilotPlanJobTool(IPlanStore store)
+    public UpdateCopilotPlanJobTool(IPlanStoreFactory storeFactory)
         : base(
               name: "update_copilot_plan_job",
               description: "Update a single job's specification.",
               inputSchema: ObjectSchema("planId", "jobId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
         string jobId = parameters.GetProperty("jobId").GetString()!;
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
@@ -47,7 +48,7 @@ internal sealed class UpdateCopilotPlanJobTool : PlanToolBase
             string statusStr = statusEl.GetString() ?? string.Empty;
             if (Enum.TryParse<JobStatus>(statusStr, ignoreCase: true, out var newStatus))
             {
-                await this.Store.MutateAsync(
+                await store.MutateAsync(
                     planId,
                     new JobStatusUpdated(0, default, DateTimeOffset.UtcNow, jobId, newStatus),
                     NewIdemKey(),
@@ -68,7 +69,7 @@ internal sealed class UpdateCopilotPlanJobTool : PlanToolBase
                 }
             }
 
-            await this.Store.MutateAsync(
+            await store.MutateAsync(
                 planId,
                 new JobDepsUpdated(0, default, DateTimeOffset.UtcNow, jobId, [.. deps]),
                 NewIdemKey(),

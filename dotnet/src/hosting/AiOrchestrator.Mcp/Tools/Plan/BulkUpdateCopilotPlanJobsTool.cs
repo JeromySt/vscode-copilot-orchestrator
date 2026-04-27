@@ -15,19 +15,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>bulk_update_copilot_plan_jobs</c> — Apply common AgentSpec attributes to multiple jobs at once.</summary>
 internal sealed class BulkUpdateCopilotPlanJobsTool : PlanToolBase
 {
-    public BulkUpdateCopilotPlanJobsTool(IPlanStore store)
+    public BulkUpdateCopilotPlanJobsTool(IPlanStoreFactory storeFactory)
         : base(
               name: "bulk_update_copilot_plan_jobs",
               description: "Apply common AgentSpec attributes to multiple jobs at once.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
@@ -65,7 +66,7 @@ internal sealed class BulkUpdateCopilotPlanJobsTool : PlanToolBase
                 {
                     if (plan.Jobs.ContainsKey(jid))
                     {
-                        await this.Store.MutateAsync(
+                        await store.MutateAsync(
                             planId,
                             new JobStatusUpdated(0, default, DateTimeOffset.UtcNow, jid, newStatus),
                             NewIdemKey(),

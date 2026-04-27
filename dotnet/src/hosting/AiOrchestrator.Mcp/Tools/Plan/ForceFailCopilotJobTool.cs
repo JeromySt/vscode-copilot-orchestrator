@@ -15,20 +15,21 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>force_fail_copilot_job</c> — Force a stuck running job to failed state.</summary>
 internal sealed class ForceFailCopilotJobTool : PlanToolBase
 {
-    public ForceFailCopilotJobTool(IPlanStore store)
+    public ForceFailCopilotJobTool(IPlanStoreFactory storeFactory)
         : base(
               name: "force_fail_copilot_job",
               description: "Force a stuck running job to failed state.",
               inputSchema: ObjectSchema("planId", "jobId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
         string jobId = parameters.GetProperty("jobId").GetString()!;
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
@@ -39,7 +40,7 @@ internal sealed class ForceFailCopilotJobTool : PlanToolBase
             return ErrorResponse($"Job '{jobId}' not found in plan '{planId}'.");
         }
 
-        await this.Store.MutateAsync(
+        await store.MutateAsync(
             planId,
             new JobStatusUpdated(0, default, DateTimeOffset.UtcNow, jobId, JobStatus.Failed),
             NewIdemKey(),

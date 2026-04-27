@@ -20,22 +20,23 @@ internal sealed class GetCopilotJobProcessTreeTool : PlanToolBase
 {
     private readonly IProcessHandleRegistry? registry;
 
-    public GetCopilotJobProcessTreeTool(IPlanStore store, IProcessHandleRegistry? registry = null)
+    public GetCopilotJobProcessTreeTool(IPlanStoreFactory storeFactory, IProcessHandleRegistry? registry = null)
         : base(
               name: "get_copilot_job_process_tree",
               description: "Get the process tree (PIDs, CPU, memory) for a running job.",
               inputSchema: ObjectSchema("planId", "jobId"),
-              store: store)
+              storeFactory: storeFactory)
     {
         this.registry = registry;
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
         string jobId = parameters.GetProperty("jobId").GetString()!;
 
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");

@@ -24,12 +24,12 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// </summary>
 internal abstract class PlanToolBase : IMcpTool
 {
-    private readonly IPlanStore? store;
+    private readonly IPlanStoreFactory? storeFactory;
 
-    protected PlanToolBase(string name, string description, JsonNode inputSchema, IPlanStore store)
+    protected PlanToolBase(string name, string description, JsonNode inputSchema, IPlanStoreFactory storeFactory)
         : this(name, description, inputSchema)
     {
-        this.store = store ?? throw new ArgumentNullException(nameof(store));
+        this.storeFactory = storeFactory ?? throw new ArgumentNullException(nameof(storeFactory));
     }
 
     /// <summary>Backwards-compatible constructor for subclasses that do not require a store (e.g. test helpers).</summary>
@@ -49,14 +49,37 @@ internal abstract class PlanToolBase : IMcpTool
     /// <summary>Gets the JSON Schema describing the tool's input parameters.</summary>
     public JsonNode InputSchema { get; }
 
-    /// <summary>Gets the plan store. Throws if no store was provided.</summary>
-    protected IPlanStore Store => this.store ?? throw new InvalidOperationException("No IPlanStore was provided.");
+    /// <summary>Gets the store factory. Throws if none was provided.</summary>
+    protected IPlanStoreFactory StoreFactory => this.storeFactory ?? throw new InvalidOperationException("No IPlanStoreFactory was provided.");
+
+    /// <summary>
+    /// Resolves an <see cref="IPlanStore"/> for the repository identified by the
+    /// <c>repo_root</c> property in <paramref name="parameters"/>.
+    /// </summary>
+    protected IPlanStore GetStore(JsonElement parameters)
+    {
+        var repoRoot = ParseRepoRoot(parameters);
+        if (string.IsNullOrEmpty(repoRoot))
+        {
+            throw new InvalidOperationException("repo_root is required");
+        }
+
+        return this.StoreFactory.GetStore(repoRoot);
+    }
+
+    /// <summary>Extracts the optional <c>repo_root</c> string from the tool parameters.</summary>
+    protected static string? ParseRepoRoot(JsonElement parameters)
+    {
+        return parameters.TryGetProperty("repo_root", out var elem) && elem.ValueKind == JsonValueKind.String
+            ? elem.GetString()
+            : null;
+    }
 
     /// <inheritdoc/>
     public ValueTask<JsonNode> InvokeAsync(JsonElement parameters, CancellationToken ct) =>
         this.InvokeCoreAsync(parameters, ct);
 
-    /// <summary>Helper: builds an object schema with the specified required string properties.</summary>
+    /// <summary>Helper: builds an object schema with the specified required string properties. Always includes an optional <c>repo_root</c> property.</summary>
     protected static JsonNode ObjectSchema(params string[] requiredStringProps)
     {
         var props = new JsonObject();
@@ -66,6 +89,13 @@ internal abstract class PlanToolBase : IMcpTool
             props[p] = new JsonObject { ["type"] = "string" };
             required.Add(p);
         }
+
+        // Every tool accepts repo_root so the daemon can be repo-agnostic.
+        props["repo_root"] = new JsonObject
+        {
+            ["type"] = "string",
+            ["description"] = "Absolute path to the repository root for repo-scoped operations.",
+        };
 
         return new JsonObject
         {

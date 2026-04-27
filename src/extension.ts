@@ -129,8 +129,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (useDotNet) {
     const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     const workspaceId = Buffer.from(repoRoot).toString('base64url').slice(0, 16);
-    daemonManager = new DotNetDaemonManager(context.extensionPath, workspaceId, repoRoot);
-    engine = new DotNetOrchestrationEngine(daemonManager);
+    daemonManager = new DotNetDaemonManager(context.extensionPath, workspaceId);
+    engine = new DotNetOrchestrationEngine(daemonManager, repoRoot);
     context.subscriptions.push(daemonManager);
     extLog.info('Using .NET engine (experimental) — daemon will be started on initialize');
   } else {

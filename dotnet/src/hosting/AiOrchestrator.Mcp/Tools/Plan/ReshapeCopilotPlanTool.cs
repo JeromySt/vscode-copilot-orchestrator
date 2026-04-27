@@ -17,19 +17,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>reshape_copilot_plan</c> — Reshape a running or paused plan's DAG topology.</summary>
 internal sealed class ReshapeCopilotPlanTool : PlanToolBase
 {
-    public ReshapeCopilotPlanTool(IPlanStore store)
+    public ReshapeCopilotPlanTool(IPlanStoreFactory storeFactory)
         : base(
               name: "reshape_copilot_plan",
               description: "Reshape a running or paused plan's DAG topology.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
@@ -47,7 +48,7 @@ internal sealed class ReshapeCopilotPlanTool : PlanToolBase
                         if (op.TryGetProperty("spec", out var specEl))
                         {
                             var node = ParseJobNode(specEl);
-                            await this.Store.MutateAsync(
+                            await store.MutateAsync(
                                 planId,
                                 new JobAdded(0, default, DateTimeOffset.UtcNow, node),
                                 NewIdemKey(),
@@ -62,7 +63,7 @@ internal sealed class ReshapeCopilotPlanTool : PlanToolBase
                             : op.TryGetProperty("producerId", out var pid) ? pid.GetString() : null;
                         if (removeId is not null)
                         {
-                            await this.Store.MutateAsync(
+                            await store.MutateAsync(
                                 planId,
                                 new JobRemoved(0, default, DateTimeOffset.UtcNow, removeId),
                                 NewIdemKey(),
@@ -86,7 +87,7 @@ internal sealed class ReshapeCopilotPlanTool : PlanToolBase
                                 }
                             }
 
-                            await this.Store.MutateAsync(
+                            await store.MutateAsync(
                                 planId,
                                 new JobDepsUpdated(0, default, DateTimeOffset.UtcNow, depsJobId, [.. deps]),
                                 NewIdemKey(),

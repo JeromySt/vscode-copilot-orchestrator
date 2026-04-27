@@ -14,19 +14,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>add_copilot_plan_jobs</c> — Batch-add multiple jobs to a scaffolding plan.</summary>
 internal sealed class AddCopilotPlanJobsTool : PlanToolBase
 {
-    public AddCopilotPlanJobsTool(IPlanStore store)
+    public AddCopilotPlanJobsTool(IPlanStoreFactory storeFactory)
         : base(
               name: "add_copilot_plan_jobs",
               description: "Batch-add multiple jobs to a scaffolding plan.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
@@ -38,7 +39,7 @@ internal sealed class AddCopilotPlanJobsTool : PlanToolBase
             foreach (var jobEl in jobsEl.EnumerateArray())
             {
                 var node = ParseJobNode(jobEl);
-                await this.Store.MutateAsync(
+                await store.MutateAsync(
                     planId,
                     new JobAdded(0, default, DateTimeOffset.UtcNow, node),
                     NewIdemKey(),

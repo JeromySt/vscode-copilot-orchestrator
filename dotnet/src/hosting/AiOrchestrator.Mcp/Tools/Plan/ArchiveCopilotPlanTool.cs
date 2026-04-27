@@ -15,25 +15,26 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>archive_copilot_plan</c> — Archive a completed or canceled plan.</summary>
 internal sealed class ArchiveCopilotPlanTool : PlanToolBase
 {
-    public ArchiveCopilotPlanTool(IPlanStore store)
+    public ArchiveCopilotPlanTool(IPlanStoreFactory storeFactory)
         : base(
               name: "archive_copilot_plan",
               description: "Archive a completed or canceled plan.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
         }
 
-        await this.Store.MutateAsync(
+        await store.MutateAsync(
             planId,
             new PlanStatusUpdated(0, default, DateTimeOffset.UtcNow, PlanStatus.Archived),
             NewIdemKey(),

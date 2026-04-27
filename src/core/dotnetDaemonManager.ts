@@ -4,7 +4,7 @@
  * Manages the AiOrchestrator .NET daemon child process. The daemon provides
  * the execution engine when experimental.useDotNetEngine is enabled.
  *
- * Spawns `AiOrchestrator.Cli.exe daemon start --pipe-name <name> --repo-root <path>`
+ * Spawns `AiOrchestrator.Cli.exe daemon start --pipe-name <name>`
  * and waits for the READY signal on stderr before resolving.
  *
  * @module core/dotnetDaemonManager
@@ -36,7 +36,6 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
   constructor(
     private readonly extensionPath: string,
     private readonly workspaceId: string,
-    private readonly repoRoot: string,
     private readonly platform: NodeJS.Platform = process.platform,
   ) {
     this._pipeName = this.buildPipeName();
@@ -55,7 +54,6 @@ export class DotNetDaemonManager implements IDotNetDaemonManager {
       this.process = spawn(binaryPath, [
         'daemon', 'start',
         '--pipe-name', this._pipeName!,
-        '--repo-root', this.repoRoot,
       ], {
         stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,

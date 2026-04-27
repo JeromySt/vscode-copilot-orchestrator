@@ -112,7 +112,7 @@ export function registerMcpDefinitionProvider(
         server = new (vscode as any).McpStdioServerDefinition(
           'Copilot Orchestrator (.NET)',  // label
           binaryPath,                     // command — native .NET binary
-          ['mcp', 'serve', '--repo-root', currentWorkspacePath],
+          ['mcp', 'serve'],
           {},                             // no special env vars needed
           context.extension.packageJSON.version
         );

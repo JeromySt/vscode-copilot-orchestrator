@@ -56,6 +56,7 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
 
   constructor(
     private readonly daemonManager: IDotNetDaemonManager,
+    private readonly repoRoot: string,
   ) {
     super();
   }
@@ -308,7 +309,7 @@ export class DotNetOrchestrationEngine extends EventEmitter implements IOrchestr
   // ── MCP Communication ──────────────────────────────────────────────
 
   private async callTool(toolName: string, args: Record<string, unknown>): Promise<any> {
-    const result = await this.callMcp('tools/call', { name: toolName, arguments: args });
+    const result = await this.callMcp('tools/call', { name: toolName, arguments: { ...args, repo_root: this.repoRoot } });
     // For tools/call, the result is in result.content[0].text
     if (result?.content?.[0]?.text) {
       try { return JSON.parse(result.content[0].text); } catch { return result; }

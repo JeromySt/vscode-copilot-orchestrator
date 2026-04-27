@@ -5,7 +5,6 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
-using System.IO;
 using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,7 +14,6 @@ using AiOrchestrator.Composition;
 using AiOrchestrator.Logging.Telemetry;
 using AiOrchestrator.Mcp;
 using AiOrchestrator.Mcp.Transports;
-using AiOrchestrator.Models.Paths;
 using AiOrchestrator.Plan.Store;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,11 +35,6 @@ internal sealed class DaemonStartHandler : VerbBase
         Description = "The named pipe name to listen on.",
     };
 
-    private readonly Option<string?> repoRootOption = new("--repo-root")
-    {
-        Description = "Absolute path to the repository root for repo-scoped operations.",
-    };
-
     public DaemonStartHandler(IServiceProvider services)
         : base(services)
     {
@@ -57,21 +50,18 @@ internal sealed class DaemonStartHandler : VerbBase
     protected override IReadOnlyList<string> ExtraOptionHelp { get; } = new[]
     {
         "--pipe-name <name>  The named pipe name to listen on (required).",
-        "--repo-root <path>  Absolute path to the repository root for repo-scoped operations.",
     };
 
     /// <inheritdoc/>
     protected override void ConfigureOptions(Command command)
     {
         command.Options.Add(this.pipeNameOption);
-        command.Options.Add(this.repoRootOption);
     }
 
     /// <inheritdoc/>
     protected override async Task<int> RunAsync(ParseResult result, CancellationToken ct)
     {
         string? pipeName = result.GetValue(this.pipeNameOption);
-        string? repoRoot = result.GetValue(this.repoRootOption);
 
         if (string.IsNullOrEmpty(pipeName))
         {
@@ -79,12 +69,7 @@ internal sealed class DaemonStartHandler : VerbBase
             return CliExitCodes.UsageError;
         }
 
-        if (!string.IsNullOrEmpty(repoRoot))
-        {
-            Environment.SetEnvironmentVariable("AIO_REPO_ROOT", repoRoot);
-        }
-
-        IEnumerable<IMcpTool> tools = BuildToolSet(repoRoot);
+        IEnumerable<IMcpTool> tools = BuildToolSet();
         ILogger<McpServer> logger = NullLogger<McpServer>.Instance;
         IOptionsMonitor<McpOptions> options = new StaticOptionsMonitor<McpOptions>(new McpOptions());
 
@@ -140,7 +125,7 @@ internal sealed class DaemonStartHandler : VerbBase
     /// container with the composition root extensions. Same approach as
     /// <see cref="Mcp.McpServeHandler"/>.
     /// </summary>
-    private static IEnumerable<IMcpTool> BuildToolSet(string? repoRoot)
+    private static IEnumerable<IMcpTool> BuildToolSet()
     {
         IConfiguration config = new ConfigurationBuilder().Build();
         var services = new ServiceCollection();
@@ -153,19 +138,13 @@ internal sealed class DaemonStartHandler : VerbBase
         _ = services.AddTime();
         _ = services.AddEventing(config);
 
-        AbsolutePath storeRoot = ComputeStoreRoot(repoRoot);
-        _ = services.AddPathValidator(new[] { storeRoot.Value });
+        // No fixed store root — the daemon is repo-agnostic. Each tool call
+        // provides repo_root and the factory creates/caches stores per repo.
         _ = services.AddFileSystem();
 
         _ = services.AddPlanModels();
         _ = services.AddOptions<PlanStoreOptions>();
-        _ = services.AddSingleton<IPlanStore>(sp => new PlanStore(
-            storeRoot,
-            sp.GetRequiredService<Abstractions.Io.IFileSystem>(),
-            sp.GetRequiredService<IClock>(),
-            sp.GetRequiredService<Abstractions.Eventing.IEventBus>(),
-            sp.GetRequiredService<IOptionsMonitor<PlanStoreOptions>>(),
-            sp.GetRequiredService<ILogger<PlanStore>>()));
+        _ = services.AddSingleton<IPlanStoreFactory, PlanStoreFactory>();
 
         _ = services.AddSingleton<Abstractions.Process.IProcessHandleRegistry, AiOrchestrator.Process.ProcessHandleRegistry>();
 
@@ -173,18 +152,6 @@ internal sealed class DaemonStartHandler : VerbBase
 
         ServiceProvider provider = services.BuildServiceProvider();
         return provider.GetServices<IMcpTool>();
-    }
-
-    private static AbsolutePath ComputeStoreRoot(string? repoRoot)
-    {
-        if (!string.IsNullOrEmpty(repoRoot))
-        {
-            return new AbsolutePath(Path.Combine(repoRoot, ".orchestrator", "plans"));
-        }
-
-        return new AbsolutePath(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ai-orchestrator"));
     }
 
     /// <summary>

@@ -13,19 +13,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>get_copilot_plan_graph</c> — Get the dependency graph of a plan as Mermaid and adjacency list.</summary>
 internal sealed class GetCopilotPlanGraphTool : PlanToolBase
 {
-    public GetCopilotPlanGraphTool(IPlanStore store)
+    public GetCopilotPlanGraphTool(IPlanStoreFactory storeFactory)
         : base(
               name: "get_copilot_plan_graph",
               description: "Get the dependency graph of a plan as Mermaid and adjacency list.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");

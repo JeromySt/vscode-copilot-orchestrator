@@ -14,12 +14,12 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>scaffold_copilot_plan</c> — Create an empty plan scaffold for incremental job building.</summary>
 internal sealed class ScaffoldCopilotPlanTool : PlanToolBase
 {
-    public ScaffoldCopilotPlanTool(IPlanStore store)
+    public ScaffoldCopilotPlanTool(IPlanStoreFactory storeFactory)
         : base(
               name: "scaffold_copilot_plan",
               description: "Create an empty plan scaffold for incremental job building.",
               inputSchema: ObjectSchema(),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
@@ -34,7 +34,8 @@ internal sealed class ScaffoldCopilotPlanTool : PlanToolBase
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
-        var planId = await this.Store.CreateAsync(plan, NewIdemKey(), ct).ConfigureAwait(false);
+        var store = this.GetStore(parameters);
+        var planId = await store.CreateAsync(plan, NewIdemKey(), ct).ConfigureAwait(false);
 
         return new JsonObject
         {

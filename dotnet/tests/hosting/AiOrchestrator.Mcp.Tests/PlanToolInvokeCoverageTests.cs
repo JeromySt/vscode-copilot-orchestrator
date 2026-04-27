@@ -24,9 +24,9 @@ public sealed class PlanToolInvokeCoverageTests
     private static readonly PlanId TestPlanId = PlanId.New();
 
     private static JsonElement MakeParams() =>
-        JsonDocument.Parse($$"""{ "planId": "{{TestPlanId}}" }""").RootElement;
+        JsonDocument.Parse($$"""{ "planId": "{{TestPlanId}}", "repo_root": "C:\\fake-repo" }""").RootElement;
 
-    private static FakePlanStore StoreWithPlan() => new(new AiOrchestrator.Plan.Models.Plan
+    private static FakePlanStoreFactory FactoryWithPlan() => new(new AiOrchestrator.Plan.Models.Plan
     {
         Id = TestPlanId.ToString(),
         Name = "Test Plan",
@@ -41,7 +41,7 @@ public sealed class PlanToolInvokeCoverageTests
     [Fact]
     public async Task FinalizeCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new FinalizeCopilotPlanTool(StoreWithPlan());
+        var tool = new FinalizeCopilotPlanTool(FactoryWithPlan());
         var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
@@ -49,7 +49,7 @@ public sealed class PlanToolInvokeCoverageTests
     [Fact]
     public async Task CancelCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new CancelCopilotPlanTool(StoreWithPlan());
+        var tool = new CancelCopilotPlanTool(FactoryWithPlan());
         var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
@@ -57,7 +57,7 @@ public sealed class PlanToolInvokeCoverageTests
     [Fact]
     public async Task DeleteCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new DeleteCopilotPlanTool(StoreWithPlan());
+        var tool = new DeleteCopilotPlanTool(FactoryWithPlan());
         var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
@@ -65,7 +65,7 @@ public sealed class PlanToolInvokeCoverageTests
     [Fact]
     public async Task CloneCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new CloneCopilotPlanTool(StoreWithPlan());
+        var tool = new CloneCopilotPlanTool(FactoryWithPlan());
         var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
     }
@@ -73,9 +73,21 @@ public sealed class PlanToolInvokeCoverageTests
     [Fact]
     public async Task ArchiveCopilotPlanTool_InvokeAsync_ReturnsSuccess()
     {
-        var tool = new ArchiveCopilotPlanTool(StoreWithPlan());
+        var tool = new ArchiveCopilotPlanTool(FactoryWithPlan());
         var result = await tool.InvokeAsync(MakeParams(), CancellationToken.None);
         Assert.True(result["success"]?.GetValue<bool>());
+    }
+
+    /// <summary>Wraps a <see cref="FakePlanStore"/> as a factory for test use.</summary>
+    internal sealed class FakePlanStoreFactory : IPlanStoreFactory
+    {
+        private readonly FakePlanStore store;
+
+        public FakePlanStoreFactory() => this.store = new FakePlanStore();
+
+        public FakePlanStoreFactory(AiOrchestrator.Plan.Models.Plan seed) => this.store = new FakePlanStore(seed);
+
+        public IPlanStore GetStore(string repoRoot) => this.store;
     }
 
     /// <summary>Minimal in-memory <see cref="IPlanStore"/> for unit tests.</summary>

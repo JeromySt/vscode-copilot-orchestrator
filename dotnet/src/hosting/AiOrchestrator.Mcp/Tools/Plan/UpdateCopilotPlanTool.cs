@@ -15,19 +15,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>update_copilot_plan</c> — Update plan-level settings such as env vars or concurrency.</summary>
 internal sealed class UpdateCopilotPlanTool : PlanToolBase
 {
-    public UpdateCopilotPlanTool(IPlanStore store)
+    public UpdateCopilotPlanTool(IPlanStoreFactory storeFactory)
         : base(
               name: "update_copilot_plan",
               description: "Update plan-level settings such as env vars or concurrency.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");
@@ -39,7 +40,7 @@ internal sealed class UpdateCopilotPlanTool : PlanToolBase
             string statusStr = statusEl.GetString() ?? string.Empty;
             if (Enum.TryParse<PlanStatus>(statusStr, ignoreCase: true, out var newStatus))
             {
-                await this.Store.MutateAsync(
+                await store.MutateAsync(
                     planId,
                     new PlanStatusUpdated(0, default, DateTimeOffset.UtcNow, newStatus),
                     NewIdemKey(),

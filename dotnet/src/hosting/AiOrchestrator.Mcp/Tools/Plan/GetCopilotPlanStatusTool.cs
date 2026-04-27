@@ -13,19 +13,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>get_copilot_plan_status</c> — Get the status of a plan including per-node progress.</summary>
 internal sealed class GetCopilotPlanStatusTool : PlanToolBase
 {
-    public GetCopilotPlanStatusTool(IPlanStore store)
+    public GetCopilotPlanStatusTool(IPlanStoreFactory storeFactory)
         : base(
               name: "get_copilot_plan_status",
               description: "Get the status of a plan including per-node progress.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var planId = ParsePlanId(parameters);
-        var plan = await this.Store.LoadAsync(planId, ct).ConfigureAwait(false);
+        var plan = await store.LoadAsync(planId, ct).ConfigureAwait(false);
         if (plan is null)
         {
             return ErrorResponse($"Plan '{planId}' not found.");

@@ -16,12 +16,12 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>run_copilot_integration_test</c> — Create an integration test plan with scripted output.</summary>
 internal sealed class RunCopilotIntegrationTestTool : PlanToolBase
 {
-    public RunCopilotIntegrationTestTool(IPlanStore store)
+    public RunCopilotIntegrationTestTool(IPlanStoreFactory storeFactory)
         : base(
               name: "run_copilot_integration_test",
               description: "Create an integration test plan with scripted output.",
               inputSchema: ObjectSchema(),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
@@ -39,7 +39,8 @@ internal sealed class RunCopilotIntegrationTestTool : PlanToolBase
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
-        var planId = await this.Store.CreateAsync(plan, NewIdemKey(), ct).ConfigureAwait(false);
+        var store = this.GetStore(parameters);
+        var planId = await store.CreateAsync(plan, NewIdemKey(), ct).ConfigureAwait(false);
 
         // Add sample test jobs.
         var jobs = new (string Id, string Title, string[] Deps)[]
@@ -60,7 +61,7 @@ internal sealed class RunCopilotIntegrationTestTool : PlanToolBase
                 DependsOn = deps,
             };
 
-            await this.Store.MutateAsync(
+            await store.MutateAsync(
                 planId,
                 new JobAdded(0, default, DateTimeOffset.UtcNow, node),
                 NewIdemKey(),

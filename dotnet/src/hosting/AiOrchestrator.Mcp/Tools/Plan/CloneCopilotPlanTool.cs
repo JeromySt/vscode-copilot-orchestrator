@@ -16,19 +16,20 @@ namespace AiOrchestrator.Mcp.Tools.Plan;
 /// <summary>MCP tool: <c>clone_copilot_plan</c> — Duplicate an existing plan as a new scaffolding plan.</summary>
 internal sealed class CloneCopilotPlanTool : PlanToolBase
 {
-    public CloneCopilotPlanTool(IPlanStore store)
+    public CloneCopilotPlanTool(IPlanStoreFactory storeFactory)
         : base(
               name: "clone_copilot_plan",
               description: "Duplicate an existing plan as a new scaffolding plan.",
               inputSchema: ObjectSchema("planId"),
-              store: store)
+              storeFactory: storeFactory)
     {
     }
 
     protected override async ValueTask<JsonNode> InvokeCoreAsync(JsonElement parameters, CancellationToken ct)
     {
+        var store = this.GetStore(parameters);
         var sourcePlanId = ParsePlanId(parameters);
-        var source = await this.Store.LoadAsync(sourcePlanId, ct).ConfigureAwait(false);
+        var source = await store.LoadAsync(sourcePlanId, ct).ConfigureAwait(false);
         if (source is null)
         {
             return ErrorResponse($"Source plan '{sourcePlanId}' not found.");
@@ -47,7 +48,7 @@ internal sealed class CloneCopilotPlanTool : PlanToolBase
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
-        var newPlanId = await this.Store.CreateAsync(clonePlan, NewIdemKey(), ct).ConfigureAwait(false);
+        var newPlanId = await store.CreateAsync(clonePlan, NewIdemKey(), ct).ConfigureAwait(false);
 
         // Clone all jobs from source.
         foreach (var (_, job) in source.Jobs)
@@ -61,7 +62,7 @@ internal sealed class CloneCopilotPlanTool : PlanToolBase
                 WorkSpec = job.WorkSpec,
             };
 
-            await this.Store.MutateAsync(
+            await store.MutateAsync(
                 newPlanId,
                 new JobAdded(0, default, DateTimeOffset.UtcNow, clonedJob),
                 NewIdemKey(),
