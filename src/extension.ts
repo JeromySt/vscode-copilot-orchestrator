@@ -188,7 +188,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // VS Code will spawn AiOrchestrator.Cli.exe mcp serve as the MCP server.
     // No IPC server needed — the .NET binary handles MCP protocol natively.
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    const providerDisposable = registerMcpDefinitionProvider(context, workspacePath, '', '');
+    const providerDisposable = registerMcpDefinitionProvider(
+      context, workspacePath, '', daemonManager!.getAuthNonce() ?? '');
     context.subscriptions.push(providerDisposable);
   }
 

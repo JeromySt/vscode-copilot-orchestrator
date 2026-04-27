@@ -161,11 +161,14 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
 
             if (!string.Equals(clientNonce, expectedNonce, StringComparison.Ordinal))
             {
-                this.logger.LogWarning("Rejected initialize: nonce mismatch (expected {Expected}, got {Got})", expectedNonce[..4] + "…", clientNonce?[..Math.Min(4, clientNonce.Length)] + "…");
+                var got = clientNonce is { Length: > 0 } ? clientNonce[..Math.Min(4, clientNonce.Length)] + "…" : "(none)";
+                this.logger.LogWarning("Rejected initialize: nonce mismatch (expected {Expected}, got {Got})",
+                    expectedNonce[..Math.Min(4, expectedNonce.Length)] + "…", got);
                 return ErrorEnvelope(request.Id, -32001, "Auth failed: invalid or missing nonce in clientInfo.nonce");
             }
         }
 
+        this.logger.LogInformation("MCP initialize accepted");
         return ResultEnvelope(request.Id, BuildInitializeResult());
     }
 
@@ -294,11 +297,12 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
             try
             {
                 await this.transport.SendAsync(resp, ct).ConfigureAwait(false);
+                this.logger.LogInformation("MCP response sent (id={Id})", resp.Id);
             }
 #pragma warning disable CA1031
             catch (Exception ex)
             {
-                this.logger.LogError(ex, "Transport send failure; terminating MCP loop.");
+                this.logger.LogError(ex, "Transport send failure (id={Id}); terminating MCP loop.", resp.Id);
                 return;
             }
 #pragma warning restore CA1031

@@ -122,7 +122,9 @@ export function registerMcpDefinitionProvider(
           'AI Orchestrator (.NET)',  // label
           binaryPath,                     // command — native .NET binary
           ['mcp', 'bridge', '--pipe-name', currentDaemonPipeName],
-          {},                             // no special env vars needed
+          {
+            AIO_AUTH_NONCE: currentAuthNonce ?? '',  // bridge injects into initialize
+          },
           context.extension.packageJSON.version
         );
         (server as any).cwd = vscode.Uri.file(currentWorkspacePath);
