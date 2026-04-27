@@ -85,8 +85,9 @@ internal abstract class VerbBase : ICliVerbHandler
             return CliExitCodes.IoError;
         }
 #pragma warning disable CA1031 // top-level CLI boundary
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"FATAL: {ex}");
             return CliExitCodes.InternalError;
         }
 #pragma warning restore CA1031

@@ -172,10 +172,12 @@ internal sealed class DaemonStartHandler : VerbBase
             new OtlpTelemetrySink(Options.Create(new OtlpOptions())));
 
         _ = services.AddTime();
+        _ = services.AddRedaction();
         _ = services.AddEventing(config);
 
         // No fixed store root — the daemon is repo-agnostic. Each tool call
         // provides repo_root and the factory creates/caches stores per repo.
+        _ = services.AddPathValidator(Array.Empty<string>());
         _ = services.AddFileSystem();
 
         _ = services.AddPlanModels();
