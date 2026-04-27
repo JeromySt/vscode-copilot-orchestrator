@@ -76,19 +76,21 @@ internal sealed class McpBridgeHandler : VerbBase
         }
 
         string? authNonce = Environment.GetEnvironmentVariable("AIO_AUTH_NONCE");
+        Console.Error.WriteLine($"[bridge] Connected to pipe '{pipeName}', nonce={(!string.IsNullOrEmpty(authNonce) ? "set" : "none")}");
 
         // stdin → pipe: intercept the first Content-Length frame, inject nonce, then raw relay
         var stdinToPipe = Task.Run(async () =>
         {
             using var stdin = Console.OpenStandardInput();
-            bool nonceInjected = false;
 
             if (!string.IsNullOrEmpty(authNonce))
             {
+                Console.Error.WriteLine("[bridge] Reading first frame from stdin for nonce injection...");
                 // Read the first Content-Length framed message, inject nonce, forward
                 var firstFrame = await ReadOneFrameAsync(stdin, ct).ConfigureAwait(false);
                 if (firstFrame is not null)
                 {
+                    Console.Error.WriteLine($"[bridge] Got first frame ({firstFrame.Length} chars), injecting nonce");
                     string patched = InjectNonce(firstFrame, authNonce!);
                     byte[] patchedBytes = Encoding.UTF8.GetBytes(patched);
                     string header = $"Content-Length: {patchedBytes.Length}\r\n\r\n";
@@ -96,8 +98,11 @@ internal sealed class McpBridgeHandler : VerbBase
                     await client.WriteAsync(headerBytes, ct).ConfigureAwait(false);
                     await client.WriteAsync(patchedBytes, ct).ConfigureAwait(false);
                     await client.FlushAsync(ct).ConfigureAwait(false);
-                    nonceInjected = true;
-                    Console.Error.WriteLine($"[bridge] Injected nonce into initialize (frame={patchedBytes.Length}b)");
+                    Console.Error.WriteLine($"[bridge] Nonce injected and forwarded ({patchedBytes.Length}b)");
+                }
+                else
+                {
+                    Console.Error.WriteLine("[bridge] WARNING: Failed to read first frame from stdin");
                 }
             }
 
@@ -119,44 +124,58 @@ internal sealed class McpBridgeHandler : VerbBase
     /// <summary>Reads one Content-Length framed message body from the stream.</summary>
     private static async Task<string?> ReadOneFrameAsync(Stream stream, CancellationToken ct)
     {
-        // Read headers until \r\n\r\n
-        var headerBuf = new StringBuilder();
-        int prev = -1;
-        while (true)
+        // Use a StreamReader for buffered reading (byte-by-byte ReadAsync on
+        // Console.OpenStandardInput can stall on Windows)
+        var buf = new byte[16384];
+        int total = 0;
+
+        // Read enough to find \r\n\r\n header terminator
+        while (total < buf.Length)
         {
-            var b = new byte[1];
-            int n = await stream.ReadAsync(b, ct).ConfigureAwait(false);
+            int n = await stream.ReadAsync(buf.AsMemory(total, Math.Min(4096, buf.Length - total)), ct).ConfigureAwait(false);
             if (n == 0) return null;
-            char c = (char)b[0];
-            headerBuf.Append(c);
-            // Detect \r\n\r\n
-            if (headerBuf.Length >= 4)
+            total += n;
+
+            // Check if we have the header terminator
+            var text = Encoding.UTF8.GetString(buf, 0, total);
+            int headerEnd = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+            if (headerEnd >= 0)
             {
-                string tail = headerBuf.ToString(headerBuf.Length - 4, 4);
-                if (tail == "\r\n\r\n") break;
+                // Parse Content-Length from headers
+                string headers = text[..headerEnd];
+                int clStart = headers.IndexOf("Content-Length:", StringComparison.OrdinalIgnoreCase);
+                if (clStart < 0) return null;
+                int valStart = clStart + "Content-Length:".Length;
+                int lineEnd = headers.IndexOf("\r\n", valStart, StringComparison.Ordinal);
+                if (lineEnd < 0) lineEnd = headers.Length;
+                if (!int.TryParse(headers[valStart..lineEnd].Trim(), out int contentLength)) return null;
+
+                int bodyStart = headerEnd + 4;
+                int bodyBytesAvailable = total - bodyStart;
+
+                // Read remaining body bytes if needed
+                if (bodyBytesAvailable < contentLength)
+                {
+                    int need = contentLength - bodyBytesAvailable;
+                    if (total + need > buf.Length)
+                    {
+                        Array.Resize(ref buf, total + need);
+                    }
+
+                    while (bodyBytesAvailable < contentLength)
+                    {
+                        int r = await stream.ReadAsync(buf.AsMemory(total, contentLength - bodyBytesAvailable), ct).ConfigureAwait(false);
+                        if (r == 0) return null;
+                        total += r;
+                        bodyBytesAvailable += r;
+                    }
+                }
+
+                return Encoding.UTF8.GetString(buf, bodyStart, contentLength);
             }
         }
 
-        // Parse Content-Length
-        string headers = headerBuf.ToString();
-        int clStart = headers.IndexOf("Content-Length:", StringComparison.OrdinalIgnoreCase);
-        if (clStart < 0) return null;
-        int valStart = clStart + "Content-Length:".Length;
-        int lineEnd = headers.IndexOf("\r\n", valStart, StringComparison.Ordinal);
-        if (lineEnd < 0) lineEnd = headers.Length;
-        if (!int.TryParse(headers[valStart..lineEnd].Trim(), out int contentLength)) return null;
-
-        // Read exactly contentLength bytes
-        var body = new byte[contentLength];
-        int totalRead = 0;
-        while (totalRead < contentLength)
-        {
-            int n = await stream.ReadAsync(body.AsMemory(totalRead, contentLength - totalRead), ct).ConfigureAwait(false);
-            if (n == 0) return null;
-            totalRead += n;
-        }
-
-        return Encoding.UTF8.GetString(body);
+        return null; // Header too large
     }
 
     /// <summary>Injects <c>clientInfo.nonce</c> into a JSON-RPC initialize request body.</summary>
