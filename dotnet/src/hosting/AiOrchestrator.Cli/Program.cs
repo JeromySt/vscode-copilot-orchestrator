@@ -74,6 +74,7 @@ public sealed class Program
         foreach (ICliVerbHandler h in new ICliVerbHandler[]
         {
             new McpServeHandler(sp),
+            new McpBridgeHandler(sp),
         })
         {
             mcpRoot.Subcommands.Add(h.Build());
@@ -113,6 +114,7 @@ public sealed class Program
             new DaemonStopHandler(sp),
             new DaemonStatusHandler(sp),
             new McpServeHandler(sp),
+            new McpBridgeHandler(sp),
             new VersionHandler(sp),
         };
     }

@@ -84,13 +84,17 @@ internal sealed class DaemonStartHandler : VerbBase
         Console.Error.WriteLine("READY");
         Console.Error.Flush();
 
-        // Accept loop — one client at a time.
+        // Multi-client accept loop — each connection runs in its own task.
+        // NamedPipeServerStream.MaxAllowedServerInstances allows unlimited
+        // concurrent pipe instances with the same name.
+        var activeSessions = new List<Task>();
+
         while (!ct.IsCancellationRequested)
         {
-            using var pipeServer = new NamedPipeServerStream(
+            var pipeServer = new NamedPipeServerStream(
                 pipeName,
                 PipeDirection.InOut,
-                1,
+                NamedPipeServerStream.MaxAllowedServerInstances,
                 PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous);
 
@@ -100,38 +104,60 @@ internal sealed class DaemonStartHandler : VerbBase
             }
             catch (OperationCanceledException)
             {
+                pipeServer.Dispose();
                 break;
             }
 
-            // AUTH: Instance-level isolation is provided by the AIO_AUTH_NONCE
-            // env var, validated in McpServer.HandleInitialize on every client
-            // connection. OS-level peer-credential checks (RunAsClient /
-            // WindowsIdentity) are not used here because the IL trimmer strips
-            // the required metadata. The nonce is sufficient — only the VS Code
-            // process that spawned this daemon knows it.
+            // Spawn a session task for this client — don't block the accept loop.
+            activeSessions.Add(HandleClientSessionAsync(pipeServer, tools, options, logger, ct));
 
-            using var transport = new NamedPipeTransport(pipeServer);
-            var registry = new McpToolRegistry(tools);
-
-            await using var server = new McpServer(registry, transport, options, logger);
-
-            // StartAsync kicks off the read loop in a background Task.
-            await server.StartAsync(CancellationToken.None).ConfigureAwait(false);
-
-            // Wait for the client to disconnect (loop exits on null ReceiveAsync).
-            // Do NOT call StopAsync here — it cancels the internal CTS which kills
-            // the loop before the client can send messages.
-            try
-            {
-                await server.WaitForLoopAsync().ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // Daemon shutdown requested — fall through to exit the while-loop.
-            }
+            // Clean up completed sessions.
+            activeSessions.RemoveAll(t => t.IsCompleted);
         }
 
+        // Wait for all active sessions to finish.
+        await Task.WhenAll(activeSessions).ConfigureAwait(false);
+
         return CliExitCodes.Ok;
+    }
+
+    /// <summary>
+    /// Handles a single client session on a connected pipe. Runs until the
+    /// client disconnects or the daemon shutdown token fires.
+    /// </summary>
+    private static async Task HandleClientSessionAsync(
+        NamedPipeServerStream pipeServer,
+        IEnumerable<IMcpTool> tools,
+        IOptionsMonitor<McpOptions> options,
+        ILogger<McpServer> logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            using (pipeServer)
+            using (var transport = new NamedPipeTransport(pipeServer))
+            {
+                var registry = new McpToolRegistry(tools);
+                await using var server = new McpServer(registry, transport, options, logger);
+
+                await server.StartAsync(CancellationToken.None).ConfigureAwait(false);
+
+                try
+                {
+                    await server.WaitForLoopAsync().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Client disconnected or daemon shutting down.
+                }
+            }
+        }
+#pragma warning disable CA1031 // Per-session isolation — don't crash the daemon
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Client session error: {ex.Message}");
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>

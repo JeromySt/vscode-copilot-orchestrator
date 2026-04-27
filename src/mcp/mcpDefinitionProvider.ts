@@ -29,6 +29,9 @@ let currentIpcPath: string | undefined;
 /** Auth nonce for the IPC connection. */
 let currentAuthNonce: string | undefined;
 
+/** Daemon pipe name for .NET bridge mode. */
+let currentDaemonPipeName: string | undefined;
+
 /** Whether the MCP server feature is enabled in user settings. */
 let isEnabled = true;
 
@@ -102,7 +105,13 @@ export function registerMcpDefinitionProvider(
       let server: vscode.McpServerDefinition;
 
       if (currentEngineKind === 'dotnet') {
-        // .NET engine: spawn the native aio CLI binary with "mcp serve"
+        // .NET engine: spawn the bridge process that relays stdin/stdout
+        // to the already-running daemon's named pipe.
+        if (!currentDaemonPipeName) {
+          console.log('[MCP Provider] Returning empty list (.NET engine but no daemon pipe name)');
+          return [];
+        }
+
         const platformDir = process.platform === 'win32' ? 'win-x64'
           : process.platform === 'darwin' ? 'osx-x64'
           : 'linux-x64';
@@ -112,12 +121,12 @@ export function registerMcpDefinitionProvider(
         server = new (vscode as any).McpStdioServerDefinition(
           'Copilot Orchestrator (.NET)',  // label
           binaryPath,                     // command — native .NET binary
-          ['mcp', 'serve'],
+          ['mcp', 'bridge', '--pipe-name', currentDaemonPipeName],
           {},                             // no special env vars needed
           context.extension.packageJSON.version
         );
         (server as any).cwd = vscode.Uri.file(currentWorkspacePath);
-        console.log(`[MCP Provider] Returning .NET stdio server: ${(server as any).label}`);
+        console.log(`[MCP Provider] Returning .NET bridge server: ${(server as any).label}, pipe: ${currentDaemonPipeName}`);
       } else {
         // TypeScript engine (default): spawn via VS Code's bundled Node.js
         // Require IPC path for the stdio server to connect back
@@ -219,6 +228,22 @@ export function setMcpServerEnabled(enabled: boolean): void {
 export function setMcpEngineKind(kind: 'typescript' | 'dotnet'): void {
   if (currentEngineKind !== kind) {
     currentEngineKind = kind;
+    serverChangedEmitter.fire();
+  }
+}
+
+/**
+ * Set the daemon pipe name for .NET bridge mode.
+ *
+ * When the .NET engine is active, the MCP definition provider spawns
+ * `aio mcp bridge --pipe-name <name>` instead of `aio mcp serve`.
+ * Call this after the daemon starts so the bridge knows which pipe to connect to.
+ *
+ * @param pipeName - The daemon's named pipe name (e.g. `aio-daemon-abc123`).
+ */
+export function setDaemonPipeName(pipeName: string): void {
+  if (currentDaemonPipeName !== pipeName) {
+    currentDaemonPipeName = pipeName;
     serverChangedEmitter.fire();
   }
 }
