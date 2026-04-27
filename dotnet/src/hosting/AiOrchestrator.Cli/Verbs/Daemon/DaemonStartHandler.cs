@@ -113,6 +113,7 @@ internal sealed class DaemonStartHandler : VerbBase
             }
 
             // Spawn a session task for this client — don't block the accept loop.
+            logger.LogInformation("Client connected to pipe {PipeName} (session #{Count})", pipeName, activeSessions.Count + 1);
             activeSessions.Add(HandleClientSessionAsync(pipeServer, tools, options, logger, ct));
 
             // Clean up completed sessions.
@@ -145,6 +146,7 @@ internal sealed class DaemonStartHandler : VerbBase
                 await using var server = new McpServer(registry, transport, options, logger);
 
                 await server.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                logger.LogInformation("MCP session started for client");
 
                 try
                 {
@@ -154,12 +156,14 @@ internal sealed class DaemonStartHandler : VerbBase
                 {
                     // Client disconnected or daemon shutting down.
                 }
+
+                logger.LogInformation("MCP session ended for client");
             }
         }
 #pragma warning disable CA1031 // Per-session isolation — don't crash the daemon
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Client session error: {ex.Message}");
+            logger.LogError(ex, "Client session error");
         }
 #pragma warning restore CA1031
     }

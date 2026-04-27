@@ -110,6 +110,7 @@ public sealed class McpServer : IHostedService, IAsyncDisposable
 
         try
         {
+            this.logger.LogInformation("MCP {Method} (id={Id})", request.Method, request.Id);
             return request.Method switch
             {
                 "initialize" => this.HandleInitialize(request),
