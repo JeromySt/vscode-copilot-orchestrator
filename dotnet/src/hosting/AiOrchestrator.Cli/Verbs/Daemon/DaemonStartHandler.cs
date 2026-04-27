@@ -174,21 +174,12 @@ internal sealed class DaemonStartHandler : VerbBase
         IConfiguration config = new ConfigurationBuilder().Build();
         var services = new ServiceCollection();
 
-        // Add file logging to the per-PID daemon log file.
-        var logPath = AiOrchestrator.Logging.AioLogPaths.GlobalDaemonLog;
-        var logDir = System.IO.Path.GetDirectoryName(logPath)!;
-        if (!System.IO.Directory.Exists(logDir))
-        {
-            System.IO.Directory.CreateDirectory(logDir);
-        }
-
         _ = services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Information);
-            // File logger for persistent diagnostics
-            builder.AddProvider(new AiOrchestrator.Logging.File.RollingFileLoggerProvider(
-                new AiOrchestrator.Logging.File.RollingFileLoggerOptions { FilePath = logPath, MaxFileSizeBytes = 10 * 1024 * 1024 }));
-            // Console logger writes to stderr → captured by VS Code Output channel
+            // Console logger writes to stderr → captured by VS Code Output channel.
+            // RollingFileLogger is disabled in trimmed builds because it uses
+            // reflection-based JsonSerializer which the trimmer strips.
             builder.AddConsole();
         });
 
